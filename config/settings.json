@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "paths": {
+    "scopevisioRoot": "C:\\Users\\Dell\\Scopevisio Documents\\Arndt",
+    "logsDir": "C:\\Fidelio\\Logs",
+    "backupsDir": "C:\\Fidelio\\Backups"
+  },
+  "ui": {
+    "headerVariant": "light",
+    "colors": {
+      "primary": "#471A17",
+      "primaryHover": "#6C2E2A",
+      "accent": "#C8A27C",
+      "background": "#FAF9F7",
+      "surface": "#FFFFFF",
+      "text": "#1C1A1A",
+      "muted": "#585555",
+      "success": "#16A34A",
+      "warning": "#D97706",
+      "error": "#B91C1C"
+    },
+    "radius": 12,
+    "shadow": "0 4px 12px rgba(0,0,0,0.08)"
+  },
+  "watermark": {
+    "enabled": true,
+    "textTemplate": "<OBJEKT> – EINGEGANGEN: <DATUM>",
+    "color": "#E2001A",
+    "alpha": 0.25,
+    "position": "left-vertical",
+    "marginMM": 8,
+    "fontFamily": "Arial",
+    "fontSizePt": 11,
+    "pages": [1]
+  },
+  "naming": {
+    "fileTemplate": "<BETRAG>_<OBJEKT>_<ABSENDER>_<DATUM>.pdf",
+    "dateFormat": "YYYY.MM.DD",
+    "amountDecimalSeparator": ",",
+    "amountThousandsSeparator": ".",
+    "amountForFilenameCommaToDash": true,
+    "collapseEmptyParts": true,
+    "normalizeWhitespace": true
+  },
+  "duplication": {
+    "key": ["DATUM", "BETRAG", "OBJEKT", "DATEI_HASH"],
+    "onConflict": "prompt"
+  },
+  "behavior": {
+    "autoMove": true,
+    "autoMoveTarget": "Bearbeitet",
+    "undoSeconds": 15,
+    "successToastSeconds": 15,
+    "showManualMoveButton": false
+  }
+}

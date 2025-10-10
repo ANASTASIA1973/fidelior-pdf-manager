@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fidelior – PDF Management</title>
+
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- PDF.js (Preview) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+
+  <!-- pdf-lib (Schreiben / Stempeln) -->
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header" role="banner">
+    <div class="brand">
+      <img src="./assets/fidelior-logo.png" alt="Fidelior" class="logo" />
+      <div class="titles">
+        <h1 id="appTitle">Fidelior – PDF Management</h1>
+        <p class="subtitle">Grundbesitzverwaltung</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="container" role="main" aria-labelledby="appTitle">
+    <div class="grid" id="mainGrid">
+
+      <!-- Linke Spalte -->
+      <section class="card column" id="leftPane" role="region" aria-labelledby="uploadH2">
+        <div class="column-scroll">
+          <h2 id="uploadH2">Upload</h2>
+
+          <!-- Dropzone -->
+          <div id="dropZone" class="dropzone" tabindex="0" aria-label="PDF hierher ziehen – oder klicken">
+            <div class="dz-text">
+              <div class="dz-title">PDF hierher ziehen – oder klicken</div>
+              <div class="dz-hint">Nur PDF · Max. 50&nbsp;MB</div>
+            </div>
+            <input id="fileInput" class="file-input" type="file" accept="application/pdf" />
+          </div>
+          <div class="row">
+            <button id="btnPick" class="btn-primary btn-small" type="button">Datei auswählen…</button>
+            <div id="uploadStatus" class="status" style="margin-left:.4rem" aria-live="polite"></div>
+          </div>
+
+          <hr class="sep" />
+
+          <!-- Dokument-Metadaten -->
+          <h2 id="docH2">Dokument</h2>
+
+          <label class="label" for="docTypeSelect">Dokumentenart</label>
+          <div class="row">
+            <select id="docTypeSelect" class="select" aria-describedby="docTypeHelp"></select>
+            <button id="addDocTypeBtn"    class="linklike" type="button" title="Neuen Typ anlegen">➕ Neu</button>
+            <button id="manageDocTypesBtn" class="linklike" type="button" title="Dokumentarten verwalten">⚙ Verwalten</button>
+          </div>
+
+          <label class="label" for="objectSelect">Liegenschaft</label>
+          <div class="row">
+            <select id="objectSelect" class="select"></select>
+            <button id="addObjectBtn"     class="linklike" type="button" title="Neue Liegenschaft anlegen">➕ Neu</button>
+            <button id="manageObjectsBtn" class="linklike" type="button" title="Liegenschaften verwalten">⚙ Verwalten</button>
+          </div>
+
+          <!-- B75-Sonderfall -->
+          <div id="b75Row" class="row" style="display:none; margin-top:.6rem">
+            <label class="label" for="b75Subfolder" style="min-width:160px">Unterordner</label>
+            <select id="b75Subfolder" class="select" aria-label="B75-Unterordner">
+              <option value="">(Bitte wählen)</option>
+              <option value="D1">D1</option>
+              <option value="D4">D4</option>
+              <option value="Allgemein">Allgemein</option>
+            </select>
+          </div>
+
+          <label class="label" for="receivedDate">Eingangsdatum</label>
+          <input id="receivedDate" type="date" class="input" autocomplete="off" />
+
+          <label class="label" for="invoiceDate">Rechnungsdatum</label>
+          <input id="invoiceDate" type="date" class="input" autocomplete="off" />
+
+          <label class="label" for="amountInput">Rechnungsbetrag (€)</label>
+          <input id="amountInput" type="text" class="input" inputmode="decimal" autocomplete="off" placeholder="z. B. 788,00" />
+
+          <label class="label" for="senderInput">Absender <span class="muted">(optional)</span></label>
+          <input id="senderInput" type="text" class="input" autocomplete="off" placeholder="Absender eingeben" />
+
+          <div class="meta" aria-live="polite">
+            <div><strong>Dateiname:</strong> <span id="fileNamePreview">–</span></div>
+            <div><strong>Zielordner:</strong> <span id="targetPreview">–</span></div>
+          </div>
+
+          <!-- Versand -->
+          <h2 id="sendH2">Versand</h2>
+          <div class="mail-group">
+            <label class="chk">
+              <input type="checkbox" id="mailPreset1Chk" />
+              <input class="input mail-input" id="mailPreset1" placeholder="belege@scalara.de" disabled autocomplete="off" />
+            </label>
+            <label class="chk">
+              <input type="checkbox" id="mailPreset2Chk" />
+              <input class="input mail-input" id="mailPreset2" placeholder="autobox@sevdesk.de" disabled autocomplete="off" />
+            </label>
+            <label class="chk">
+              <input type="checkbox" id="mailCustomChk" />
+              <input class="input mail-input" id="mailCustom" placeholder="weitere E-Mail …" disabled autocomplete="off" inputmode="email" />
+            </label>
+          </div>
+
+          <!-- Form-Actions -->
+          <div class="row row-actions">
+            <button id="saveBtn"   class="btn-primary" type="button">Dokument speichern…</button>
+            <button id="cancelBtn" class="btn-outline" type="button">Abbrechen</button>
+          </div>
+
+          <hr class="sep" />
+
+          <!-- Verbindungen -->
+          <h2 id="foldersH2">Ordner & Zähler</h2>
+
+          <div class="row">
+            <button id="btnBindInbox"  class="btn-outline" type="button">Inbox verbinden</button>
+            <button id="btnBindQuelle" class="btn-outline" type="button">Quelle–Ziel verbinden</button>
+          </div>
+
+          <div class="row">
+            <button id="btnBindScopevisio" class="btn-outline" type="button">Scopevisio verbinden</button>
+            <button id="btnBindPcloud"     class="btn-outline" type="button">pCloud verbinden</button>
+          </div>
+
+          <div class="chips" aria-live="polite">
+            <span class="chip" id="chipScope">Scopevisio ○</span>
+            <span class="chip" id="chipPcloud">pCloud ○</span>
+          </div>
+
+          <div id="rootsInfo" class="status" aria-live="polite"></div>
+
+          <div class="row" style="margin-top:.4rem">
+            <label class="label" style="min-width:120px">Speichern in</label>
+            <label class="chk"><input type="checkbox" id="chkScope" checked /> Scopevisio</label>
+            <label class="chk"><input type="checkbox" id="chkPcloud" /> pCloud</label>
+          </div>
+
+          <div class="status" id="counters" aria-live="polite">Offen: – · In Arbeit: – · Fertig: – · Session: 0</div>
+          <ul id="inboxList" class="list slim" aria-live="polite"></ul>
+        </div>
+      </section>
+
+      <!-- Rechte Spalte -->
+      <section class="card preview-card column" id="previewPane" role="region" aria-labelledby="previewH2">
+        <div class="preview-head">
+          <h2 id="previewH2">Preview</h2>
+          <div class="preview-tools" id="previewTools">
+            <button id="zoomOut"     class="icon-btn" type="button" title="Verkleinern">−</button>
+            <input  id="zoomRange"   class="zoom-range" type="range" min="50" max="250" step="1" value="110" aria-label="Zoom" />
+            <span   id="zoomLabel"   class="zoom-label">110%</span>
+            <button id="zoomIn"      class="icon-btn" type="button" title="Vergrößern">+</button>
+
+            <div class="tools-sep" aria-hidden="true"></div>
+
+            <button id="openTabBtn"  class="icon-btn" type="button" title="In neuem Tab öffnen">⤢</button>
+            <button id="printBtn"    class="icon-btn" type="button" title="Drucken">🖨</button>
+            <button id="downloadBtn" class="icon-btn" type="button" title="Download">⬇</button>
+          </div>
+        </div>
+
+        <div class="preview-wrap" id="previewScroll">
+          <div id="previewPlaceholder" class="preview-placeholder" aria-live="polite">
+            <div class="preview-icon" aria-hidden="true">📄</div>
+            <div>Keine Datei geladen</div>
+          </div>
+          <div id="pdfViewer" class="pdf-viewer"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Toasts -->
+  <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Dialog: Dokumentarten -->
+  <dialog id="manageTypesDialog" class="dialog" aria-labelledby="typesTitle">
+    <div class="dialog-body">
+      <div class="dialog-titlebar">
+        <h3 id="typesTitle">Dokumentarten verwalten</h3>
+        <button class="dialog-close" data-close="#manageTypesDialog" type="button" title="Schließen">✕</button>
+      </div>
+      <ul id="typesList" class="list"></ul>
+      <div class="dialog-actions">
+        <button id="typesConnect"    class="btn-outline" type="button">Ordner verbinden…</button>
+        <button id="typesSaveShared" class="btn-outline" type="button">In gemeinsamen Ordner speichern</button>
+        <button class="btn-primary"  data-close="#manageTypesDialog" type="button">Schließen</button>
+      </div>
+      <p class="hint">Quelle: <code>config/document_types.json</code> – lokal/pCloud.</p>
+    </div>
+  </dialog>
+
+  <!-- Dialog: Liegenschaften -->
+  <dialog id="manageObjectsDialog" class="dialog" aria-labelledby="objectsTitle">
+    <div class="dialog-body">
+      <div class="dialog-titlebar">
+        <h3 id="objectsTitle">Liegenschaften verwalten</h3>
+        <button class="dialog-close" data-close="#manageObjectsDialog" type="button" title="Schließen">✕</button>
+      </div>
+      <ul id="objectsList" class="list"></ul>
+      <div class="dialog-actions">
+        <button id="objectsConnect"    class="btn-outline" type="button">Ordner verbinden…</button>
+        <button id="objectsSaveShared" class="btn-outline" type="button">In gemeinsamen Ordner speichern</button>
+        <button class="btn-primary"    data-close="#manageObjectsDialog" type="button">Schließen</button>
+      </div>
+      <p class="hint">Quelle: <code>config/objects.json</code> – lokal/pCloud.</p>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

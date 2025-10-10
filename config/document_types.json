@@ -1,0 +1,10 @@
+{
+  "types": [
+    { "key": "rechnung",      "label": "Rechnung", "isInvoice": true },
+    { "key": "gutschrift",    "label": "Gutschrift", "isInvoice": true },
+    { "key": "angebot",       "label": "Angebot", "isInvoice": false },
+    { "key": "vertrag",       "label": "Vertrag", "isInvoice": false },
+    { "key": "sonstiges",     "label": "Sonstiges", "isInvoice": false }
+  ],
+  "defaultTypeKey": "rechnung"
+}
