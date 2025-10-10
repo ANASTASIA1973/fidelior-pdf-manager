@@ -20,3 +20,4 @@ Dieses Paket enthält die Grundstruktur und Konfigurationsdateien für dein Proj
 2. Prüfe die `objects.json` und ergänze weitere Objekte nach Bedarf.
 3. Dokumentarten in `document_types.json` anpassen.
 4. Projekt in VS Code öffnen und mit der Implementierung beginnen.
+"trigger" 
