@@ -95,22 +95,27 @@
             <div><strong>Zielordner:</strong> <span id="targetPreview">–</span></div>
           </div>
 
-          <!-- Versand -->
-          <h2 id="sendH2">Versand</h2>
-          <div class="mail-group">
-            <label class="chk">
-              <input type="checkbox" id="mailPreset1Chk" />
-              <input class="input mail-input" id="mailPreset1" placeholder="belege@scalara.de" disabled autocomplete="off" />
-            </label>
-            <label class="chk">
-              <input type="checkbox" id="mailPreset2Chk" />
-              <input class="input mail-input" id="mailPreset2" placeholder="autobox@sevdesk.de" disabled autocomplete="off" />
-            </label>
-            <label class="chk">
-              <input type="checkbox" id="mailCustomChk" />
-              <input class="input mail-input" id="mailCustom" placeholder="weitere E-Mail …" disabled autocomplete="off" inputmode="email" />
-            </label>
-          </div>
+         <!-- Versand -->
+<h2 id="sendH2">Versand</h2>
+<div class="mail-group">
+  <div class="mail-row">
+    <input type="checkbox" id="chkScalar" />
+    <input class="input mail-input" type="email" id="mailScalar"
+           value="belege@scalara.de" disabled autocomplete="off" />
+  </div>
+  <div class="mail-row">
+    <input type="checkbox" id="chkSevdesk" />
+    <input class="input mail-input" type="email" id="mailSevdesk"
+           value="autobox@sevdesk.de" disabled autocomplete="off" />
+  </div>
+  <div class="mail-row">
+    <input type="checkbox" id="chkOther" />
+    <input class="input mail-input" type="email" id="mailOther"
+           placeholder="weitere E-Mail …" disabled autocomplete="off" />
+    <label for="chkOther">andere Empfänger</label>
+  </div>
+</div>
+
 
           <!-- Form-Actions -->
           <div class="row row-actions">

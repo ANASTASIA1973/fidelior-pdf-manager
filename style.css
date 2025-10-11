@@ -77,7 +77,8 @@ button{outline:none}
 }
 /* Dropdown-Typografie klarer (geschlossenes Feld) */
 .select{font-weight:600;letter-spacing:.2px}
-.select:focus,.input:focus{border-color:#b08a86;box-shadow:0 0 0 4px rgba(176,138,134,.22);outline:none}
+.select:focus,
+:focus{border-color:#b08a86;box-shadow:0 0 0 4px rgba(176,138,134,.22);outline:none}
 .chk{display:flex;align-items:center;gap:.4rem}
 .row{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
 .row-actions{
@@ -223,3 +224,5 @@ dialog::backdrop{background:rgba(0,0,0,.25)}
     flex-basis: 100%;
   }
 }
+
+

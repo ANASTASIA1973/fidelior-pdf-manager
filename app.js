@@ -28,6 +28,50 @@ function toast(html, ms=9000){
   return { root:div, actions:div.querySelector(".toast-actions"), close:()=>{clearTimeout(t);div.remove();} };
 }
 
+// === Mail-Helfer: Datei -> Base64, Versand an Netlify, kleines Popup ===
+
+// 1) Datei/Blob -> reines Base64 (ohne data:-Prefix)
+async function fileToBase64(fileOrBlob) {
+  const blob = fileOrBlob instanceof Blob ? fileOrBlob : new Blob([fileOrBlob]);
+  const buf = await blob.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buf);
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+// 2) Versand an die Netlify-Function (POST)
+async function sendEmailViaNetlify({ to=[], cc=[], bcc=[], subject="", text="", html="", attachments=[] }) {
+  const res = await fetch("/.netlify/functions/send-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, cc, bcc, subject, text, html, attachments })
+  });
+  const data = await res.json().catch(()=>({}));
+  if (!res.ok || !data.ok) throw new Error(data.error || "E-Mail Versand fehlgeschlagen");
+  return data; // { ok:true, messageId: ... }
+}
+
+// 3) Mini-Popup (nutzt nicht das große toast-Layout)
+function showPopup(msg, ok=true) {
+  const div = document.createElement("div");
+  div.textContent = msg;
+  Object.assign(div.style, {
+    position: "fixed",
+    right: "16px",
+    bottom: "16px",
+    padding: "10px 12px",
+    borderRadius: "10px",
+    background: ok ? "#1f9d55" : "#e02424",
+    color: "#fff",
+    font: "14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial",
+    boxShadow: "0 10px 24px rgba(0,0,0,.2)",
+    zIndex: 9999
+  });
+  document.body.appendChild(div);
+  setTimeout(()=>div.remove(), 4000);
+}
+
 /* ---------- State ---------- */
 const supportsDirPicker = !!window.showDirectoryPicker;
 
@@ -123,27 +167,32 @@ function applyWatermarkPreview(pageWrap, viewport, pageIndex){
   const el = document.createElement("div");
   el.className = "wm-overlay";
   // Maße aus viewport
-  const pageW = viewport.width, pageH = viewport.height;
-  const fontPx = Math.max(10, Math.round(pageW * 0.06)); // ~6% der Breite
-  el.textContent = text;
-  Object.assign(el.style, {
-    position: "absolute",
-    left: "16px",
-    top: "50%",
-    transformOrigin: "left bottom",
-    transform: "translateY(-50%) rotate(90deg)",
-    fontWeight: "800",
-    fontFamily: 'Inter, "Segoe UI", Arial, sans-serif',
-    fontSize: fontPx+"px",
-    color: "rgba(211,47,47,0.38)",      // #D32F2F @ 0.38
-    letterSpacing: "1.2px",
-    whiteSpace: "nowrap",
-    pointerEvents: "none",
-    userSelect: "none",
-    opacity: "1",
-    maxHeight: Math.round(pageH*0.5)+"px", // 50% der Seitenhöhe
-    lineHeight: "1",
-  });
+ // … innerhalb von applyWatermarkPreview(…)
+const pageW = viewport.width, pageH = viewport.height;
+
+// etwas kleiner: ca. 4.5% der Seitenbreite, min. 12px
+const fontPx = Math.max(12, Math.round(pageW * 0.045));
+
+el.textContent = text;
+Object.assign(el.style, {
+  position: "absolute",
+  left: "10px",                     // näher an den Rand
+  top: "50%",
+  transformOrigin: "left bottom",
+  transform: "translateY(-50%) rotate(90deg)",
+  fontWeight: "800",
+  fontFamily: 'Inter, "Segoe UI", Arial, sans-serif',
+  fontSize: fontPx + "px",
+  color: "#E53935",                 // kräftiges Rot (#E53935)
+  letterSpacing: "0.8px",
+  whiteSpace: "nowrap",
+  pointerEvents: "none",
+  userSelect: "none",
+  opacity: "1",                     // nicht transparent
+  maxHeight: Math.round(pageH * 0.52) + "px", // nicht höher als ~52% der Seite
+  lineHeight: "1",
+});
+
   pageWrap.appendChild(el);
 }
 
@@ -483,26 +532,23 @@ async function ensurePermission(handle){
     return r === "granted";
   }catch{ return true; }
 }
-
-/* ---------- PDF STAMP: eingebettetes Wasserzeichen ---------- */
-/* Lädt pdf-lib bei Bedarf dynamisch */
-async function ensurePdfLib(){
-  if (window.PDFLib) return;
-  await new Promise((res,rej)=>{
-    const s=document.createElement("script");
-    s.src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js";
-    s.async=true; s.onload=res; s.onerror=()=>rej(new Error("pdf-lib Laden fehlgeschlagen"));
+// Lädt pdf-lib nur, wenn es noch nicht vorhanden ist
+async function ensurePdfLib () {
+  if (window.PDFLib) return; // schon geladen (z.B. via <script> in index.html)
+  await new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js";
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("pdf-lib Laden fehlgeschlagen"));
     document.head.appendChild(s);
   });
 }
 
-/**
- * Stempelt Seite 1 mit rotem, gedrehtem Text (nach innen, oben→unten).
- * - Farbe: #D32F2F @ ~0.38
- * - Größe: ~6% Seitenbreite, max 50% Seitenhöhe
- * - Rotation: +90°
+ /**
+ * Roter Eingangsstempel – kompakter, weiter innen platziert.
  */
-async function stampPdf(inputArrayBuffer){
+async function stampPdf(inputArrayBuffer) {
   await ensurePdfLib();
   const { PDFDocument, rgb, StandardFonts, degrees } = PDFLib;
 
@@ -513,38 +559,37 @@ async function stampPdf(inputArrayBuffer){
   // Text ermitteln
   const codeRaw = objSel?.value || "—";
   let codePart = codeRaw;
-  if (codeRaw === "B75" && isRechnung()){
-    const sub = (b75Sel?.value||"").trim();
-    codePart = (sub && sub!=="Allgemein") ? `B75-${sub}` : "B75";
+  if (codeRaw === "B75" && isRechnung()) {
+    const sub = (b75Sel?.value || "").trim();
+    codePart = (sub && sub !== "Allgemein") ? `B75-${sub}` : "B75";
   }
-  const date = recvDateEl?.value ? recvDateEl.value.replaceAll("-",".") : ymd(new Date());
+  const date = recvDateEl?.value ? recvDateEl.value.replaceAll("-", ".") : ymd(new Date());
   const text = `${codePart} – EINGEGANGEN: ${date}`;
 
   const p = pages[0];
   const pageW = p.getWidth(), pageH = p.getHeight();
-
   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
 
-  // Startgröße ~6% der Seitenbreite
-  let fontSize = Math.max(8, Math.round(pageW * 0.06));
-  let textWidth = font.widthOfTextAtSize(text, fontSize);
+  // Schriftgröße: ~1.6 % der Seitenbreite (kompakt)
+  let fontSize = Math.max(8, Math.round(pageW * 0.016));
+  let textLength = font.widthOfTextAtSize(text, fontSize);
 
-  // Nach Rotation (90°) liegt Textlänge vertikal -> gegen 50% Seitenhöhe deckeln
-  const maxLen = pageH * 0.50;
-  if (textWidth > maxLen){
-    fontSize = Math.max(6, Math.floor(fontSize * (maxLen / textWidth)));
-    textWidth = font.widthOfTextAtSize(text, fontSize);
+  // Max. 50 % der Seitenhöhe
+  const maxLen = pageH * 0.5;
+  if (textLength > maxLen) {
+    fontSize = Math.max(6, Math.floor(fontSize * (maxLen / textLength)));
+    textLength = font.widthOfTextAtSize(text, fontSize);
   }
 
-  // Position: linker Rand, leicht eingerückt; vertikal zentriert
-  // Bei 90°-Drehung ist (x,y) die Bezugsecke VOR Rotation.
-  const marginLeft = 16;                            // ~15px
+  // Position: 1 cm von oben, 3 cm vom linken Rand
+  const marginLeft = 18; // ~3 cm
+  const marginTop  = 28; // ~1 cm
   const x = marginLeft;
-  const y = (pageH / 2) - (textWidth / 2);         // so, dass die "Länge" (vertical) mittig liegt
+  const y = pageH - marginTop - textLength;
 
   // Farbe & Deckkraft
-  const color = rgb(211/255, 47/255, 47/255);
-  const opacity = 0.38;
+  const color = rgb(229/255, 57/255, 53/255); // #E53935
+  const opacity = 1;
 
   p.drawText(text, {
     x, y,
@@ -552,7 +597,7 @@ async function stampPdf(inputArrayBuffer){
     font,
     color,
     opacity,
-    rotate: degrees(90),           // nach innen (oben -> unten)
+    rotate: degrees(90),
   });
 
   const out = await pdf.save({ useObjectStreams: true });
@@ -799,7 +844,33 @@ function attachSave(){
       if(scopeDir) savedPaths.push(`${scopeDir.name||"Ordner"}\\${await writeFileAtomic(scopeDir, outName, saveArrayBuffer)}`);
       for(const d of pcloudDirs){ savedPaths.push(`${d.name}\\${await writeFileAtomic(d, outName, saveArrayBuffer)}`); }
 
-      // 3) Quelle → Erledigt
+            // 3) E-Mail-Versand (nur wenn Empfänger angehakt sind)
+      try {
+        const recipients = collectEmailRecipients(); // nutzt unsere Helper-Funktion
+        if (recipients.length) {
+          // PDF-Anhang aus dem aktuell gestempelten Puffer bauen
+          const attachmentB64 = await fileToBase64(new Blob([saveArrayBuffer], { type: "application/pdf" }));
+          const subject = outName; // Betreff = Dateiname
+          const body = `Automatischer Versand aus FIDELIOR DMS.\nAblage:\n- ${savedPaths.join("\n- ")}`;
+
+          await sendEmailViaNetlify({
+            to: recipients,
+            subject,
+            text: body,
+            attachments: [
+              { filename: outName, contentBase64: attachmentB64, contentType: "application/pdf" }
+            ]
+          });
+
+          showPopup("E-Mail gesendet ✔️", true);
+        }
+      } catch (e) {
+        console.error("Mail error:", e);
+        showPopup("E-Mail Versand fehlgeschlagen", false);
+      }
+
+      // 4) Quelle → Erledigt
+
       const moveInfo = { moved:false };
       try{
         await tryMoveSource(lastFile.name);
@@ -846,6 +917,26 @@ function attachFormChanges(){
     refreshPreviewInfo();
     toggleB75(); // Sichtbarkeit bleibt korrekt beim Typwechsel
     scheduleRender(50);
+  });
+}
+
+/* E-Mail-Checkboxen ↔ Eingabefelder */
+function attachMailRows() {
+  const pairs = [
+    { chk: "#chkScalar",  inp: "#mailScalar"  },
+    { chk: "#chkSevdesk", inp: "#mailSevdesk" },
+    { chk: "#chkOther",   inp: "#mailOther"   }
+  ];
+  pairs.forEach(p => {
+    const c = $(p.chk), i = $(p.inp);
+    if (!c || !i) return;
+    const sync = () => {
+      i.disabled = !c.checked;
+      // beim Aktivieren ggf. aus Placeholder befüllen
+      if (c.checked && !i.value && i.placeholder) i.value = i.placeholder;
+    };
+    c.addEventListener("change", sync);
+    sync(); // Initialzustand
   });
 }
 
@@ -896,7 +987,7 @@ async function initData(){
 
 function start(){
   updateChips();
-  attachUpload(); attachZoom(); attachActions(); attachCancel(); attachFormChanges(); attachSave(); attachBinding(); attachManage();
+  attachUpload(); attachZoom(); attachActions(); attachCancel(); attachFormChanges(); attachMailRows(); attachSave(); attachBinding(); attachManage();
   initData().then(()=>{ refreshPreviewInfo(); refreshInbox(); updateUiEnabled(false); renderAmountFromRaw(); console.log("✅ Fidelior initialisiert."); });
 }
 
