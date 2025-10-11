@@ -41,14 +41,31 @@ async function fileToBase64(fileOrBlob) {
 }
 
 // 2) Versand an die Netlify-Function (POST)
+// [FIX] Robuster: Timeout + detailierte Fehler
 async function sendEmailViaNetlify({ to=[], cc=[], bcc=[], subject="", text="", html="", attachments=[] }) {
-  const res = await fetch("/.netlify/functions/send-email", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, cc, bcc, subject, text, html, attachments })
-  });
-  const data = await res.json().catch(()=>({}));
-  if (!res.ok || !data.ok) throw new Error(data.error || "E-Mail Versand fehlgeschlagen");
+  if (!to || !to.length) throw new Error("Kein Empfänger angegeben.");
+  const controller = new AbortController();
+  const timeout = setTimeout(()=>controller.abort(), 15000); // 15s
+  let res, bodyText = "";
+  try {
+    res = await fetch("/.netlify/functions/send-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to, cc, bcc, subject, text, html, attachments }),
+      signal: controller.signal
+    });
+    bodyText = await res.text();
+  } catch (e) {
+    clearTimeout(timeout);
+    throw new Error("Netzwerk/Timeout beim E-Mail-Versand: " + (e?.message||e));
+  }
+  clearTimeout(timeout);
+  let data = {};
+  try { data = bodyText ? JSON.parse(bodyText) : {}; } catch {}
+  if (!res.ok || data.ok !== true) {
+    const msg = data.error || `HTTP ${res.status} – ${res.statusText}`;
+    throw new Error("E-Mail Versand fehlgeschlagen: " + msg);
+  }
   return data; // { ok:true, messageId: ... }
 }
 
@@ -166,33 +183,27 @@ function applyWatermarkPreview(pageWrap, viewport, pageIndex){
 
   const el = document.createElement("div");
   el.className = "wm-overlay";
-  // Maße aus viewport
- // … innerhalb von applyWatermarkPreview(…)
-const pageW = viewport.width, pageH = viewport.height;
-
-// etwas kleiner: ca. 4.5% der Seitenbreite, min. 12px
-const fontPx = Math.max(12, Math.round(pageW * 0.045));
-
-el.textContent = text;
-Object.assign(el.style, {
-  position: "absolute",
-  left: "10px",                     // näher an den Rand
-  top: "50%",
-  transformOrigin: "left bottom",
-  transform: "translateY(-50%) rotate(90deg)",
-  fontWeight: "800",
-  fontFamily: 'Inter, "Segoe UI", Arial, sans-serif',
-  fontSize: fontPx + "px",
-  color: "#E53935",                 // kräftiges Rot (#E53935)
-  letterSpacing: "0.8px",
-  whiteSpace: "nowrap",
-  pointerEvents: "none",
-  userSelect: "none",
-  opacity: "1",                     // nicht transparent
-  maxHeight: Math.round(pageH * 0.52) + "px", // nicht höher als ~52% der Seite
-  lineHeight: "1",
-});
-
+  const pageW = viewport.width, pageH = viewport.height;
+  const fontPx = Math.max(12, Math.round(pageW * 0.045));
+  el.textContent = text;
+  Object.assign(el.style, {
+    position: "absolute",
+    left: "10px",
+    top: "50%",
+    transformOrigin: "left bottom",
+    transform: "translateY(-50%) rotate(90deg)",
+    fontWeight: "800",
+    fontFamily: 'Inter, "Segoe UI", Arial, sans-serif',
+    fontSize: fontPx + "px",
+    color: "#E53935",
+    letterSpacing: "0.8px",
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+    userSelect: "none",
+    opacity: "1",
+    maxHeight: Math.round(pageH * 0.52) + "px",
+    lineHeight: "1",
+  });
   pageWrap.appendChild(el);
 }
 
@@ -825,38 +836,45 @@ function showSavedToast(paths, moveInfo){
   ok.onclick = () => t.close();
   t.actions.append(ok);
 }
+
 // ====================================================
-// Empfänger sammeln (fehlende Funktion wieder ergänzt)
+// Empfänger sammeln – vereinheitlicht & robust
 // ====================================================
+// [FIX] Unterstützt aktuelle IDs (#chkScalar, #chkSevdesk, #chkOther) + Fallbacks
 function collectEmailRecipients() {
   const emails = new Set();
-
-  // 1) Feste Paare nach IDs (robust gegen alte/neue Namen)
-  const pairs = [
-    ['mailPreset1Chk', 'mailPreset1'],
-    ['mailPreset2Chk', 'mailPreset2'],
-    ['mailCustomChk',  'mailOther'],   // aktueller Name
-    ['mailCustomChk',  'mailCustom'],  // Fallback (älterer Name)
-  ];
-
   const isEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 
-  for (const [chkId, inputId] of pairs) {
+  const pairIds = [
+    // aktuelle UI
+    ['chkScalar','mailScalar'],
+    ['chkSevdesk','mailSevdesk'],
+    ['chkOther','mailOther'],
+    // ältere/Alternative Names
+    ['mailPreset1Chk','mailPreset1'],
+    ['mailPreset2Chk','mailPreset2'],
+    ['mailCustomChk','mailOther'],
+    ['mailCustomChk','mailCustom'],
+  ];
+
+  for (const [chkId, inputId] of pairIds) {
     const chk = document.getElementById(chkId);
     const input = document.getElementById(inputId);
-    if (chk && chk.checked && input) {
-      const parts = input.value.split(/[;, ]+/).map(s => s.trim()).filter(Boolean);
-      parts.forEach(e => { if (isEmail(e)) emails.add(e); });
+    if (chk && chk.checked && input && input.value) {
+      input.value.split(/[;, ]+/).map(s=>s.trim()).filter(Boolean).forEach(e=>{
+        if (isEmail(e)) emails.add(e);
+      });
     }
   }
 
-  // 2) Fallback – generisch für .mail-group-Struktur
-  document.querySelectorAll('.mail-group .chk').forEach(label => {
-    const chk   = label.querySelector('input[type="checkbox"]');
-    const input = label.querySelector('input.mail-input');
-    if (chk && chk.checked && input) {
-      const parts = input.value.split(/[;, ]+/).map(s => s.trim()).filter(Boolean);
-      parts.forEach(e => { if (isEmail(e)) emails.add(e); });
+  // generische .mail-group Struktur (falls vorhanden)
+  document.querySelectorAll('.mail-group').forEach(group=>{
+    const chk = group.querySelector('input[type="checkbox"]');
+    const input = group.querySelector('input.mail-input');
+    if (chk && chk.checked && input && input.value) {
+      input.value.split(/[;, ]+/).map(s=>s.trim()).filter(Boolean).forEach(e=>{
+        if (isEmail(e)) emails.add(e);
+      });
     }
   });
 
@@ -870,7 +888,7 @@ function attachSave(){
       const outName = currentOutputName();
       requireSelection(); // erzwingt Objektwahl
 
-      // 1) Vor dem Schreiben: PDF STEMPELN (nur Seite 1)
+      // 1) Stempel vor dem Schreiben
       saveArrayBuffer = await stampPdf(saveArrayBuffer);
 
       // 2) Ziele ermitteln & schreiben
@@ -881,16 +899,19 @@ function attachSave(){
       if(scopeDir) savedPaths.push(`${scopeDir.name||"Ordner"}\\${await writeFileAtomic(scopeDir, outName, saveArrayBuffer)}`);
       for(const d of pcloudDirs){ savedPaths.push(`${d.name}\\${await writeFileAtomic(d, outName, saveArrayBuffer)}`); }
 
-            // 3) E-Mail-Versand (nur wenn Empfänger angehakt sind)
+      // 3) E-Mail-Versand
       try {
-        const recipients = collectEmailRecipients(); // nutzt unsere Helper-Funktion
-        if (recipients.length) {
-          // PDF-Anhang aus dem aktuell gestempelten Puffer bauen
+        const recipients = collectEmailRecipients();
+        console.log("[Mail] recipients:", recipients);
+        if (!recipients.length) {
+          // [FIX] Deutliches Feedback, kein Versandversuch
+          showPopup("Keine Empfänger angehakt – PDF nur abgelegt", true);
+        } else {
           const attachmentB64 = await fileToBase64(new Blob([saveArrayBuffer], { type: "application/pdf" }));
-          const subject = outName; // Betreff = Dateiname
+          const subject = outName;
           const body = `Automatischer Versand aus FIDELIOR DMS.\nAblage:\n- ${savedPaths.join("\n- ")}`;
 
-          await sendEmailViaNetlify({
+          const resp = await sendEmailViaNetlify({
             to: recipients,
             subject,
             text: body,
@@ -898,16 +919,15 @@ function attachSave(){
               { filename: outName, contentBase64: attachmentB64, contentType: "application/pdf" }
             ]
           });
-
+          console.log("[Mail] response:", resp);
           showPopup("E-Mail gesendet ✔️", true);
         }
       } catch (e) {
         console.error("Mail error:", e);
-        showPopup("E-Mail Versand fehlgeschlagen", false);
+        showPopup(String(e?.message||"E-Mail Versand fehlgeschlagen"), false);
       }
 
       // 4) Quelle → Erledigt
-
       const moveInfo = { moved:false };
       try{
         await tryMoveSource(lastFile.name);
@@ -952,7 +972,7 @@ function attachFormChanges(){
 
   typeSel?.addEventListener("change", () => {
     refreshPreviewInfo();
-    toggleB75(); // Sichtbarkeit bleibt korrekt beim Typwechsel
+    toggleB75();
     scheduleRender(50);
   });
 }
@@ -969,11 +989,10 @@ function attachMailRows() {
     if (!c || !i) return;
     const sync = () => {
       i.disabled = !c.checked;
-      // beim Aktivieren ggf. aus Placeholder befüllen
       if (c.checked && !i.value && i.placeholder) i.value = i.placeholder;
     };
     c.addEventListener("change", sync);
-    sync(); // Initialzustand
+    sync();
   });
 }
 
