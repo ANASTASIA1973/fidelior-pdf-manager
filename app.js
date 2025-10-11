@@ -825,6 +825,43 @@ function showSavedToast(paths, moveInfo){
   ok.onclick = () => t.close();
   t.actions.append(ok);
 }
+// ====================================================
+// Empfänger sammeln (fehlende Funktion wieder ergänzt)
+// ====================================================
+function collectEmailRecipients() {
+  const emails = new Set();
+
+  // 1) Feste Paare nach IDs (robust gegen alte/neue Namen)
+  const pairs = [
+    ['mailPreset1Chk', 'mailPreset1'],
+    ['mailPreset2Chk', 'mailPreset2'],
+    ['mailCustomChk',  'mailOther'],   // aktueller Name
+    ['mailCustomChk',  'mailCustom'],  // Fallback (älterer Name)
+  ];
+
+  const isEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
+  for (const [chkId, inputId] of pairs) {
+    const chk = document.getElementById(chkId);
+    const input = document.getElementById(inputId);
+    if (chk && chk.checked && input) {
+      const parts = input.value.split(/[;, ]+/).map(s => s.trim()).filter(Boolean);
+      parts.forEach(e => { if (isEmail(e)) emails.add(e); });
+    }
+  }
+
+  // 2) Fallback – generisch für .mail-group-Struktur
+  document.querySelectorAll('.mail-group .chk').forEach(label => {
+    const chk   = label.querySelector('input[type="checkbox"]');
+    const input = label.querySelector('input.mail-input');
+    if (chk && chk.checked && input) {
+      const parts = input.value.split(/[;, ]+/).map(s => s.trim()).filter(Boolean);
+      parts.forEach(e => { if (isEmail(e)) emails.add(e); });
+    }
+  });
+
+  return Array.from(emails);
+}
 
 function attachSave(){
   $("#saveBtn")?.addEventListener("click", async ()=>{
