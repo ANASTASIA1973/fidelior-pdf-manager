@@ -1,20 +1,24 @@
 {
   "objects": [
-    { "code": "PRIVAT",   "displayName": "PRIVAT",   "scopevisioName": "PRIVAT",   "type": "branch", "branch": "PRIVAT" },
-    { "code": "FIDELIOR", "displayName": "FIDELIOR", "scopevisioName": "FIDELIOR", "type": "branch", "branch": "FIDELIOR" },
+    { "code": "PRIVAT",   "displayName": "PRIVAT",   "scopevisioName": "PRIVAT",   "pcloudName": "PRIVAT",   "type": "branch", "branch": "PRIVAT" },
+    { "code": "FIDELIOR", "displayName": "FIDELIOR", "scopevisioName": "FIDELIOR", "pcloudName": "FIDELIOR", "type": "branch", "branch": "FIDELIOR" },
 
-    { "code": "A15", "displayName": "A15 · Ahrweiler Straße 15",   "scopevisioName": "A15 Ahrweiler Straße 15" },
-    { "code": "B75", "displayName": "B75 · Beethovenallee 75",     "scopevisioName": "B75 Beethovenallee 75", "specialSubfoldersScopevisio": ["Allgemein","D1","D4"] },
-    { "code": "D50", "displayName": "D50 · Denglerstraße 50",      "scopevisioName": "D50 Denglerstraße 50" },
-    { "code": "EGYO","displayName": "EGYO · Yachthafen Oberwinter","scopevisioName": "EGYO Yachthafen Oberwinter" },
-    { "code": "L4",  "displayName": "L4 · Lennestraße 4",          "scopevisioName": "L4 Lennestraße 4" },
-    { "code": "R81", "displayName": "R81 · Rheindorfer Straße 81", "scopevisioName": "R81 Rheindorfer Straße 81" },
-    { "code": "V8",  "displayName": "V8 · Viktoriastraße 8",       "scopevisioName": "V8 Viktoriastraße 8" },
-    { "code": "W7",  "displayName": "W7 · Windmühlenstraße 7",     "scopevisioName": "W7 Windmühlenstraße 7" }
+    { "code": "ARNDTCIE", "displayName": "ARNDT & CIE", "scopevisioName": "ARNDT & CIE", "pcloudName": "ARNDT & CIE", "pcloudDisabled": true },
+
+    { "code": "A15", "displayName": "A15 · Ahrweiler Straße 15", "scopevisioName": "A15 Ahrweiler Straße 15", "pcloudName": "A15 Ahrweiler Straße 15" },
+    { "code": "B75", "displayName": "B75 · Beethovenallee 75",   "scopevisioName": "B75 Beethovenallee 75",   "pcloudName": "B75 Beethovenallee 75", "specialSubfoldersScopevisio": ["Allgemein", "D1", "D4"] },
+    { "code": "D50", "displayName": "D50 · Denglerstraße 50",     "scopevisioName": "D50 Denglerstraße 50",     "pcloudName": "D50 Denglerstraße 50" },
+    { "code": "EGYO","displayName": "EGYO · Yachthafen Oberwinter","scopevisioName": "EGYO Yachthafen Oberwinter","pcloudName": "EGYO Yachthafen Oberwinter" },
+    { "code": "L4",  "displayName": "L4 · Lennestraße 4",         "scopevisioName": "L4 Lennestraße 4",         "pcloudName": "L4 Lennestraße 4" },
+    { "code": "R81", "displayName": "R81 · Rheindorfer Straße 81","scopevisioName": "R81 Rheindorfer Straße 81","pcloudName": "R81 Rheindorfer Straße 81" },
+    { "code": "V8",  "displayName": "V8 · Viktoriastraße 8",      "scopevisioName": "V8 Viktoriastraße 8",      "pcloudName": "V8 Viktoriastraße 8" },
+    { "code": "W7",  "displayName": "W7 · Windmühlenstraße 7",    "scopevisioName": "W7 Windmühlenstraße 7",    "pcloudName": "W7 Windmühlenstraße 7" }
   ],
   "rules": {
     "yearAtEnd": true,
     "useIdenticalNamesInPcloud": true,
+    "noAutoCreateRoots": true,
+    "askBeforeCreatingMissing": true,
     "folders": {
       "invoice": "Rechnungsbelege",
       "nonInvoiceObjects": "Objektdokumente",
@@ -25,15 +29,15 @@
     "paths": {
       "scopevisioRoot": "Scopevisio Documents\\Arndt",
       "pcloud": {
-        "root": "P:\\FIDELIOR",
-        "objectsBase": "P:\\FIDELIOR\\OBJEKTE",
-        "privatBase": "P:\\FIDELIOR\\PRIVAT",
-        "fideliorDocsBase": "P:\\FIDELIOR",
-        "fideliorInvoicesBase": "P:\\FIDELIOR\\VERWALTUNG\\Finanzen - Buchhaltung\\Eingangsrechnungen"
+        "root": "P:\\\\FIDELIOR",
+        "objectsBase": "P:\\\\FIDELIOR\\\\OBJEKTE",
+        "privatBase": "P:\\\\FIDELIOR\\\\PRIVAT",
+        "fideliorDocsBase": "P:\\\\FIDELIOR",
+        "fideliorInvoicesBase": "P:\\\\FIDELIOR\\\\VERWALTUNG\\\\Finanzen - Buchhaltung\\\\Eingangsrechnungen"
       }
     },
     "specialCases": {
-      "B75": { "categoryBeforeYear": true, "categories": ["Allgemein","D1","D4"] }
+      "B75": { "categoryBeforeYear": true, "categories": ["Allgemein", "D1", "D4"] }
     }
   }
 }

@@ -38,7 +38,7 @@
     "dateFormat": "YYYY.MM.DD",
     "amountDecimalSeparator": ",",
     "amountThousandsSeparator": ".",
-    "amountForFilenameCommaToDash": true,
+    "amountForFilenameCommaToDash": false,
     "collapseEmptyParts": true,
     "normalizeWhitespace": true
   },
@@ -52,5 +52,22 @@
     "undoSeconds": 15,
     "successToastSeconds": 15,
     "showManualMoveButton": false
+  },
+  "mail": {
+    "from": "documents@fidelior.de",
+    "subjects": {
+      "zahlungOffen": "NEUE RECHNUNG – ZAHLUNG OFFEN",
+      "pruefung": "RECHNUNGSPRÜFUNG ERFORDERLICH"
+    },
+    "replyTo": {
+      "zahlungOffen": "payable@fidelior.de",
+      "pruefung": "kontakt@fidelior.de"
+    },
+    "addressBook": [
+      { "id": "sevdesk",   "name": "Sevdesk Autobox",   "email": "autobox@sevdesk.email", "tags": ["immer"] },
+      { "id": "payable",   "name": "Fidelior Payable",  "email": "payable@fidelior.de",    "tags": ["zahlungOffen"] },
+      { "id": "kontakt",   "name": "Fidelior Kontakt",  "email": "kontakt@fidelior.de",    "tags": ["pruefung"] },
+      { "id": "egyo-info", "name": "EGYO Hafenleitung", "email": "yachthafenoberwinter@web.de", "tags": ["egyo"] }
+    ]
   }
 }

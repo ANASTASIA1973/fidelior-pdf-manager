@@ -1,5 +1,31 @@
+# netlify.toml (minimal & gültig)
+
 [build]
-  publish = "."
+  publish   = "."
   functions = "netlify/functions"
+
 [[plugins]]
   package = "@netlify/plugin-functions-install-core"
+
+# Optional: JS/CSS nicht hart cachen
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# JSON IMMER FRISCH (verhindert: „Dropdowns erst nach Cache/Cookies löschen“)
+[[headers]]
+  for = "/*.json"
+  [headers.values]
+    Cache-Control = "no-store"
+
+# Vorsichtshalber: PDF.js-Worker nicht hart cachen (optional)
+[[headers]]
+  for = "/pdf.worker.min.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

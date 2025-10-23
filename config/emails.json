@@ -1,0 +1,49 @@
+{
+  "from": "documents@fidelior.de",
+
+  "addressBook": [
+    { "id": "sevdesk",   "label": "Sevdesk Autobox",   "email": "autobox@sevdesk.email" },
+    { "id": "payable",   "label": "Fidelior Zahlung",  "email": "payable@fidelior.de" },
+    { "id": "kontakt",   "label": "Fidelior Prüfung",  "email": "kontakt@fidelior.de" },
+    { "id": "egyo-info", "label": "EGYO Hafenleitung", "email": "yachthafenoberwinter@web.de" }
+  ],
+
+  "defaults": {
+    "invoice": {
+      "Fidelior": {
+        "subjectByStatus": {
+          "open":   "Neue Rechnung – Zahlung offen",
+          "review": "Rechnungsprüfung erforderlich"
+        },
+        "replyToByStatus": {
+          "open":   "payable@fidelior.de",
+          "review": "kontakt@fidelior.de"
+        },
+        "toByStatus": {
+          "open":   ["payable", "sevdesk"],
+          "review": ["kontakt", "sevdesk"]
+        },
+        "body": "Automatischer Versand aus FIDELIOR DMS."
+      }
+    }
+  },
+
+  "perObject": {
+    "EGYO": {
+      "invoice": {
+        "emails": ["egyo-info"],
+        "to": ["yachthafenoberwinter@web.de"],
+        "subject": "Kenntnisnahme zur Rechnungsfreigabe – EGYO",
+        "body": "Bitte um Kenntnisnahme/Freigabe der angehängten Rechnung."
+      }
+    },
+
+    "FIDELIOR": {
+      "invoice": {
+        "emails": ["payable", "sevdesk"],
+        "to": ["payable@fidelior.de", "autobox@sevdesk.email"],
+        "body": "Automatischer Versand aus FIDELIOR DMS."
+      }
+    }
+  }
+}
