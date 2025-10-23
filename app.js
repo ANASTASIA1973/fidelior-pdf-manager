@@ -696,7 +696,50 @@ document.getElementById("downloadBtn")?.addEventListener("click", () => {
   /* --------------------------- Auto-Erkennung ------------------------------ */
   async function extractTextFirstPages(pdf, maxPages=3){ const N=Math.min(maxPages, pdf.numPages); let out=[]; for(let i=1;i<=N;i++){ const p=await pdf.getPage(i); const c=await p.getTextContent({ normalizeWhitespace:true, disableCombineTextItems:false }); out.push((c.items||[]).map(it=>it.str).join(" ")); } return out.join("\n"); }
   function euroToNum(s){ let x=(s||"").replace(/[€\s]/g,"").replace(/−/g,"-"); if(x.includes(",")&&x.includes(".")) x=x.replace(/\./g,"").replace(",","."); else if(x.includes(",")) x=x.replace(",","."); const v=Number(x); return isFinite(v)?v:NaN; }
-  async function autoRecognize(){ try{ const txt = (await extractTextFirstPages(pdfDoc,3)) || ""; const moneyHits=[...txt.matchAll(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g)].map(m=>m[0]); if(moneyHits.length){ const pick = moneyHits.map(v=>({v,n:euroToNum(v)})).sort((a,b)=>b.n-a.n)[0].v; amountEl.dataset.raw=pick; amountEl.value=formatAmountDisplay(pick); amountEl.classList.add("auto"); } const dHits=[...txt.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)].map(m=>{ const y=m[3].length===2 ? ( +m[3] < 50 ? "20"+m[3] : "19"+m[3]) : m[3]; return `${y}-${pad2(+m[2])}-${pad2(+m[1])}`; }); if(dHits.length){ const last=dHits.sort((a,b)=>b.localeCompare(a))[0]; invDateEl.value=isoToDisp(last); invDateEl.classList.add("auto"); } const rn = (txt.match(/\b(?:Rechnungs(?:nummer|nr\.?)|Invoice(?: Number| No\.?)|Beleg(?:nummer|nr\.?))\s*[:#]?\s*([A-Z0-9][A-Z0-9\-\/.]{3,})/i)||[])[1]; if(rn){ invNoEl.value=rn; invNoEl.classList.add("auto"); } if(!recvDateEl.value){ recvDateEl.value=today(); recvDateEl.classList.add("auto"); }
+  async function autoRecognize(){ try{ const txt = (await extractTextFirstPages(pdfDoc,3)) || ""; const moneyHits=[...txt.matchAll(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g)].map(m=>m[0]); if(moneyHits.length){ const pick = moneyHits.map(v=>({v,n:euroToNum(v)})).sort((a,b)=>b.n-a.n)[0].v; amountEl.dataset.raw=pick; amountEl.value=formatAmountDisplay(pick); amountEl.classList.add("auto"); } // --- NEU: Datum erkennen (auch Monatsnamen) und niemals Zukunft wählen ---
+const MONTHS = {
+  januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,
+  juli:7,august:8,september:9,oktober:10,november:11,dezember:12
+};
+const isoFromDMY = (d,m,y) => {
+  const yy = String(y).length === 2 ? (+y < 50 ? 2000 + +y : 1900 + +y) : +y;
+  return `${yy}-${pad2(m)}-${pad2(d)}`;
+};
+
+const dateHits = [];
+
+// 1) 01.02.2025 / 1-2-25
+for (const m of txt.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
+  dateHits.push( isoFromDMY(+m[1], +m[2], m[3]) );
+}
+
+// 2) 23. November 2025
+for (const m of txt.matchAll(/\b(\d{1,2})\.\s*(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)) {
+  const mon = MONTHS[m[2].toLowerCase()];
+  if (mon) dateHits.push( isoFromDMY(+m[1], mon, m[3]) );
+}
+
+// 3) „im November 2025“ → 01.11.2025
+for (const m of txt.matchAll(/\b(?:im\s+)?(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)) {
+  const mon = MONTHS[m[1].toLowerCase()];
+  if (mon) dateHits.push( isoFromDMY(1, mon, m[2]) );
+}
+// Auswahl: NIE in der Zukunft. Wenn nichts Vergangenes/Heute gefunden → nimm heute.
+const todayIso = new Date().toISOString().slice(0,10);
+
+// Eindeutige Treffer, sortiert (YYYY-MM-DD sortiert lexikographisch korrekt)
+const uniq = Array.from(new Set(dateHits)).filter(Boolean).sort();
+
+// alles ≤ heute
+const nonFuture = uniq.filter(d => d <= todayIso);
+
+// Wahl: letztes nicht-zukünftiges Datum, sonst heute
+const picked = nonFuture.length ? nonFuture[nonFuture.length - 1] : todayIso;
+
+invDateEl.value = isoToDisp(picked);
+invDateEl.classList.add("auto");
+
+
       if(assignmentsCfg?.patterns?.length){ const t=txt.toLowerCase(); const hit=assignmentsCfg.patterns.find(p=> String(p.pattern||"").split("|").some(rx=>{ try{ return new RegExp(rx,"i").test(t); }catch{ return t.includes(rx.toLowerCase()); } })); if(hit?.object){ const before=objSel.value; objSel.value = hit.object; if(objSel.value!==before) toast(`Zuordnung: <strong>${hit.object}</strong>`,2000); } }
       applyPerObjectMailRules(); prefillMail(); updateStatusPillsVisibility(); const found = []; if(amountEl.value) found.push("Betrag"); if(invDateEl.value) found.push("Rechnungsdatum"); if(invNoEl.value) found.push("Rechnungsnr."); if(found.length) toast(`<strong>Automatisch erkannt</strong><br>${found.join(" · ")}`,3000); refreshPreview(); }catch(e){ console.warn("Auto-Erkennung fehlgeschlagen", e); toast("Auto-Erkennung fehlgeschlagen.", 2500); } }
 
@@ -806,7 +849,65 @@ document.getElementById("downloadBtn")?.addEventListener("click", () => {
   }
 
   /* --------------------------- Date-Picker (native) ------------------------ */
-  function attachNativeDatePicker(textInput){ if (!textInput || textInput._hasPicker) return; textInput._hasPicker = true; const hidden = document.createElement("input"); hidden.type = "date"; hidden.style.position="fixed"; hidden.style.opacity="0"; hidden.style.pointerEvents="none"; hidden.style.width="1px"; hidden.style.height="1px"; textInput.insertAdjacentElement("afterend", hidden); const openPicker = () => { const rect = textInput.getBoundingClientRect(); hidden.style.left = Math.max(0, Math.floor(rect.left)+8) + "px"; hidden.style.top  = Math.max(0, Math.floor(rect.top)+8)  + "px"; const iso = dispToIso(textInput.value); if (iso) hidden.value = iso; hidden.showPicker?.(); hidden.click(); }; textInput.addEventListener("focus", openPicker); textInput.addEventListener("click", openPicker); hidden.addEventListener("change", ()=>{ if (hidden.value) { const m = hidden.value.match(/^(\d{4})-(\d{2})-(\d{2})$/); if (m) textInput.value = `${m[3]}.${m[2]}.${m[1]}`; textInput.dispatchEvent(new Event("input",{bubbles:true})); textInput.dispatchEvent(new Event("change",{bubbles:true})); } }); }
+ function attachNativeDatePicker(textInput){
+  if (!textInput || textInput._hasPicker) return;
+  textInput._hasPicker = true;
+
+  const hidden = document.createElement("input");
+  hidden.type = "date";
+  hidden.style.position = "fixed";
+  hidden.style.opacity = "0";
+  hidden.style.pointerEvents = "none";
+  hidden.style.width = "1px";
+  hidden.style.height = "1px";
+  hidden.style.zIndex = "9999"; // sicherheitshalber oben
+  textInput.insertAdjacentElement("afterend", hidden);
+
+  const openPicker = () => {
+    // Feld möglichst sichtbar machen
+    textInput.scrollIntoView({ block: "nearest", inline: "nearest" });
+
+    const rect = textInput.getBoundingClientRect();
+    const margin = 8;        // kleiner Abstand
+    const calH   = 320;      // grobe Kalender-Höhe
+    const calW   = 320;      // grobe Kalender-Breite
+
+    // Links klemmen
+    const left = Math.max(
+      margin,
+      Math.min(rect.left + margin, window.innerWidth - calW - margin)
+    );
+
+    // Unten genug Platz? Sonst oberhalb anzeigen
+    const needsUp = (rect.top + rect.height + calH + margin > window.innerHeight);
+    const top = needsUp
+      ? Math.max(margin, rect.top - calH - margin)          // oberhalb
+      : Math.max(margin, rect.top + rect.height + margin);  // unterhalb
+
+    hidden.style.left = Math.floor(left) + "px";
+    hidden.style.top  = Math.floor(top)  + "px";
+
+    // aktuellen Wert übernehmen
+    const iso = dispToIso(textInput.value);
+    if (iso) hidden.value = iso;
+
+    hidden.showPicker?.();
+    hidden.click();
+  };
+
+  textInput.addEventListener("focus", openPicker);
+  textInput.addEventListener("click", openPicker);
+
+  hidden.addEventListener("change", () => {
+    if (hidden.value) {
+      const m = hidden.value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (m) textInput.value = `${m[3]}.${m[2]}.${m[1]}`;
+      textInput.dispatchEvent(new Event("input",  { bubbles:true }));
+      textInput.dispatchEvent(new Event("change", { bubbles:true }));
+    }
+  });
+}
+
   attachNativeDatePicker(recvDateEl); attachNativeDatePicker(invDateEl);
 
   /* ----------------------- Verbindungen & Zähler --------------------------- */
@@ -1360,14 +1461,32 @@ async function openAssignmentsDialog(){
   // (Wenn sie fehlen, wird dieser Teil einfach übersprungen.)
   try {
     // Objektliste vorbefüllen, falls leer
-    const o = await loadJson("config/objects.json");
-    const sel = $("#saObject");
-    if (sel && !sel.options.length) {
-      sel.innerHTML =
-        `<option value="">(Objekt wählen)</option>` +
-        (o.objects||[]).map(x =>
-          `<option value="${x.code}">${x.displayName||x.code}</option>`).join("");
-    }
+   // Objektliste IMMER frisch befüllen (nicht nur wenn leer)
+try {
+  const o   = await loadJson("config/objects.json");
+  const sel = $("#saObject");
+  if (sel) {
+    const opts = (o.objects || []).map(x => {
+      const val = x.code || x.scopevisioName || x.displayName || "";
+      const txt = x.displayName || x.code || x.scopevisioName || "";
+      return `<option value="${val}">${txt}</option>`;
+    }).join("");
+    sel.innerHTML = `<option value="">(Objekt wählen)</option>` + opts;
+    sel.value = ""; // Platzhalter aktiv lassen
+  }
+} catch {
+  // Fallback, falls objects.json nicht geladen werden kann
+  const sel = $("#saObject");
+  if (sel) {
+    sel.innerHTML = `
+      <option value="">(Objekt wählen)</option>
+      <option value="PRIVAT">PRIVAT</option>
+      <option value="FIDELIOR">FIDELIOR</option>
+      <option value="ARNDTCIE">ARNDT & CIE</option>`;
+    sel.value = "";
+  }
+}
+
   } catch {}
 
   const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1733,38 +1852,39 @@ const moved = await moveInboxToProcessed(); if(moved) toast("Inbox → Bearbeite
         <option value="" disabled>(Dokumenttyp wählen)</option>
         <option value="rechnung" data-isinvoice="true">Rechnung</option>
         <option value="sonstiges">Sonstiges</option>`; } }
-  async function loadObjects(){
+ async function loadObjects(){
   try{
+    // 1) Datei laden
     const j = await loadJson("config/objects.json");
     objectsCfg = j;
 
-    const list = (j?.objects || []);
+    // 2) Liste holen (nichts filtern!)
+    const list = Array.isArray(j?.objects) ? j.objects : [];
+
+    // 3) Dropdown neu aufbauen
     objSel.innerHTML = "";
     objSel.appendChild(new Option("(Liegenschaft wählen)", ""));
 
     list.forEach(o => {
-      const opt = new Option(
-        o.displayName || o.code || o.scopevisioName || "",
-        o.code || o.scopevisioName || o.displayName || ""
-      );
+      const text  = o.displayName || o.code || o.scopevisioName || "";
+      const value = o.code || o.scopevisioName || o.displayName || "";
+      const opt = new Option(text, value);
       if (o.scopevisioName) opt.dataset.scopevisioName = o.scopevisioName;
       objSel.appendChild(opt);
     });
 
-    // <<< NEU: automatisch einen sinnvollen Standard setzen
-    if (!objSel.value && list.length){
-      const prefer = list.find(o => o.code === "FIDELIOR") || list[0];
-      objSel.value = prefer.code || prefer.scopevisioName || "";
-      // Abhängigkeiten (Subfolder, Mail-Vorlagen, Preview) aktualisieren
-      objSel.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-  } catch {
+    // 4) Platzhalter aktiv lassen (kein Auto-Select)
+    objSel.value = "";
+  } catch (e){
+    // Fallback, falls die Datei nicht gelesen werden konnte
     objSel.innerHTML = `
       <option value="">(Liegenschaft wählen)</option>
-      <option value="FIDELIOR">Fidelior</option>
-      <option value="EGYO">EGYO</option>`;
+      <option value="PRIVAT">PRIVAT</option>
+      <option value="FIDELIOR">FIDELIOR</option>
+      <option value="ARNDTCIE">ARNDT & CIE</option>`;
   }
 }
+
 
   objSel?.addEventListener("change", async () => {
   // Mail-State leeren
