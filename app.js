@@ -693,55 +693,199 @@ document.getElementById("downloadBtn")?.addEventListener("click", () => {
 });
 
 
-  /* --------------------------- Auto-Erkennung ------------------------------ */
-  async function extractTextFirstPages(pdf, maxPages=3){ const N=Math.min(maxPages, pdf.numPages); let out=[]; for(let i=1;i<=N;i++){ const p=await pdf.getPage(i); const c=await p.getTextContent({ normalizeWhitespace:true, disableCombineTextItems:false }); out.push((c.items||[]).map(it=>it.str).join(" ")); } return out.join("\n"); }
-  function euroToNum(s){ let x=(s||"").replace(/[€\s]/g,"").replace(/−/g,"-"); if(x.includes(",")&&x.includes(".")) x=x.replace(/\./g,"").replace(",","."); else if(x.includes(",")) x=x.replace(",","."); const v=Number(x); return isFinite(v)?v:NaN; }
-  async function autoRecognize(){ try{ const txt = (await extractTextFirstPages(pdfDoc,3)) || ""; const moneyHits=[...txt.matchAll(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g)].map(m=>m[0]); if(moneyHits.length){ const pick = moneyHits.map(v=>({v,n:euroToNum(v)})).sort((a,b)=>b.n-a.n)[0].v; amountEl.dataset.raw=pick; amountEl.value=formatAmountDisplay(pick); amountEl.classList.add("auto"); } // --- NEU: Datum erkennen (auch Monatsnamen) und niemals Zukunft wählen ---
-const MONTHS = {
-  januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,
-  juli:7,august:8,september:9,oktober:10,november:11,dezember:12
-};
-const isoFromDMY = (d,m,y) => {
-  const yy = String(y).length === 2 ? (+y < 50 ? 2000 + +y : 1900 + +y) : +y;
-  return `${yy}-${pad2(m)}-${pad2(d)}`;
-};
+ // === Helper: robuste Rechnungsnummer-Erkennung (unabhängig von Zuordnungsregeln) ===
+function findInvoiceNumber(rawText) {
+  if (!rawText) return "";
+  const text = String(rawText).replace(/\s+/g, " ");
 
-const dateHits = [];
+  const hits = [];
 
-// 1) 01.02.2025 / 1-2-25
-for (const m of txt.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
-  dateHits.push( isoFromDMY(+m[1], +m[2], m[3]) );
+  // 1) Label-basierte Treffer (bevorzugt)
+  const labelRxs = [
+    /(?:rechnungs(?:nummer|nr\.?)|rechnung\s*nr\.?|rg-?nr\.?|rn\.?|belegnr\.?|belegnummer)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})/gi,
+    /(?:invoice(?:\s*no\.?| number)?|inv\.?\s*no\.?|billing\s*no\.?)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})/gi,
+    /(?:rechnung|invoice)[^.\n]{0,50}?\b(?:nr\.?|no\.?)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})/gi,
+  ];
+  for (const rx of labelRxs) {
+    let m; while ((m = rx.exec(text))) hits.push(m[1]);
+  }
+
+  // 2) Nähe-Fallback: ein plausibles Token kurz nach „Rechnung/Invoice“
+  for (const m of text.matchAll(/(?:rechnung|invoice)[^.\n]{0,50}?([A-Z0-9][A-Z0-9./\-]{4,})/gi)) {
+    hits.push(m[1]);
+  }
+
+  // 3) Numerischer Fallback 6–12 Ziffern in Nähe „Rechn…/Invoice“
+  for (const m of text.matchAll(/(?:rechn\w*|invoice)\D{0,40}(\d{6,12})/gi)) {
+    hits.push(m[1]);
+  }
+
+  // Filter: keine IBAN/Datums/Kunden-/Bestellnummern etc.
+  const looksLikeDate1 = /^(\d{1,2}[.\-\/]){2}\d{2,4}$/;
+  const looksLikeDate2 = /^\d{2}\.\d{2}\.\d{2,4}$/;
+  const looksLikeIBAN  = /^[A-Z]{2}\d{2}[A-Z0-9]{10,}$/i;
+  const badLabelStart  = /^(kdnr|kunde|kundennr|kundennummer|bestellnr|bestellnummer|auftrag|auftragsnr|auftragsnummer)\b/i;
+
+  const clean = Array.from(new Set(hits.map(c =>
+    String(c).trim().replace(/[,;:]+$/, "").replace(/^[#:.\-]+/, "")
+  ))).filter(c =>
+    c.length >= 4 &&
+    !looksLikeDate1.test(c) &&
+    !looksLikeDate2.test(c) &&
+    !/^\d{1,5}$/.test(c) &&
+    !looksLikeIBAN.test(c) &&
+    !badLabelStart.test(c)
+  );
+
+  // Ranking: alphanumerisch > rein numerisch; längere zuerst
+  clean.sort((a, b) => {
+    const aAlpha = /[A-Z]/i.test(a) ? 1 : 0;
+    const bAlpha = /[A-Z]/i.test(b) ? 1 : 0;
+    if (bAlpha !== aAlpha) return bAlpha - aAlpha;
+    return b.length - a.length;
+  });
+
+  return clean[0] || "";
 }
 
-// 2) 23. November 2025
-for (const m of txt.matchAll(/\b(\d{1,2})\.\s*(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)) {
-  const mon = MONTHS[m[2].toLowerCase()];
-  if (mon) dateHits.push( isoFromDMY(+m[1], mon, m[3]) );
+/* --------------------------- Auto-Erkennung ------------------------------ */
+async function extractTextFirstPages(pdf, maxPages=3){
+  const N=Math.min(maxPages, pdf.numPages);
+  let out=[];
+  for(let i=1;i<=N;i++){
+    const p=await pdf.getPage(i);
+    const c=await p.getTextContent({ normalizeWhitespace:true, disableCombineTextItems:false });
+    out.push((c.items||[]).map(it=>it.str).join(" "));
+  }
+  return out.join("\n");
+}
+function euroToNum(s){
+  let x=(s||"").replace(/[€\s]/g,"").replace(/−/g,"-");
+  if(x.includes(",")&&x.includes(".")) x=x.replace(/\./g,"").replace(",",".");
+  else if(x.includes(",")) x=x.replace(",",".");
+  const v=Number(x); return isFinite(v)?v:NaN;
 }
 
-// 3) „im November 2025“ → 01.11.2025
-for (const m of txt.matchAll(/\b(?:im\s+)?(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)) {
-  const mon = MONTHS[m[1].toLowerCase()];
-  if (mon) dateHits.push( isoFromDMY(1, mon, m[2]) );
+// ====== ERSATZ: autoRecognize (Block 2) ======
+async function autoRecognize() {
+  try {
+    const txt = (await extractTextFirstPages(pdfDoc, 3)) || "";
+
+    /* Betrag */
+    const moneyHits = [...txt.matchAll(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g)].map(m => m[0]);
+    if (moneyHits.length) {
+      const pick = moneyHits.map(v => ({ v, n: euroToNum(v) }))
+                            .sort((a,b)=>b.n-a.n)[0].v;
+      amountEl.dataset.raw = pick;
+      amountEl.value = formatAmountDisplay(pick);
+      amountEl.classList.add("auto");
+    }
+
+    /* Datum */
+    const MONTHS = { januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12 };
+    const isoFromDMY = (d,m,y)=>{ const yy=String(y).length===2?(+y<50?2000+ +y:1900+ +y):+y; return `${yy}-${pad2(m)}-${pad2(d)}`; };
+
+    const dateHits=[];
+    for (const m of txt.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) dateHits.push(isoFromDMY(+m[1],+m[2],m[3]));
+    for (const m of txt.matchAll(/\b(\d{1,2})\.\s*(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)){
+      const mon = MONTHS[m[2].toLowerCase()]; if (mon) dateHits.push(isoFromDMY(+m[1],mon,m[3]));
+    }
+    for (const m of txt.matchAll(/\b(?:im\s+)?(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)){
+      const mon = MONTHS[m[1].toLowerCase()]; if (mon) dateHits.push(isoFromDMY(1,mon,m[2]));
+    }
+    const todayIso = new Date().toISOString().slice(0,10);
+    const uniq = Array.from(new Set(dateHits)).filter(Boolean).sort();
+    const nonFuture = uniq.filter(d => d <= todayIso);
+    const picked = nonFuture.length ? nonFuture[nonFuture.length - 1] : todayIso;
+    invDateEl.value = isoToDisp(picked);
+    invDateEl.classList.add("auto");
+
+    /* Rechnungsnummer */
+    const autoInvNo = findInvoiceNumber(txt);
+    if (autoInvNo && invNoEl && !invNoEl.value.trim()) {
+      invNoEl.value = autoInvNo.trim();
+      invNoEl.classList.add("auto");
+    }
+
+    /* 1) Dokumenttyp früh setzen → Unterordner können korrekt geladen werden */
+    const hadType = !!(typeSel?.value);
+    if (typeSel && typeSel.value !== "rechnung") {
+      // Falls deine Keys anders lauten: hier ggf. auf den korrekten Key anpassen
+      typeSel.value = "rechnung";
+      toast("Dokumentenart gesetzt: <strong>Rechnung</strong>", 2000);
+    }
+
+    /* 2) AUTO-ASSIGN: Objekt & (optional) Unterordner */
+    let appliedMsg = null;
+    if (assignmentsCfg && Array.isArray(assignmentsCfg.patterns) && assignmentsCfg.patterns.length) {
+      const tRaw = txt || "";
+      let hit = null;
+
+      const normalizeList = (rule) => {
+        if (Array.isArray(rule.patterns)) return rule.patterns;
+        if (Array.isArray(rule.pattern))  return rule.pattern;
+        if (typeof rule.pattern === "string" && rule.pattern.trim()) return [rule.pattern];
+        return [];
+      };
+
+      for (const rule of assignmentsCfg.patterns) {
+        const list = normalizeList(rule);
+        const matched = list.some(pat => {
+          try { return new RegExp(pat, "i").test(tRaw); }
+          catch { return tRaw.toLowerCase().includes(String(pat||"").toLowerCase()); }
+        });
+        if (matched) { hit = rule; break; }
+      }
+
+      if (hit) {
+        // Objekt setzen
+        if (hit.object) {
+          const before = objSel.value;
+          objSel.value = hit.object;
+          if (objSel.value !== before) appliedMsg = `Zuordnung: <strong>${hit.object}</strong>`;
+        }
+
+        // Unterordner-Optionen (müssen nach Typ/Objekt geladen werden)
+        if (typeof updateSubfolderOptions === "function") {
+          await updateSubfolderOptions({ silent: !hit.subfolder });
+        }
+
+        // gewünschten Unterordner auswählen (falls vorhanden)
+        if (hit.subfolder && subSel) {
+          const wanted = String(hit.subfolder).trim();
+          const has = Array.from(subSel.options).some(o => o.value === wanted);
+          if (has) {
+            subSel.value = wanted;
+            if (subRow) subRow.style.display = "grid";
+            appliedMsg = appliedMsg
+              ? `${appliedMsg} · Unterordner: <strong>${wanted}</strong>`
+              : `Unterordner: <strong>${wanted}</strong>`;
+          } else {
+            toast(`Hinweis: Unterordner „<code>${wanted}</code>“ ist für <strong>${hit.object}</strong> nicht bekannt.`, 3500);
+          }
+        }
+      }
+    }
+
+    /* Mail-Vorbelegung & Meta */
+    applyPerObjectMailRules();
+    prefillMail();
+    updateStatusPillsVisibility();
+
+    const found = [];
+    if (amountEl.value)  found.push("Betrag");
+    if (invDateEl.value) found.push("Rechnungsdatum");
+    if (invNoEl?.value)  found.push("Rechnungsnr.");
+    if (found.length) toast(`<strong>Automatisch erkannt</strong><br>${found.join(" · ")}`, 2800);
+    if (appliedMsg) toast(appliedMsg, 2200);
+
+    refreshPreview();
+  } catch (e) {
+    console.warn("Auto-Erkennung fehlgeschlagen", e);
+    toast("Auto-Erkennung fehlgeschlagen.", 2500);
+  }
 }
-// Auswahl: NIE in der Zukunft. Wenn nichts Vergangenes/Heute gefunden → nimm heute.
-const todayIso = new Date().toISOString().slice(0,10);
 
-// Eindeutige Treffer, sortiert (YYYY-MM-DD sortiert lexikographisch korrekt)
-const uniq = Array.from(new Set(dateHits)).filter(Boolean).sort();
-
-// alles ≤ heute
-const nonFuture = uniq.filter(d => d <= todayIso);
-
-// Wahl: letztes nicht-zukünftiges Datum, sonst heute
-const picked = nonFuture.length ? nonFuture[nonFuture.length - 1] : todayIso;
-
-invDateEl.value = isoToDisp(picked);
-invDateEl.classList.add("auto");
-
-
-      if(assignmentsCfg?.patterns?.length){ const t=txt.toLowerCase(); const hit=assignmentsCfg.patterns.find(p=> String(p.pattern||"").split("|").some(rx=>{ try{ return new RegExp(rx,"i").test(t); }catch{ return t.includes(rx.toLowerCase()); } })); if(hit?.object){ const before=objSel.value; objSel.value = hit.object; if(objSel.value!==before) toast(`Zuordnung: <strong>${hit.object}</strong>`,2000); } }
-      applyPerObjectMailRules(); prefillMail(); updateStatusPillsVisibility(); const found = []; if(amountEl.value) found.push("Betrag"); if(invDateEl.value) found.push("Rechnungsdatum"); if(invNoEl.value) found.push("Rechnungsnr."); if(found.length) toast(`<strong>Automatisch erkannt</strong><br>${found.join(" · ")}`,3000); refreshPreview(); }catch(e){ console.warn("Auto-Erkennung fehlgeschlagen", e); toast("Auto-Erkennung fehlgeschlagen.", 2500); } }
 
   /* ----------------------------- Name + Ziel ------------------------------- */
   function currentYear(){ const s = invDateEl?.value || recvDateEl?.value || today(); const iso = dispToIso(s); return iso ? +iso.slice(0,4) : (new Date()).getFullYear(); }
@@ -807,22 +951,81 @@ invDateEl.classList.add("auto");
 
   async function listChildFolders(rootHandle, segments){ try{ if(!rootHandle || !segments?.length) return []; let dir = rootHandle; for (const s of segments){ if(!s) continue; dir = await dir.getDirectoryHandle(s, { create:false }); } const out = []; for await (const e of dir.values()){ if(e.kind === "directory") out.push(e.name); } return out; }catch{ return []; } }
 
-  async function updateSubfolderOptions(){
-    if(!subRow || !subSel) return; const code=(objSel?.value||"").trim(); const invoice=isInvoice(); subRow.style.display="none"; subSel.innerHTML="";
-    if(!code || code === "PRIVAT") return;
-    if (code === "FIDELIOR") { if (!invoice) { if (!pcloudRootHandle) return; const base=["FIDELIOR","VERWALTUNG"]; const options=await listChildFolders(pcloudRootHandle, base); if (options.length){ subSel.innerHTML = options.map(v=>`<option value="${v}">${v}</option>`).join(""); subSel.value = options[0]||""; subRow.style.display="grid"; } } return; }
-    const { scopeName, pcloudName } = getFolderNames(code);
-    const scopeBase=["OBJEKTE", scopeName, (invoice?"Rechnungsbelege":"Objektdokumente")];
-    let pclBase=null; if (!isArndtCie(code)) { if (code === "A15" && invoice) pclBase=["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"]; else pclBase=["FIDELIOR","OBJEKTE", pcloudName, (invoice?"Rechnungsbelege":"Objektdokumente")]; }
-    const known = new Set(getKnownSubfolders(code)); if (invoice) known.add("Rechnungsbelege"); else known.add("Objektdokumente");
-    const lists=[]; if (scopeRootHandle) lists.push(listChildFolders(scopeRootHandle, scopeBase)); if (pcloudRootHandle && pclBase) lists.push(listChildFolders(pcloudRootHandle, pclBase));
-    const foundLists=(await Promise.all(lists).catch(()=>[[]])).flat(); foundLists.forEach(n=>known.add(n));
-    const options=[...known].filter(Boolean);
-    if (!options.length) { if (!invoice) { subSel.innerHTML = `<option value="Objektdokumente">Objektdokumente</option>`; subRow.style.display="grid"; } return; }
-    subSel.innerHTML = options.map(v => `<option value="${v}">${v}</option>`).join("");
-    subSel.value = invoice ? (options.includes("Rechnungsbelege")?"Rechnungsbelege":options[0]) : (options.includes("Objektdokumente")?"Objektdokumente":options[0]);
-    subRow.style.display = "grid";
+  /* ====== BLOCK 1: updateSubfolderOptions (ERSATZ, kompletter Funktions-Body) ====== */
+/* Änderung: zusätzlicher Parameter { silent=false } steuert, ob die UI sichtbar wird.
+   Wenn silent===true, werden Optionen geladen & Vorwahl gesetzt, aber subRow bleibt verborgen. */
+async function updateSubfolderOptions({ silent = false } = {}) {
+  if (!subRow || !subSel) return;
+
+  const code = (objSel?.value || "").trim();
+  const invoice = isInvoice();
+
+  // Standard: ausblenden & leeren
+  subRow.style.display = "none";
+  subSel.innerHTML = "";
+
+  // PRAGMATIK: Für PRV/ohne Code nichts anzeigen
+  if (!code || code === "PRIVAT") return;
+
+  // Spezialfall FIDELIOR (nur bei Nicht-Rechnung sinnvoll)
+  if (code === "FIDELIOR") {
+    if (!invoice) {
+      if (!pcloudRootHandle) return;
+      const base = ["FIDELIOR", "VERWALTUNG"];
+      const options = await listChildFolders(pcloudRootHandle, base);
+      if (options.length) {
+        subSel.innerHTML = options.map(v => `<option value="${v}">${v}</option>`).join("");
+        subSel.value = options[0] || "";
+        if (!silent) subRow.style.display = "grid";
+      }
+    }
+    return;
   }
+
+  // Allgemeine Ermittlung aus Config + realen Ordnern
+  const { scopeName, pcloudName } = getFolderNames(code);
+  const scopeBase = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
+
+  let pclBase = null;
+  if (!isArndtCie(code)) {
+    if (code === "A15" && invoice) {
+      pclBase = ["FIDELIOR", "OBJEKTE", "A15 Ahrweiler Straße 15", "Buchhaltung", "Rechnungsbelege"];
+    } else {
+      pclBase = ["FIDELIOR", "OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
+    }
+  }
+
+  const known = new Set(getKnownSubfolders(code));
+  if (invoice) known.add("Rechnungsbelege");
+  else known.add("Objektdokumente");
+
+  const lists = [];
+  if (scopeRootHandle) lists.push(listChildFolders(scopeRootHandle, scopeBase));
+  if (pcloudRootHandle && pclBase) lists.push(listChildFolders(pcloudRootHandle, pclBase));
+
+  const foundLists = (await Promise.all(lists).catch(() => [[]])).flat();
+  foundLists.forEach(n => known.add(n));
+
+  const options = [...known].filter(Boolean);
+
+  // Wenn gar keine Optionen bekannt sind → nichts anzeigen (optional bleibt möglich via Regel)
+  if (!options.length) {
+    // Bei Nicht-Rechnung fallback „Objektdokumente“ als Option anbieten
+    if (!invoice) {
+      subSel.innerHTML = `<option value="Objektdokumente">Objektdokumente</option>`;
+      if (!silent) subRow.style.display = "grid";
+    }
+    return;
+  }
+
+  subSel.innerHTML = options.map(v => `<option value="${v}">${v}</option>`).join("");
+  subSel.value = invoice
+    ? (options.includes("Rechnungsbelege") ? "Rechnungsbelege" : options[0])
+    : (options.includes("Objektdokumente") ? "Objektdokumente" : options[0]);
+
+  // Sichtbarkeit NUR wenn nicht „silent“ angefordert
+  if (!silent) subRow.style.display = "grid";
+}
 
   function refreshPreview(){
     const hasDoc = !!pdfDoc;
@@ -887,12 +1090,14 @@ invDateEl.classList.add("auto");
     hidden.style.left = Math.floor(left) + "px";
     hidden.style.top  = Math.floor(top)  + "px";
 
-    // aktuellen Wert übernehmen
-    const iso = dispToIso(textInput.value);
-    if (iso) hidden.value = iso;
+  
+    // aktuellen Wert übernehmen – wenn keiner gesetzt: heute
+const iso = dispToIso(textInput.value);
+hidden.value = iso || new Date().toISOString().slice(0,10);
 
-    hidden.showPicker?.();
-    hidden.click();
+hidden.showPicker?.();
+hidden.click();
+
   };
 
   textInput.addEventListener("focus", openPicker);
@@ -1083,12 +1288,101 @@ async function refreshInbox(){
 }
 
   /* --------------------------- Config: load/save --------------------------- */
-  async function loadJson(rel){
-    try{ if(configDirHandle){ for await (const e of configDirHandle.values()){ if(e.kind==="file" && e.name.toLowerCase()===rel.split("/").pop().toLowerCase()){ const f=await configDirHandle.getFileHandle(e.name,{create:false}).then(h=>h.getFile()); return JSON.parse(await f.text()); } } } }catch{}
-    const paths=[rel, "./"+rel, "config/"+rel, "./config/"+rel]; for(const p of paths){ try{ const r=await fetch(p,{cache:"no-store"}); if(r.ok) return await r.json(); }catch{} }
-    throw new Error("Konfiguration nicht gefunden: "+rel);
+// NUR diese Funktion ersetzen
+async function loadJson(rel){
+  const baseName = rel.split("/").pop();            // z.B. "assignments.json"
+  const stem     = baseName.replace(/\.json$/i, ""); // "assignments"
+  const withExt  = stem + ".json";
+
+  // 1) Im verbundenen Config-Ordner suchen (beide Varianten) und die JÜNGSTE nehmen
+  try {
+    if (configDirHandle) {
+      const candidates = [];
+      for await (const e of configDirHandle.values()) {
+        if (e.kind !== "file") continue;
+        const n = e.name.toLowerCase();
+        if (n === baseName.toLowerCase() || n === withExt.toLowerCase() || n === stem.toLowerCase()) {
+          const h = await configDirHandle.getFileHandle(e.name, { create:false });
+          const f = await h.getFile();
+          candidates.push({ file: f, name: e.name, mtime: f.lastModified || 0 });
+        }
+      }
+      if (candidates.length) {
+        // jüngste Datei gewinnen lassen (endet .json oder endungslos – egal)
+        candidates.sort((a,b)=>b.mtime - a.mtime);
+        return JSON.parse(await candidates[0].file.text());
+      }
+    }
+  } catch { /* ignore, wir versuchen Fetch */ }
+
+  // 2) Fallback: vom Projekt laden (beide Varianten probieren)
+  const tries = [
+    rel, "./"+rel,
+    "config/"+withExt, "./config/"+withExt,
+    "config/"+stem,    "./config/"+stem
+  ];
+  for (const p of tries) {
+    try {
+      const r = await fetch(p, { cache:"no-store" });
+      if (r.ok) return await r.json();
+    } catch {}
   }
-  async function saveJson(name, json){ if(!configDirHandle){ configDirHandle = await window.showDirectoryPicker({mode:"readwrite"}).catch(()=>null); if(!configDirHandle) throw new Error("Kein Config-Ordner verbunden."); } const fh=await configDirHandle.getFileHandle(name,{create:true}); const w=await fh.createWritable({keepExistingData:false}); await w.write(JSON.stringify(json,null,2)); await w.close(); }
+
+  throw new Error("Konfiguration nicht gefunden: " + rel);
+}
+
+// JSON im verbundenen Config-Ordner speichern
+async function saveJson(rel, data){
+  // rel kann "config/assignments.json", "assignments.json" oder "assignments" sein
+  const raw = String(rel || "").replace(/^\.\//, "");
+  const segs = raw.split("/").filter(Boolean);
+
+  // Dateiname + optionaler Unterordner
+  let fileName = (segs.pop() || "config.json");
+  fileName = fileName.replace(/\.json$/i, "") + ".json";
+  const subdirs = segs; // z.B. ["config"] oder []
+
+  // Ordner verbunden?
+  if (!configDirHandle) {
+    try {
+      configDirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+      paintChips?.();
+      await saveBoundHandles?.();
+      toast?.("<strong>Config verbunden</strong>", 1500);
+    } catch {
+      throw new Error("Kein Config-Ordner verbunden.");
+    }
+  }
+
+  // Schreibrecht anstoßen (innerhalb User-Gesture aufgerufen → Prompt sichtbar)
+  const ok = await (typeof ensureWritePermissionWithPrompt === "function"
+    ? ensureWritePermissionWithPrompt(configDirHandle, "Config")
+    : true);
+  if (ok === false) throw new Error("Schreibberechtigung für Config verweigert.");
+
+  // ggf. Unterordner anlegen (falls rel "config/…" war)
+  let dir = configDirHandle;
+  for (const s of subdirs) {
+    dir = await dir.getDirectoryHandle(s, { create: true });
+  }
+
+  // schreiben
+  const fh = await dir.getFileHandle(fileName, { create: true });
+  const ws = await fh.createWritable({ keepExistingData: false });
+  await ws.write(new Blob([JSON.stringify(data, null, 2) + "\n"], { type: "application/json" }));
+  await ws.close();
+
+  return true;
+}
+
+
+try {
+  window.FDLDBG = window.FDLDBG || {};
+  FDLDBG.saveJson    = saveJson;     // <— hinzufügen
+  FDLDBG.loadJson    = loadJson;
+  FDLDBG.loadObjects = loadObjects;
+  FDLDBG.loadDocTypes= loadDocTypes;
+} catch {}
 
   /* --------------------------- Dialoge (vollständig) ----------------------- */
   function wireDialogClose(dlg){ if(!dlg) return; dlg.addEventListener("keydown", (e)=>{ if(e.key==="Escape"){ e.preventDefault(); dlg.close?.(); }}); dlg.querySelectorAll("[data-close], .btn-cancel, .dlg-close, .dialog-close").forEach(btn=>{ btn.addEventListener("click",(e)=>{ e.preventDefault(); dlg.close?.(); }); }); dlg.addEventListener("click",(e)=>{ const r=dlg.getBoundingClientRect(); const inside = e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom; if(!inside && e.target===dlg) dlg.close?.(); }); }
@@ -1425,14 +1719,14 @@ btnDel.setAttribute("aria-label", "Löschen");
     if (typeof dlg.showModal==="function") dlg.showModal(); else dlg.setAttribute("open","open"); wireDialogClose(dlg);
   }
 
- // === NEU: openAssignmentsDialog mit „Einfach“-Eingabe (Stichwort + Kundennr.) ===
-async function openAssignmentsDialog(){
+// ====== ERSATZ (komplett): openAssignmentsDialog ======
+async function openAssignmentsDialog() {
   await ensureConfigConnectedOrAsk();
 
   const dlg = $("#manageAssignmentsDialog");
-  if(!dlg){ toast("Zuordnungs-Dialog fehlt.",2000); return; }
+  if (!dlg) { toast("Zuordnungs-Dialog fehlt.", 2000); return; }
 
-  // Bestehende Regeln laden (bleiben erhalten)
+  // Bestehende Regeln laden
   let j;
   try { j = await loadJson("config/assignments.json"); }
   catch { j = { patterns: [] }; }
@@ -1440,137 +1734,214 @@ async function openAssignmentsDialog(){
   const tbody = $("#assignTbody");
   tbody.innerHTML = "";
 
-  // ---- Tabellenzeile (wie bisher, editierbar) ----
-  const addRow = (row={pattern:"", object:"", note:""}) => {
+  // Tabellenzeile (leichtgewichtig)
+  const addRow = (row = { pattern: "", object: "", subfolder: "", note: "" }) => {
+    const esc = s => String(s || "").replace(/"/g, "&quot;");
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><input class="input slim as-pat"  placeholder="RegEx oder mehrere per |" value="${row.pattern||""}"></td>
-      <td><input class="input slim as-obj"  placeholder="Objektcode (z. B. B75)"   value="${row.object||""}"></td>
-      <td><input class="input slim as-note" placeholder="Hinweis (optional)"       value="${row.note||""}"></td>
-      <td class="right"><button class="icon-btn as-del" title="Löschen">🗑️</button></td>`;
-    tr.querySelector(".as-del").onclick = ()=> tr.remove();
+      <td><input class="input slim as-pat" placeholder="RegEx oder mehrere per |" value="${esc(row.pattern)}"></td>
+      <td><input class="input slim as-obj" placeholder="Objektcode (z. B. B75)"  value="${esc(row.object)}"></td>
+      <td><input class="input slim as-sub" placeholder="Unterordner (optional)"  value="${esc(row.subfolder)}"></td>
+      <td><input class="input slim as-note" placeholder="Hinweis (optional)"     value="${esc(row.note)}"></td>
+      <td class="right"><button class="icon-btn as-del" title="Löschen">🗑️</button></td>
+    `;
+    tr.querySelector(".as-del").onclick = () => tr.remove();
     tbody.appendChild(tr);
     return tr;
   };
 
-  (j.patterns||[]).forEach(addRow);
+  // Vorhandene Regeln in die Tabelle
+  (j.patterns || []).forEach(addRow);
 
-  // ---- Einfach-Modus: erzeugt RegEx automatisch ----
-  // Erwartet diese Felder im Dialog-HTML (oben über der Tabelle):
-  // #saVendor, #saId, #saObject, #saNote, #saAddBtn
-  // (Wenn sie fehlen, wird dieser Teil einfach übersprungen.)
+  // --- NEU: Objektliste für die Einfach-Eingabe (#saObject) füllen ---
   try {
-    // Objektliste vorbefüllen, falls leer
-   // Objektliste IMMER frisch befüllen (nicht nur wenn leer)
-try {
-  const o   = await loadJson("config/objects.json");
-  const sel = $("#saObject");
-  if (sel) {
-    const opts = (o.objects || []).map(x => {
-      const val = x.code || x.scopevisioName || x.displayName || "";
-      const txt = x.displayName || x.code || x.scopevisioName || "";
-      return `<option value="${val}">${txt}</option>`;
-    }).join("");
-    sel.innerHTML = `<option value="">(Objekt wählen)</option>` + opts;
-    sel.value = ""; // Platzhalter aktiv lassen
+    const o = await loadJson("config/objects.json");
+    const sel = $("#saObject");
+    if (sel) {
+      const opts = (o.objects || []).map(x => {
+        const val = x.code || x.scopevisioName || x.displayName || "";
+        const txt = x.displayName || x.code || x.scopevisioName || "";
+        return `<option value="${val}">${txt}</option>`;
+      }).join("");
+      sel.innerHTML = `<option value="">(Objekt wählen)</option>${opts}`;
+      sel.value = "";
+    }
+  } catch {
+    const sel = $("#saObject");
+    if (sel) {
+      sel.innerHTML = `
+        <option value="">(Objekt wählen)</option>
+        <option value="PRIVAT">PRIVAT</option>
+        <option value="FIDELIOR">FIDELIOR</option>
+        <option value="ARNDTCIE">ARNDT & CIE</option>`;
+      sel.value = "";
+    }
   }
-} catch {
-  // Fallback, falls objects.json nicht geladen werden kann
-  const sel = $("#saObject");
-  if (sel) {
-    sel.innerHTML = `
-      <option value="">(Objekt wählen)</option>
-      <option value="PRIVAT">PRIVAT</option>
-      <option value="FIDELIOR">FIDELIOR</option>
-      <option value="ARNDTCIE">ARNDT & CIE</option>`;
-    sel.value = "";
-  }
-}
 
-  } catch {}
+  // --- Unterordner-Vorschläge für #saSub (D1, D4, Allgemein, 2023, …) ---
+  (function setupSaSubDatalist(){
+    const input = $("#saSub");
+    if (!input) return;
 
-  const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    let dl = $("#saSubList");
+    if (!dl) {
+      dl = document.createElement("datalist");
+      dl.id = "saSubList";
+      input.setAttribute("list", "saSubList");
+      input.parentElement?.appendChild(dl);
+    }
 
-  // „K1516411“ → K[-./\s]?1516[-./\s]?411 (robust gegen Trennzeichen)
+    async function gatherSubfolders(code){
+      const out = new Set();
+      getKnownSubfolders(code).forEach(s => out.add(s));
+
+      const { scopeName, pcloudName } = getFolderNames(code);
+
+      const scopeJobs = [];
+      if (scopeRootHandle) {
+        scopeJobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Rechnungsbelege"]));
+        scopeJobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Objektdokumente"]));
+      }
+
+      const pclJobs = [];
+      if (pcloudRootHandle && !isArndtCie(code)) {
+        pclJobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Rechnungsbelege"]));
+        pclJobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Objektdokumente"]));
+      }
+
+      const lists = (await Promise.all([...scopeJobs, ...pclJobs]).catch(()=>[[]])).flat();
+      lists.forEach(n => out.add(n));
+
+      const priority = ["Allgemein","D1","D4"];
+      return Array.from(out)
+        .filter(Boolean)
+        .sort((a,b)=>{
+          const ia = priority.indexOf(a), ib = priority.indexOf(b);
+          if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+          const ya = /^\d{4}$/.test(a) ? -parseInt(a,10) : 0;
+          const yb = /^\d{4}$/.test(b) ? -parseInt(b,10) : 0;
+          if (ya !== yb) return ya - yb; // Jahre absteigend
+          return a.localeCompare(b, "de");
+        });
+    }
+
+    async function refill(){
+      const code = ($("#saObject")?.value || "").trim();
+      dl.innerHTML = "";
+      if (!code) return;
+      const items = await gatherSubfolders(code);
+      items.forEach(v => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        dl.appendChild(opt);
+      });
+      toast(`Unterordner-Vorschläge geladen: ${items.length || 0}`, 1800);
+    }
+
+    $("#saObject")?.addEventListener("change", refill);
+    refill(); // initial, falls schon ein Objekt steht
+  })();
+
+  // --- Pattern-Builder (wie gehabt) ---
+  const escRx = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const loosenId = (id) => {
-    const raw = String(id||"").trim();
+    const raw = String(id || "").trim();
     if (!raw) return "";
-    const chunks = raw.replace(/\s+/g,"").match(/[A-Za-z]+|\d+/g) || [raw];
-
-    const expandDigits = (d) => {
-      if (d.length >= 7) return [d.slice(0,3), d.slice(3)];   // 3|rest
-      return d.match(/\d{1,2}/g) || [d];                      // 1–2er Gruppen
-    };
-
+    const chunks = raw.replace(/\s+/g, "").match(/[A-Za-z]+|\d+/g) || [raw];
+    const expandDigits = (d) => (d.length >= 7 ? [d.slice(0, 3), d.slice(3)] : (d.match(/\d{1,2}/g) || [d]));
     const parts = chunks.flatMap(ch => /\d/.test(ch) ? expandDigits(ch) : [ch]);
-    return parts.map(p => esc(p)).join("[-./\\s]?");
+    return parts.map(p => escRx(p)).join("[-./\\s]?");
   };
-
   const buildPattern = (vendor, ident) => {
     const la = [];
-    if (vendor) la.push(`(?=.*${esc(String(vendor).trim())})`);
+    if (vendor) la.push(`(?=.*${escRx(String(vendor).trim())})`);
     if (ident)  la.push(`(?=.*${loosenId(ident)})`);
-    return la.join(""); // beide als Lookaheads
+    return la.join("");
   };
 
+  // → Regel erstellen (Einfach-Modus)
   $("#saAddBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     const vendor = ($("#saVendor")?.value || "").trim();
     const ident  = ($("#saId")?.value     || "").trim();
     const obj    = ($("#saObject")?.value || "").trim();
+    const sub    = ($("#saSub")?.value    || "").trim();
     const note   = ($("#saNote")?.value   || "").trim();
 
-    if (!vendor && !ident){ toast("Bitte Lieferant/Stichwort oder Kundennr. eingeben.", 2200); return; }
-    if (!obj){ toast("Bitte ein Objekt wählen.", 2000); return; }
+    if (!vendor && !ident) { toast("Bitte Lieferant/Stichwort oder Kundennr. eingeben.", 2200); return; }
+    if (!obj) { toast("Bitte ein Objekt wählen.", 2000); return; }
+
+    if (sub) {
+      const inList = !!([...($("#saSubList")?.children || [])].find(o => o.value === sub));
+      if (!inList) toast(`Hinweis: Unterordner „<code>${sub}</code>“ ist für <strong>${obj}</strong> nicht bekannt.`, 3200);
+    }
 
     const pat = buildPattern(vendor, ident);
-    if (!pat){ toast("Konnte kein Muster erzeugen.", 2000); return; }
+    if (!pat) { toast("Konnte kein Muster erzeugen.", 2000); return; }
 
     addRow({
       pattern: pat,
       object: obj,
-      note: note || (vendor || ident ? `auto: ${vendor||""}${ident?` · ${ident}`:""}`.trim() : "")
+      subfolder: sub || undefined,
+      note: note || (vendor || ident ? `auto: ${vendor || ""}${ident ? ` · ${ident}` : ""}`.trim() : "")
     });
 
     if ($("#saVendor")) $("#saVendor").value = "";
     if ($("#saId"))     $("#saId").value     = "";
     if ($("#saNote"))   $("#saNote").value   = "";
+    if ($("#saSub"))    $("#saSub").value    = "";
     if ($("#saObject")) $("#saObject").value = "";
+
     toast("Regel hinzugefügt (bearbeitbar).", 1600);
   });
 
   // +Neu: leere manuelle Zeile
-  $("#assignAdd")?.addEventListener("click", ()=> addRow({}));
+  $("#assignAdd")?.addEventListener("click", () => addRow({}));
 
-  // Speichern (unverändert, mit RegEx-Validierung)
-  $("#assignSave")?.addEventListener("click", async ()=> {
-    try{
+  // Speichern (RegEx-Validierung; Unterordner optional)
+  $("#assignSave")?.addEventListener("click", async () => {
+    try {
       const rows = [...tbody.querySelectorAll("tr")].map(tr => {
-        const pattern = tr.querySelector(".as-pat") ?.value.trim();
-        const object  = tr.querySelector(".as-obj") ?.value.trim();
-        const note    = tr.querySelector(".as-note")?.value.trim();
+        const pattern = (tr.querySelector(".as-pat")?.value || "").trim();
+        const object  = (tr.querySelector(".as-obj")?.value || "").trim();
+        const sub     = (tr.querySelector(".as-sub")?.value || "").trim();
+        const note    = (tr.querySelector(".as-note")?.value || "").trim();
+
         if (!pattern || !object) return null;
 
-        const ok = String(pattern).split("|").every(p => {
-          try { new RegExp(p, "i"); return true; } catch { return false; }
-        });
-        if (!ok) throw new Error(`Ungültiges Muster: ${pattern}`);
+       const okMain = (() => {
+  const pat = String(pattern).trim();
+  if (!pat) return false;        // nichts leeres speichern
+  try { new RegExp(pat, "i");    // einmal komplett validieren
+       return true;
+  } catch { return false; }
+})();
 
-        return { pattern, object, note };
+        if (!okMain) throw new Error(`Ungültiges Pattern: ${pattern}`);
+
+        const rec = { pattern, object };
+        if (sub)  rec.subfolder = sub;
+        if (note) rec.note      = note;
+        return rec;
       }).filter(Boolean);
 
       const next = { patterns: rows };
       await saveJson("assignments.json", next);
+
+      assignmentsCfg = next;
+      try { if (pdfDoc) await autoRecognize(); } catch {}
+
       toast("<strong>Zuordnung gespeichert</strong>", 1800);
       dlg.close?.();
-    }catch(e){
-      toast(`Fehler beim Speichern: ${e?.message||e}`, 2800);
+    } catch (e) {
+      toast(`Fehler beim Speichern: ${e?.message || e}`, 2800);
     }
   });
 
-  if (typeof dlg.showModal==="function") dlg.showModal(); else dlg.setAttribute("open","open");
+  if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "open");
   wireDialogClose(dlg);
 }
+
 
 
   $("#mailManageBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openEmailsDialog(); });
@@ -1760,7 +2131,47 @@ if (targets.pcloud) {
       if(targets.pcloud){ try{ await writeFileTo(targets.pcloud.root, targets.pcloud.seg, stamped, fileName); okPcl=true; } catch(e){ toast(`⚠️ Schreiben nach <strong>pCloud</strong> fehlgeschlagen:<br><code>${targets.pcloud.seg.join("\\")}</code><br>${e?.message||e}`,6000); } }
       if(!okScope && !okPcl && !wantLocal){ if ((objSel?.value||"") === "FIDELIOR" && !isInvoice() && !subSel?.value){ toast("Kein pCloud-Ziel: Bitte unter „VERWALTUNG“ einen Unterordner wählen.", 4500); } else { toast("Es wurde in kein Ziel geschrieben.", 3500); } return; }
       if(wantLocal){ const localSaved = await pickAndWriteLocal(fileName, stamped); if(localSaved) toast("Lokale Kopie gespeichert.",1200); }
-      { const to=[...Mail.to], cc=[...Mail.cc], bcc=[...Mail.bcc]; const { subject, replyTo } = computeSubjectAndReply(); if (to.length || cc.length || bcc.length){ try{ await sendMail({ to, cc, bcc, subject, text: computeMailBody(), replyTo: replyTo || undefined, attachmentBytes: stamped, attachmentName: fileName }); toast("<strong>E-Mail versendet</strong>", 2500); }catch(e){ toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message||e}`, 4000); } } }
+      { 
+  const to=[...Mail.to], cc=[...Mail.cc], bcc=[...Mail.bcc];
+  const { subject, replyTo } = computeSubjectAndReply();
+
+  // Nur bei EGYO + Rechnung: vor Versand bestätigen
+  const isEGYO = (objSel?.value || "").trim().toUpperCase() === "EGYO";
+  let allowSend = true;
+
+  if (isEGYO && isInvoice() && (to.length || cc.length || bcc.length)) {
+    const lines = [
+      "Soll die automatisch gesetzte E-Mail gesendet werden?",
+      "",
+      `An:      ${to.join(", ") || "—"}`,
+      cc.length ? `CC:      ${cc.join(", ")}` : "",
+      bcc.length ? `BCC:     ${bcc.join(", ")}` : "",
+      `Betreff: ${subject || "—"}`,
+      `Anhang:  ${fileName}`
+    ].filter(Boolean).join("\n");
+
+    allowSend = window.confirm(lines);
+  }
+
+  if (allowSend && (to.length || cc.length || bcc.length)) {
+    try{
+      await sendMail({
+        to, cc, bcc,
+        subject,
+        text: computeMailBody(),
+        replyTo: replyTo || undefined,
+        attachmentBytes: stamped,
+        attachmentName: fileName
+      });
+      toast("<strong>E-Mail versendet</strong>", 2500);
+    } catch(e){
+      toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message||e}`, 4000);
+    }
+  } else if (!allowSend) {
+    toast("E-Mail-Versand abgebrochen (EGYO).", 1800);
+  }
+}
+
       if(currentInboxFileHandle && (okScope || okPcl || wantLocal)){console.log("MOVE? ", {
   hasHandle: !!currentInboxFileHandle,
   name: currentInboxFileName,
@@ -1811,7 +2222,11 @@ const moved = await moveInboxToProcessed(); if(moved) toast("Inbox → Bearbeite
   });
 
   if (invDateEl) { invDateEl.value = ""; invDateEl.classList.remove("auto"); }
-  if (recvDateEl){ recvDateEl.value = ""; recvDateEl.classList.remove("auto"); }
+  if (recvDateEl){
+  recvDateEl.value = today();
+  recvDateEl.classList.add("auto");
+}
+
 
   if (typeSel){ typeSel.selectedIndex = 0; }
   if (objSel){  objSel.selectedIndex  = 0; }
@@ -1885,24 +2300,40 @@ const moved = await moveInboxToProcessed(); if(moved) toast("Inbox → Bearbeite
   }
 }
 
-
-  objSel?.addEventListener("change", async () => {
+// ====== ERSATZ: objSel Change-Handler (Block 4) ======
+objSel?.addEventListener("change", async () => {
   // Mail-State leeren
   Mail.to.clear();
   Mail.cc.clear();
   Mail.bcc.clear();
   Mail.customSubject = "";
   Mail.baseTo = new Set();
-  Mail.recipientsTouched = false; // ← wichtig: Vorbelegung wieder erlauben
+  Mail.recipientsTouched = false; // ← Vorbelegung wieder erlauben
 
   applyPerObjectMailRules();
   prefillMail();
   updateStatusPillsVisibility();
   repaintMailMeta();
 
-  await updateSubfolderOptions();
+  // Unterordner-Optionen normal laden (kein Zwang, UI nur wenn sinnvoll)
+  await updateSubfolderOptions({ silent: false });
+
+  // Toast-Feedback: optionales Unterordner-Feld
+  const count = subSel ? subSel.options.length : 0;
+  const visible = subRow && subRow.style.display !== "none";
+
+  if (visible && count > 0) {
+    // Zeig an, dass Unterordner verfügbar sind – aber optional
+    const def = subSel?.value ? ` (Standard: <code>${subSel.value}</code>)` : "";
+    toast(`Unterordner verfügbar – <strong>optional</strong>: ${count} Einträge${def}`, 2600);
+  } else {
+    // Kein Unterordner nötig/bekannt → Feld bleibt zu
+    toast("Keine Unterordner erforderlich/bekannt – Feld bleibt ausgeblendet (optional).", 2200);
+  }
+
   refreshPreview();
 });
+
 
 typeSel?.addEventListener("change", async () => {
   // Mail-State leeren
@@ -1966,7 +2397,14 @@ async function boot() {
   $("#chkPcloud")?.addEventListener("change", refreshPreview);
   $("#chkLocal") ?.addEventListener("change", refreshPreview);
 
+  // Eingangsdatum standardmäßig auf HEUTE setzen (falls leer)
+  if (recvDateEl && !recvDateEl.value) {
+    recvDateEl.value = today();
+    recvDateEl.classList.add("auto");
+  }
+
   refreshPreview();
+
 }
 
   if (!window.__FDL_BOOT_BOUND__){ window.__FDL_BOOT_BOUND__ = true; const start = () => { boot().catch(err => console.error("Boot failed:", err)); }; if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true }); else queueMicrotask(start); }

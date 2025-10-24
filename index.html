@@ -265,10 +265,13 @@
   <input id="saVendor" class="input slim" style="min-width:220px"
          placeholder="Lieferant / Stichwort (z. B. handyvertrag.de)">
   <input id="saId" class="input slim" style="min-width:200px"
-         placeholder="Kundennr. / Vertragsnr. (z. B. K1516411)">
+         placeholder="Kundennr. / Vertragsnr. (z. B. K1511645)">
   <select id="saObject" class="select slim" style="min-width:190px">
     <option value="">(Objekt wählen)</option>
   </select>
+  <input id="saSub" class="input slim" style="min-width:180px"
+         placeholder="Unterordner (optional)" list="saSubList">
+  <datalist id="saSubList"></datalist>
   <input id="saNote" class="input slim" style="min-width:220px"
          placeholder="Hinweis (optional)">
   <button id="saAddBtn" class="btn-outline btn-small" type="button">
@@ -276,17 +279,20 @@
   </button>
 </div>
 
-      <table class="table" style="width:100%; margin-top:.5rem">
-        <thead>
-          <tr>
-            <th style="width:48%">Pattern (RegEx | Pipe-getrennt)</th>
-            <th style="width:20%">Objekt</th>
-            <th style="width:20%">Hinweis (optional)</th>
-            <th style="width:12%"></th>
-          </tr>
-        </thead>
-        <tbody id="assignTbody"></tbody>
-      </table>
+
+  <table class="table" style="width:100%; margin-top:.5rem">
+  <thead>
+    <tr>
+      <th style="width:34%">Pattern (RegEx | Pipe-getrennt)</th>
+      <th style="width:16%">Objekt</th>
+      <th style="width:16%">Unterordner</th>
+      <th style="width:28%">Hinweis</th>
+      <th style="width:6%"></th>
+    </tr>
+  </thead>
+  <tbody id="assignTbody"></tbody>
+</table>
+
       <div class="dialog-actions">
         <button id="assignAdd" class="btn-outline btn-small" type="button">+ Neu</button>
         <span class="grow"></span>
