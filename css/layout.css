@@ -1,0 +1,76 @@
+/* =============== LAYOUT: App-Shell & Struktur ================= */
+
+.header{
+  position: sticky; top:0; z-index: 50;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+.header-inner{
+  max-width: 1400px; margin: 0 auto;
+  padding: .9rem 1.2rem;
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.titles h1{ color: var(--primary); }
+.titles .subtitle{ font-size: var(--fs-small); color: var(--muted); margin-top: 2px; }
+
+.container{
+  max-width: 1400px; margin: 1.2rem auto; padding: 0 1.2rem;
+  min-height: calc(100vh - 120px);
+}
+.grid{
+  display: grid; grid-template-columns: 420px 1fr; gap: 1.2rem;
+  min-height: 0; height: 100%;
+}
+.card{
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem; min-height: 0; overflow: visible;
+}
+.column{ display:flex; flex-direction:column; min-height:0; }
+.column-scroll{ overflow:auto; padding-right:.3rem; padding-bottom:.8rem; }
+
+.sep{ border:0; height:1px; background: var(--border); margin: 1rem 0; }
+
+/* Responsive */
+@media (max-width: 920px){
+  .grid{ grid-template-columns: 1fr; gap:.9rem; }
+  .container{ min-height: 100vh; padding: 0 .9rem; }
+  .card{ width:100%; overflow-x:hidden; }
+}
+/* === Fidelior – Layout-Veredelung (kleiner, ruhiger, Violett bleibt) ====== */
+
+/* Mehr Luft, aber kompakt in der Typo */
+.container{ padding-left:1.2rem; padding-right:1.2rem; }
+
+.card{
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  background: var(--surface);
+}
+
+/* Abschnittsabstände: einheitlich */
+#leftPane h2,
+#previewPane h2{ margin-top:.6rem; margin-bottom:.5rem; }
+
+/* Preview-Canvas neutralisiert den Weißkontrast */
+.preview-wrap{
+  background: var(--preview-bg);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+  border: 1px solid color-mix(in oklab, var(--border), #000 6%);
+}
+
+/* Preview-Kopf ruhiger, ohne Farbsprung */
+.preview-head{
+  background: var(--surface);
+  border-bottom:1px solid var(--border);
+  padding-top:.55rem; padding-bottom:.5rem;
+}
+
+/* Mobile bleibt schlank */
+@media (max-width:920px){
+  .container{ padding-left:1rem; padding-right:1rem; }
+  .card{ box-shadow: 0 6px 18px rgba(0,0,0,.06); }
+}

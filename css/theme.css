@@ -1,0 +1,102 @@
+/* =============== THEME: Tokens & Base ================= */
+
+:root{
+  /* Brand */
+  --primary: #5B1B70;
+  --primary-600: #6a2483;
+  --primary-700: #7A2C8E;
+  --accent: #C9A6E0;
+
+  /* Neutrals */
+  --bg: #FAF9F7;
+  --surface: #FFFFFF;
+  --surface-2: #F7F6F4;
+  --border: #E7E2E0;
+  --muted: #6A6666;
+  --text: #1C1A1A;
+
+  /* Effects */
+  --radius: 12px;
+  --shadow: 0 4px 12px rgba(0,0,0,.08);
+  --focus-ring: 0 0 0 2px rgba(91,27,112,.18);
+  --focus-inset: inset 0 0 0 3px rgba(91,27,112,.16);
+
+  /* Type */
+  --fs-body: clamp(13px,1.04vw,15px);
+  --fs-h1: clamp(22px,2.1vw,28px);
+  --fs-h2: clamp(16px,1.4vw,20px);
+  --fs-small: clamp(12px,1vw,13px);
+  --font-ui: Inter, "Source Sans 3", "Segoe UI", Roboto, system-ui, Arial, sans-serif;
+}
+
+*{ box-sizing: border-box; margin:0; padding:0; }
+html,body{ height:100%; overflow-x:hidden; }
+
+body{
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Typo helpers */
+h1{ font-size: var(--fs-h1); font-weight: 700; }
+h2{ font-size: var(--fs-h2); font-weight: 600; color: var(--primary); }
+.muted{ color: var(--muted); }
+
+/* (Optional) Dark – vorbereitet, aber noch nicht aktiv */
+:root[data-color-scheme="dark"]{
+  --bg:#0F1115; --surface:#14171D; --surface-2:#0F1115;
+  --text:#E7E8EA; --muted:#9AA2B1; --border:#222a36;
+  --shadow: 0 8px 20px rgba(0,0,0,.35);
+}
+/* === Fidelior – Premium Look (zurück zu deiner Farbwelt, kleiner & konsistent) === */
+
+/* 1) Typografie überall Inter (Business), Headlines NICHT mehr Serif */
+:root{
+  --font-ui: Inter, "Source Sans 3", "Segoe UI", Roboto, system-ui, Arial, sans-serif;
+  /* etwas kleiner & konsistenter */
+  --fs-body: clamp(12.5px, 0.98vw, 14px);
+  --fs-h1:   clamp(20px, 1.8vw, 24px);
+  --fs-h2:   clamp(15px, 1.25vw, 18px);
+  --fs-small: clamp(11.5px, 0.9vw, 12.5px);
+}
+
+/* Headlines wieder in Inter (kein Serif) */
+h1,h2{ font-family: var(--font-ui); letter-spacing: .1px; }
+
+/* 2) Farben: zurück auf deine Tokens (Violett) – nur Veredelung */
+:root{
+  /* Stelle sicher, dass Primär deine ursprüngliche Farbe bleibt */
+  --primary: #5B1B70;
+  --primary-600: #6a2483;
+  --primary-700: #7A2C8E;
+  --accent: #C9A6E0;
+
+  /* leichte On/Border-Verbesserungen */
+  --on-primary: #ffffff;
+  --on-surface: var(--text);
+  --border-strong: color-mix(in oklab, var(--border), #000 12%);
+
+  /* dezenter Schatten */
+  --shadow: 0 8px 24px rgba(0,0,0,.05);
+
+  /* Preview-Hintergrund etwas neutraler, aber in deiner Welt */
+  --preview-bg: #F1F2F5;
+}
+
+/* Fokus dezent in deiner Primärfarbe */
+:root{
+  --focus-ring: 0 0 0 3px color-mix(in oklab, var(--primary), #fff 70%);
+  --focus-inset: inset 0 0 0 3px color-mix(in oklab, var(--primary), #fff 78%);
+}
+
+/* Optionaler Dark-Prepared bleibt wie bei dir; nur kleine Feintöne */
+:root[data-color-scheme="dark"]{
+  --preview-bg:#141820;
+  --border-strong:#2a3342;
+}

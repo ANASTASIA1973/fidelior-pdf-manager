@@ -7,6 +7,7 @@
   /* ===== Neutrals / Layout ===== */
   --bg:#FAF9F7; --surface:#FFFFFF; --text:#1C1A1A; --muted:#6A6666;
   --radius:12px; --shadow:0 4px 12px rgba(0,0,0,.08);
+  --border:#ebe7e5;
 
   /* ===== Typo ===== */
   --fs-body:clamp(13px,1.05vw,15px);
@@ -28,10 +29,20 @@ body{
   -webkit-text-size-adjust:100%;
 }
 
-/* ==== Header ================================================================== */
-.header{display:flex;align-items:center;justify-content:space-between;
-  background:var(--surface);border-bottom:2px solid #e7e2e0;
-  padding:.9rem 2rem;box-shadow:var(--shadow);position:sticky;top:0;z-index:10}
+/* ==== Header (links, wie im Screenshot) ===================================== */
+.header{
+  display:flex; align-items:center; justify-content:center;
+  background:var(--surface); border-bottom:2px solid #e7e2e0;
+  padding:.9rem 0; box-shadow:var(--shadow); position:sticky; top:0; z-index:10;
+}
+/* Container im Header – Inhalt linksbündig */
+.header-inner{
+  width:100%; max-width:1400px; margin:0 auto; padding:0 1.2rem;
+  display:flex; align-items:center; justify-content:space-between; gap:.8rem;
+}
+.header .titles{
+  margin:0; text-align:left; display:flex; flex-direction:column; align-items:flex-start;
+}
 .titles h1{font-size:var(--fs-h1);font-weight:600;color:var(--primary)}
 .titles .subtitle{font-size:var(--fs-small);color:var(--muted);margin-top:2px}
 
@@ -159,7 +170,7 @@ input[type="date"].date-input{ background:none; }
   position:absolute;left:10px;top:12px;transform-origin:left top;transform:rotate(90deg);
   font-weight:800;color:#7A2C8E;opacity:.38;white-space:nowrap;pointer-events:none;user-select:none;line-height:1}
 
-/* ==== Dialoge & Toasts ======================================================= */
+/* ==== Dialoge & Toasts (Dialog-Basis) =================================== */
 dialog::backdrop{background:rgba(0,0,0,.25)}
 dialog{border:none;border-radius:14px;padding:0;box-shadow:var(--shadow);max-width:min(560px,92vw)}
 .dialog-body{display:flex;flex-direction:column;max-height:80vh;background:#fff;border-radius:14px}
@@ -174,126 +185,33 @@ dialog{z-index:1000}
 dialog{display:none}
 dialog[open]{display:block}
 
-/* === Emails-Dialog Hotfix v2: nur der Body scrollt, nichts überlagert ==== */
-
-/* Dialog-Frame */
-#manageEmailsDialog{
-  max-width: min(760px, 96vw);
-  max-height: 90vh;
-  overflow: hidden;
-}
-
-/* Body scrollt als Ganzes (ein Container) */
-#manageEmailsDialog .dialog-body{
-  display: flex;
-  flex-direction: column;
-  max-height: 90vh;
-  overflow: auto;
-  padding: 0;
-}
-
-/* Header sticky oben */
-#manageEmailsDialog .dialog-titlebar{
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: #fff;
-  border-bottom: 1px solid #eee;
-  padding: 1rem 1.2rem;
-}
-
-/* Inhaltspadding normalisieren */
-#manageEmailsDialog .dialog-body > *:not(.dialog-titlebar):not(.dialog-actions){
-  padding: .6rem 1.2rem 0 1.2rem;
-  overflow: visible !important;
-}
-
-/* Vorlagenliste */
-#manageEmailsDialog #poList{
-  max-height: 40vh;
-  overflow: auto;
-  margin: .4rem 0 .8rem 0;
-  padding: 0;
-}
-
-/* Footer sticky unten */
-#manageEmailsDialog .dialog-actions{
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  background: linear-gradient(to top, #fff 85%, rgba(255,255,255,0));
-  border-top: 1px solid #eee;
-  padding: .8rem 1.2rem;
-}
-
-/* Tabellen im Adressbuch: Spalten kürzen, Actions fix */
-#manageEmailsDialog table{ width:100%; table-layout: fixed; border-collapse: separate; border-spacing:0; }
-#manageEmailsDialog th, #manageEmailsDialog td{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#manageEmailsDialog input.input.slim{ width: 100%; }
-
-/* Actions-Spalte und Icon-Buttons stabil anzeigen */
-#manageEmailsDialog .table td.right,
-#manageEmailsDialog table td.right {
-  white-space: nowrap !important;
-  width: 1% !important;
-  overflow: visible !important;
-}
-#manageEmailsDialog .icon-btn {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 30px !important;
-  height: 30px !important;
-  padding: 0 !important;
-  line-height: 1 !important;
-  font-size: 18px !important;
-  border-radius: 8px;
-  overflow: visible !important;
-  vertical-align: middle;
-}
-#manageEmailsDialog .icon-btn + .icon-btn { margin-left: .35rem; }
-
-/* Vorlagenliste: Text links kürzen, Aktionen rechts fix */
-#manageEmailsDialog #poList li {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-}
-#manageEmailsDialog #poList li > div:first-child {
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#manageEmailsDialog #poList li > div:last-child {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
+/* === Emails-Dialog Hotfix v2 ============================================= */
+#manageEmailsDialog{ max-width:min(760px,96vw); max-height:90vh; overflow:hidden; }
+#manageEmailsDialog .dialog-body{ display:flex; flex-direction:column; max-height:90vh; overflow:auto; padding:0; }
+#manageEmailsDialog .dialog-titlebar{ position:sticky; top:0; z-index:2; background:#fff; border-bottom:1px solid #eee; padding:1rem 1.2rem; }
+#manageEmailsDialog .dialog-body > *:not(.dialog-titlebar):not(.dialog-actions){ padding:.6rem 1.2rem 0 1.2rem; overflow:visible !important; }
+#manageEmailsDialog #poList{ max-height:40vh; overflow:auto; margin:.4rem 0 .8rem 0; padding:0; }
+#manageEmailsDialog .dialog-actions{ position:sticky; bottom:0; z-index:2; background:linear-gradient(to top,#fff 85%,rgba(255,255,255,0)); border-top:1px solid #eee; padding:.8rem 1.2rem; }
+#manageEmailsDialog table{ width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0; }
+#manageEmailsDialog th, #manageEmailsDialog td{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#manageEmailsDialog input.input.slim{ width:100%; }
+#manageEmailsDialog .table td.right, #manageEmailsDialog table td.right{ white-space:nowrap !important; width:1% !important; overflow:visible !important; }
+#manageEmailsDialog .icon-btn{ display:inline-flex !important; align-items:center !important; justify-content:center !important; width:30px !important; height:30px !important; padding:0 !important; line-height:1 !important; font-size:18px !important; border-radius:8px; overflow:visible !important; vertical-align:middle; }
+#manageEmailsDialog .icon-btn + .icon-btn { margin-left:.35rem; }
+#manageEmailsDialog #poList li{ display:flex; align-items:center; gap:.5rem; }
+#manageEmailsDialog #poList li > div:first-child{ flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#manageEmailsDialog #poList li > div:last-child{ flex:0 0 auto; white-space:nowrap; }
 
 /* === Mail: kompakter, aufgeräumter ======================================= */
-
-/* Status-Pills kompakt */
 #accMail .status-row{display:grid;grid-template-columns:78px 1fr 1fr;align-items:center;gap:.35rem;margin:.35rem 0 .45rem}
-#accMail .status-row .pill,#accMail .status-row .chk{
-  display:inline-flex;align-items:center;gap:.5rem;font-size:.9rem;padding:.22rem .48rem;border:1px solid #d8d3d1;border-radius:10px;background:#fff;cursor:pointer}
+#accMail .status-row .pill,#accMail .status-row .chk{display:inline-flex;align-items:center;gap:.5rem;font-size:.9rem;padding:.22rem .48rem;border:1px solid #d8d3d1;border-radius:10px;background:#fff;cursor:pointer}
 #accMail .status-row .pill input{inline-size:14px;block-size:14px;margin-right:.25rem;accent-color:var(--primary)}
 #accMail .status-row .pill.is-checked{border-color:#6f2a86;box-shadow:inset 0 0 0 1px #6f2a86;background:#f7f3f9}
 #accMail .status.tiny{font-size:.92rem;color:var(--muted);margin-top:.25rem}
-
-/* Mail-Inputs enger */
 #accMail .mail-block .row.tight{gap:.5rem;margin:.2rem 0}
 #accMail .mail-block .input.slim,#accMail .mail-block .select{padding:.42rem .6rem;min-height:34px;font-size:13px}
-
-/* Chips ausblenden (wenn nicht gewünscht) */
 #mailChips { display: none !important; }
-
-/* CC/BCC Addons hübsch */
-#accMail .mail-col--addon{
-  display:inline-flex;align-items:center;gap:.35rem;padding:.28rem .6rem;
-  border:1px solid rgba(0,0,0,.08);border-radius:999px;background:linear-gradient(#fff,#fafafa);
-  box-shadow:0 1px 0 rgba(0,0,0,.02) inset;font-size:.92rem;line-height:1;text-decoration:none;color:#444;
-  transition:background .15s ease,border-color .15s ease,transform .02s ease;vertical-align:middle}
+#accMail .mail-col--addon{display:inline-flex;align-items:center;gap:.35rem;padding:.28rem .6rem;border:1px solid rgba(0,0,0,.08);border-radius:999px;background:linear-gradient(#fff,#fafafa);box-shadow:0 1px 0 rgba(0,0,0,.02) inset;font-size:.92rem;line-height:1;text-decoration:none;color:#444;transition:background .15s ease,border-color .15s ease,transform .02s ease;vertical-align:middle}
 #accMail .mail-col--addon:hover{background:#f3f3f4;border-color:rgba(0,0,0,.12);color:#222}
 #accMail .mail-col--addon:active{transform:translateY(1px)}
 #accMail .mail-col--addon::before{content:"+";display:inline-block;width:1ch;text-align:center;font-weight:600;opacity:.9}
@@ -305,22 +223,12 @@ dialog[open]{display:block}
 #counters{ margin-top:.4rem; padding-top:.4rem; border-top:1px solid #eee }
 #inboxList{ margin-top:.2rem }
 #inboxList li{ display:flex; align-items:center; justify-content:space-between }
-#accConnections .chip--on,
-#accConnections .chip-ok,
-#accConnections .chip.is-on{ background:#efe8f7; border-color:#cdb5e3; color:#55206a }
+#accConnections .chip--on, #accConnections .chip-ok, #accConnections .chip.is-on{ background:#efe8f7; border-color:#cdb5e3; color:#55206a }
 
-/* „Speichern in“: saubere Ausrichtung / schöne Pills (falls save-box genutzt) */
-#accConnections .save-box{
-  display:grid;grid-template-columns: repeat(4, auto);
-  align-items:center;gap:.6rem 1rem;border:0;padding:0;margin:.4rem 0 0;
-}
-#accConnections .save-box legend{
-  grid-column:1 / -1;margin:0 0 .2rem 0;font-weight:600;color:#444;
-}
-#accConnections .save-box .chk{
-  display:inline-flex;align-items:center;gap:.45rem;padding:.32rem .6rem;border:1px solid #E6E7EA;
-  border-radius:10px;background:linear-gradient(#fff,#fafafa);cursor:pointer;user-select:none;white-space:nowrap;
-}
+/* „Speichern in“ */
+#accConnections .save-box{display:grid;grid-template-columns: repeat(4, auto);align-items:center;gap:.6rem 1rem;border:0;padding:0;margin:.4rem 0 0;}
+#accConnections .save-box legend{grid-column:1 / -1;margin:0 0 .2rem 0;font-weight:600;color:#444;}
+#accConnections .save-box .chk{display:inline-flex;align-items:center;gap:.45rem;padding:.32rem .6rem;border:1px solid #E6E7EA;border-radius:10px;background:linear-gradient(#fff,#fafafa);cursor:pointer;user-select:none;white-space:nowrap;}
 #accConnections .save-box .chk input{ width:16px; height:16px; }
 #accConnections .save-box .chk:hover{ border-color:#D8D9DE;background:#f5f6f7; }
 #accConnections .save-box .chk:has(input:checked){ border-color:#CBD4FF;background:#F3F6FF; }
@@ -329,82 +237,20 @@ dialog[open]{display:block}
   #accConnections .save-box legend{ margin-bottom:.4rem; }
 }
 
-/* ==== Toasts ================================================================= */
-.toast-host{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:10px;z-index:10000}
-.toast{background:#fff;border:1px solid #e7e2e0;border-radius:12px;box-shadow:var(--shadow);padding:.75rem 1rem;max-width:min(440px,92vw);font-size:.95rem}
-.toast strong{color:#1f2937}
-.toast .muted{color:#6b7280}
-
-/* ===== Preview-Toolbar: immer Icon-Buttons (Neu / Drucken / Download) ===== */
-/* Runde Buttons – NUR für die drei Aktions-Buttons */
-#previewTools #openTabBtn,
-#previewTools #printBtn,
-#previewTools #downloadBtn{
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border-radius: 999px;
-  font-size: 0;                 /* Text „Neu/Drucken/Download“ ausblenden */
-}
-
-/* dezentes Hover */
-#previewTools #openTabBtn:hover,
-#previewTools #printBtn:hover,
-#previewTools #downloadBtn:hover{
-  background: #f3f4f6;
-}
-
-/* Icon via CSS-Mask */
-#previewTools #openTabBtn::before,
-#previewTools #printBtn::before,
-#previewTools #downloadBtn::before{
-  content: "";
-  width: 18px; height: 18px;
-  background: currentColor;
-  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-  -webkit-mask-position: center;  mask-position: center;
-  -webkit-mask-size: contain;     mask-size: contain;
-}
-
-/* Neu (neuer Tab) */
-#previewTools #openTabBtn::before{
-  -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-7h-2v7z"/><path fill="black" d="M14 3h7v7h-2V6.41l-8.29 8.3-1.42-1.42L17.59 5H14V3z"/></svg>');
-          mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-7h-2v7z"/><path fill="black" d="M14 3h7v7h-2V6.41l-8.29 8.3-1.42-1.42L17.59 5H14V3z"/></svg>');
-}
-
-/* Drucken */
-#previewTools #printBtn::before{
-  -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M19 8H5a3 3 0 0 0-3 3v4h4v4h12v-4h4v-4a3 3 0 0 0-3-3zM7 19v-4h10v4H7zm10-10V3H7v6h10z"/></svg>');
-          mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M19 8H5a3 3 0 0 0-3 3v4h4v4h12v-4h4v-4a3 3 0 0 0-3-3zM7 19v-4h10v4H7zm10-10V3H7v6h10z"/></svg>');
-}
-
-/* Download */
-#previewTools #downloadBtn::before{
-  -webkit-mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M5 20h14v-2H5v2zm7-18-5.5 5.5 1.41 1.41L11 7.83V16h2V7.83l3.09 3.08 1.41-1.41L12 2z"/></svg>');
-          mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M5 20h14v-2H5v2zm7-18-5.5 5.5 1.41 1.41L11 7.83V16h2V7.83l3.09 3.08 1.41-1.41L12 2z"/></svg>');
-}
-
-/* Preview-Toolbar: Icons sicher klickbar halten */
-#previewTools{
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: .4rem;
-}
-#previewTools .icon-btn{
-  cursor: pointer !important;
-  pointer-events: auto !important;
-  position: relative;
-  z-index: 2;
-  -webkit-tap-highlight-color: transparent;
-}
-#previewTools .icon-btn::before{ pointer-events: none; }
-#previewTools .zoom-range{ position: relative; z-index: 1; }
-#previewTools .tools-sep{ pointer-events: none; }
+/* ===== Preview-Toolbar: Icon-Buttons (Neu / Drucken / Download) ===== */
+#previewTools #openTabBtn,#previewTools #printBtn,#previewTools #downloadBtn{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border-radius:999px;font-size:0}
+#previewTools #openTabBtn:hover,#previewTools #printBtn:hover,#previewTools #downloadBtn:hover{ background:#f3f4f6; }
+#previewTools #openTabBtn::before,#previewTools #printBtn::before,#previewTools #downloadBtn::before{
+  content:"";width:18px;height:18px;background:currentColor;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain}
+#previewTools #openTabBtn::before{-webkit-mask-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-7h-2v7z"/><path fill="black" d="M14 3h7v7h-2V6.41l-8.29 8.3-1.42-1.42L17.59 5H14V3z"/></svg>');mask-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-7h-2v7z"/><path fill="black" d="M14 3h7v7h-2V6.41l-8.29 8.3-1.42-1.42L17.59 5H14V3z"/></svg>');}
+#previewTools #printBtn::before{-webkit-mask-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M19 8H5a3 3 0 0 0-3 3v4h4v4h12v-4h4v-4a3 3 0 0 0-3-3zM7 19v-4h10v4H7zm10-10V3H7v6h10z"/></svg>');mask-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M19 8H5a3 3 0 0 0-3 3v4h4v4h12v-4h4v-4a3 3 0 0 0-3-3zM7 19v-4h10v4H7zm10-10V3H7v6h10z"/></svg>');}
+#previewTools #downloadBtn::before{-webkit-mask-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M5 20h14v-2H5v2zm7-18-5.5 5.5 1.41 1.41L11 7.83V16h2V7.83l3.09 3.08 1.41-1.41L12 2z"/></svg>');mask-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M5 20h14v-2H5v2zm7-18-5.5 5.5 1.41 1.41L11 7.83V16h2V7.83l3.09 3.08 1.41-1.41L12 2z"/></svg>');}
+#previewTools{ position:relative; display:flex; align-items:center; gap:.4rem; }
+#previewTools .icon-btn{ cursor:pointer !important; pointer-events:auto !important; position:relative; z-index:2; -webkit-tap-highlight-color:transparent; }
+#previewTools .icon-btn::before{ pointer-events:none; }
+#previewTools .zoom-range{ position:relative; z-index:1; }
+#previewTools .tools-sep{ pointer-events:none; }
 
 /* ==== Responsive ============================================================= */
 @media (max-width:920px){
@@ -447,37 +293,499 @@ dialog[open]{display:block}
 .chip--mail{background:#f6f4f6;border:1px solid #e6dfe6; color:#4d2a4d;border-radius:9999px;padding:.2rem .5rem;display:inline-flex;align-items:center}
 .chip--mail .chip-x{margin-left:.35rem;font-weight:700;cursor:pointer}
 
-/* Zuordnungsmuster – Schnellzeile hübsch & responsiv */
-#manageAssignmentsDialog .row {
-  align-items: flex-end;
-  gap: .5rem;
-  flex-wrap: wrap;
+/* Zuordnungsmuster – Schnellzeile */
+#manageAssignmentsDialog .row{align-items:flex-end;gap:.5rem;flex-wrap:wrap}
+#manageAssignmentsDialog #saVendor,#manageAssignmentsDialog #saId,#manageAssignmentsDialog #saObject,#manageAssignmentsDialog #saNote{min-width:180px;}
+#manageAssignmentsDialog #saAddBtn{white-space:nowrap;}
+#manageAssignmentsDialog table td:last-child,#manageAssignmentsDialog table th:last-child{width:1%;white-space:nowrap;}
+@media (max-width:560px){
+  #manageAssignmentsDialog #saVendor,#manageAssignmentsDialog #saId,#manageAssignmentsDialog #saObject,#manageAssignmentsDialog #saNote{flex:1 1 100%;}
 }
 
-#manageAssignmentsDialog #saVendor,
-#manageAssignmentsDialog #saId,
-#manageAssignmentsDialog #saObject,
-#manageAssignmentsDialog #saNote {
-  min-width: 180px;
+/* -------------------------------------------------------
+   BUTTONS, LINKS & INTERACTIONS
+   ----------------------------------------------------- */
+button{ border:0; background:none; color:inherit; font:inherit; }
+button:disabled, .btn-primary[aria-disabled="true"], .btn-outline[aria-disabled="true"]{ opacity:.55; cursor:not-allowed; }
+.btn-primary{
+  --btn-shadow: 0 6px 16px rgba(91,27,112,.18);
+  display:inline-flex; align-items:center; justify-content:center;
+  gap:.45rem; padding:.6rem 1rem; border-radius:12px;
+  background:var(--primary); color:#fff; cursor:pointer;
+  transition: background .15s ease, transform .06s ease, box-shadow .15s ease;
+  box-shadow: var(--btn-shadow);
+}
+.btn-primary:hover{ background:var(--primary-hover); }
+.btn-primary:active{ transform: translateY(1px) scale(.995); }
+.btn-primary:focus-visible{ box-shadow: var(--focus-ring), var(--btn-shadow); }
+.btn-outline{
+  display:inline-flex; align-items:center; justify-content:center;
+  gap:.45rem; padding:.55rem .9rem; border-radius:12px;
+  background:#fff; border:1.5px solid #d9d4d2; color:var(--primary);
+  transition: border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .06s ease;
+}
+.btn-outline:hover{ border-color:#bfb8b6; color:#4b3f49; }
+.btn-outline:active{ transform: translateY(1px); }
+.btn-outline:focus-visible{ box-shadow: var(--focus-ring); }
+.btn-small{ padding:.38rem .7rem; font-size:12.5px; line-height:1; }
+.linklike{ display:inline-flex; align-items:center; gap:.35rem; padding:.22rem .6rem; border:1px solid #e9e4e2; border-radius:999px; background:#fff; color:#7a7271; cursor:pointer; transition: background .15s, border-color .15s, box-shadow .15s; }
+.linklike:hover{ background:#faf7f6; border-color:#d8d3d1; }
+.linklike:focus-visible{ box-shadow: var(--focus-ring); }
+.icon-btn{ display:inline-flex; align-items:center; justify-content:center; min-width:34px; height:34px; padding:.26rem .46rem; border:1px solid #ded9d7; border-radius:10px; background:#fff; cursor:pointer; transition: background .15s, border-color .15s, transform .06s, box-shadow .15s; }
+.icon-btn:hover{ background:#f7f7f8; border-color:#d2cdcb; }
+.icon-btn:active{ transform: translateY(1px); }
+.icon-btn:focus-visible{ box-shadow: var(--focus-ring); }
+a{ color: var(--primary); text-decoration: none; }
+a:hover{ text-decoration: underline; }
+a:focus-visible{ outline:0; box-shadow: var(--focus-ring); border-radius:6px; }
+.input:focus, .select:focus{ border-color:#b8a19e; box-shadow: var(--focus-inset); }
+@media (prefers-reduced-motion: reduce){ .btn-primary, .btn-outline, .icon-btn{ transition: none; } }
+
+/* === Section-Headlines & Abstände ======================================== */
+.card h2{ line-height:1.15; margin:0 0 .65rem 0; padding:0; letter-spacing:.2px; }
+.preview-head{ align-items:baseline; }
+.preview-head h2{ margin:0; }
+.row{ gap:.6rem; } .row.tight{ gap:.4rem; }
+.label{ margin:.6rem 0 .25rem; line-height:1.2; color:#3b3340; }
+.select, .input{ padding:.44rem .7rem; }
+.dropzone{ padding:1rem 1.2rem; } .dz-title{ line-height:1.1; } .dz-hint{ margin-top:.15rem; }
+#previewTools{ align-items:baseline; } #zoomLabel{ line-height:1.1; }
+.tools-sep{ height:20px; }
+
+/* === Verbindungen & Zähler – Harmonisierung =============================== */
+#accConnections{ --pill-h:34px; --pill-r:999px; --pill-b:1.5px solid #DDD6E3; --pill-bg:#fff; --pill-bg-hover:#F7F6FA; --pill-border-hover:#CFC7DB; }
+#accConnections .chips{ gap:.6rem; margin:.35rem 0 .2rem }
+#accConnections .chip{ display:inline-flex; align-items:center; gap:.4rem; height:var(--pill-h); line-height:1; padding:.28rem .8rem; border:var(--pill-b); border-radius:var(--pill-r); background:#F8F7FA; color:#5A5363; font-weight:500; }
+#accConnections .chip.is-on, #accConnections .chip-ok, #accConnections .chip--on{ background:#F3ECFF; border-color:#D9C9F2; color:#4D2A62; }
+#accConnections .btn-outline.btn-small{ height:var(--pill-h); line-height:var(--pill-h); padding:0 .9rem; border-radius:var(--pill-r); border:var(--pill-b); background:var(--pill-bg); color:var(--primary); font-weight:500; }
+#accConnections .btn-outline.btn-small:hover{ background:var(--pill-bg-hover); border-color:var(--pill-border-hover); color:#4B3F59; }
+#accConnections .btn-outline.btn-small:focus-visible{ box-shadow:var(--focus-ring); }
+#accConnections .conn-buttons{ display:flex; flex-wrap:wrap; gap:.5rem .6rem }
+#accConnections .save-box{ margin-top:.6rem }
+#accConnections .save-box .chk{ height:var(--pill-h); line-height:var(--pill-h); padding:0 .9rem; border-radius:var(--pill-r); border:var(--pill-b); background:var(--pill-bg); font-weight:500; color:#3E3846; }
+#accConnections .save-box .chk:hover{ background:var(--pill-bg-hover); border-color:var(--pill-border-hover); }
+#accConnections .save-box .chk:has(input:checked){ border-color:#CDB5E3; background:#F3ECFF; color:#4D2A62; }
+#accConnections .save-box .chk input{ width:16px; height:16px; accent-color:var(--primary); }
+
+/* === Preview-Toolbar – Icon-Buttons polieren ============================== */
+#previewTools{ --icon-size:34px; --icon-bg:#fff; --icon-bg-hover:#F4F5F7; --icon-border:1px solid #E4E6EA; }
+#previewTools .icon-btn{ position:relative; display:inline-flex; align-items:center; justify-content:center; width:var(--icon-size); height:var(--icon-size); padding:0; border-radius:999px; background:var(--icon-bg); border:var(--icon-border); cursor:pointer; transition:background .15s ease, border-color .15s ease, transform .04s ease, box-shadow .12s ease; -webkit-tap-highlight-color:transparent; }
+#previewTools .icon-btn:hover{ background:var(--icon-bg-hover); border-color:#D6DAE0; }
+#previewTools .icon-btn:focus-visible{ outline:none; box-shadow:0 0 0 2px rgba(91,27,112,.18); }
+#previewTools .icon-btn:active{ transform:translateY(1px); }
+#previewTools .icon-btn:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
+#previewTools #openTabBtn,#previewTools #printBtn,#previewTools #downloadBtn{ font-size:0 }
+
+/* === Inputs/Selects & Save-Bar ============================================ */
+.label{ font-weight:600; color:#3b3b3b; margin:.75rem 0 .35rem; }
+.input,.select{ min-height:38px; padding:.5rem .75rem; border:1.5px solid #CFCACA; border-radius:10px; background:#fff; transition:border-color .15s ease, box-shadow .15s ease, background .12s ease; }
+.input:hover,.select:hover{ border-color:#BFB7B5; }
+.input:focus,.select:focus{ border-color:#B8A19E; box-shadow:inset 0 0 0 3px rgba(91,27,112,.08); outline:none; }
+.input::placeholder{ color:#9AA0A6; }
+.input[disabled], .select[disabled], .input[readonly]{ background:#F7F8FA !important; color:#8A8F98; border-color:#E3E6EB; cursor:not-allowed; }
+.row.tight{ gap:.5rem; }
+.row-actions{ position:sticky; bottom:0; z-index:3; display:flex; gap:.6rem; padding-top:.6rem; padding-bottom:.5rem; background:linear-gradient(to top, var(--surface) 78%, rgba(255,255,255,0)); border-top:1px solid #EEE; }
+.row-actions .btn-primary{ padding:.62rem 1.05rem; font-weight:600; box-shadow:0 2px 0 rgba(91,27,112,.14); }
+.row-actions .btn-primary:hover{ box-shadow:0 3px 0 rgba(91,27,112,.18); }
+.row-actions .btn-outline{ border-color:#DFE3E8; color:#4B3F49; }
+.row-actions .btn-outline:hover{ border-color:#CFD4DA; }
+@media (max-width:560px){
+  .row-actions{ flex-direction:column; align-items:stretch; }
+  .row-actions .btn-primary, .row-actions .btn-outline{ width:100%; justify-content:center; }
 }
 
-#manageAssignmentsDialog #saAddBtn {
-  white-space: nowrap;
+/* === PDF-Viewer Finetuning ================================================= */
+.preview-wrap{ background:#F4F6F8; border:1px solid #E7EBF0; border-radius:12px; scroll-behavior:smooth; overscroll-behavior:contain; }
+.pdf-page{ margin:12px auto; border:1px solid #E6E8EB; border-radius:10px; box-shadow:0 6px 18px rgba(16,24,40,.06), 0 1px 1px rgba(16,24,40,.03); transition:transform .08s ease, box-shadow .15s ease, border-color .12s ease; }
+.pdf-page:hover{ transform:translateY(-1px); box-shadow:0 10px 24px rgba(16,24,40,.08), 0 1px 1px rgba(16,24,40,.03); border-color:#DDE3EA; }
+.pdf-page canvas{ display:block; width:100% !important; height:auto !important; }
+.preview-head{ position:sticky; top:0; background:var(--surface); border-bottom:1px solid #EFEFEF; padding:.5rem .75rem; z-index:5; }
+.zoom-range{ height:6px; border-radius:6px; background:#E5E7EB; }
+.zoom-range::-webkit-slider-thumb{ width:16px; height:16px; border:2px solid #fff; border-radius:50%; box-shadow:0 0 0 2px var(--primary); }
+.preview-wrap::-webkit-scrollbar{ width:10px; }
+.preview-wrap::-webkit-scrollbar-track{ background:transparent; }
+.preview-wrap::-webkit-scrollbar-thumb{ background:#DADFE6; border-radius:999px; border:2px solid transparent; background-clip:padding-box; }
+.preview-wrap::-webkit-scrollbar-thumb:hover{ background:#C8D0DA; }
+@media (max-width:920px){
+  .preview-wrap{ height:70vh; max-height:calc(100vh - 220px); }
 }
 
-/* Tabelle: letzte Spalte (Aktionen) bricht nie um */
-#manageAssignmentsDialog table td:last-child,
-#manageAssignmentsDialog table th:last-child {
-  width: 1%;
-  white-space: nowrap;
+/* === Toasts – FINAL (einziger Block) ===================================== */
+.toast-host{
+  position:fixed; right:16px; bottom:16px;
+  display:flex; flex-direction:column; gap:10px;
+  z-index:10000; pointer-events:none;
+}
+@keyframes toast-pop{
+  0%{ transform:translateY(6px) scale(.98); opacity:0; }
+  60%{ transform:translateY(0) scale(1); opacity:1; }
+  100%{ transform:translateY(0) scale(1); opacity:1; }
+}
+.toast{
+  pointer-events:auto;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;   /* Text | Aktionen */
+  align-items:start; gap:.25rem .6rem;
+  padding:.75rem 1rem;
+  background:#fff; border:1px solid var(--border); border-radius:12px;
+  box-shadow:0 10px 28px rgba(0,0,0,.12), 0 2px 6px rgba(0,0,0,.06);
+  max-width:min(600px,92vw);
+  font-size:.95rem; line-height:1.45;
+  animation:toast-pop .22s ease-out both;
+
+  /* saubere Umbrüche */
+  overflow-wrap:break-word; word-break:normal; hyphens:auto;
+}
+/* Mit Icon */
+.toast:has(.t-icon), .toast.has-icon{
+  grid-template-columns:22px minmax(0,1fr) auto;
+}
+.toast .t-icon{
+  width:22px; height:22px; border-radius:6px;
+  display:inline-flex; align-items:center; justify-content:center; font-size:14px;
+}
+.toast > :not(.t-icon):not(.t-actions){ grid-column:1 / -1; }
+.toast:has(.t-icon) > :not(.t-icon):not(.t-actions),
+.toast.has-icon     > :not(.t-icon):not(.t-actions){ grid-column:2 / -1; }
+.toast .t-actions{ justify-self:end; }
+
+/* Typografie & Abstände */
+.toast .t-title{ display:block; margin:0 0 .18rem 0; font-weight:650; color:#1f2937; }
+.toast strong{ display:inline; margin:0; }
+.toast .t-sub{ color:#6b7280; margin:0; }
+.toast p, .toast ul, .toast ol, .toast li, .toast dl, .toast dt, .toast dd{ margin:0; }
+.toast dl{ display:grid; grid-template-columns:max-content minmax(0,1fr); gap:.25rem .55rem; }
+.toast dt{ white-space:nowrap; }
+
+/* Farbvarianten */
+:root{ --ok:#10b981; --info:#3b82f6; --warn:#f59e0b; --err:#ef4444; }
+.toast.ok   { border-color:rgba(16,185,129,.25); }
+.toast.info { border-color:rgba(59,130,246,.25); }
+.toast.warn { border-color:rgba(245,158,11,.25); }
+.toast.err  { border-color:rgba(239,68,68,.25); }
+.toast.ok   .t-icon{ background:rgba(16,185,129,.12); color:var(--ok); }
+.toast.info .t-icon{ background:rgba(59,130,246,.12); color:var(--info); }
+.toast.warn .t-icon{ background:rgba(245,158,11,.12); color:var(--warn); }
+.toast.err  .t-icon{ background:rgba(239,68,68,.12); color:var(--err); }
+
+/* === Safety-Lock: verhindert spätere Header-Overrides ===================== */
+.header-inner{ justify-content:space-between !important; }
+.header .titles{
+  margin-left:0 !important; text-align:left !important; align-items:flex-start !important;
+}
+/* CC/BCC-Pills: zweites Plus entfernen */
+#accMail .mail-col--addon::before{
+  content: none !important;
+}
+/* ======================================================================
+   FIX nur für 4 Dialoge
+   (#manageEmailsDialog, #manageObjectsDialog, #manageDocTypesDialog, #manageAssignmentsDialog)
+   – Header sticky oben, Footer sticky unten, Close-Button klickbar,
+     Dropdowns werden nicht abgeschnitten.
+   ====================================================================== */
+
+#manageEmailsDialog,
+#manageObjectsDialog,
+#manageDocTypesDialog,
+#manageAssignmentsDialog{
+  max-width: min(760px, 96vw);
+  max-height: 90vh;
+  /* wichtig: nichts beschneiden, sonst überdecken wir den Close-Button
+     oder schneiden Dropdowns ab */
+  overflow: visible !important;
+  border: none;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(0,0,0,.18);
 }
 
-/* Sehr schmale Screens: Felder untereinander */
-@media (max-width: 560px){
-  #manageAssignmentsDialog #saVendor,
-  #manageAssignmentsDialog #saId,
-  #manageAssignmentsDialog #saObject,
-  #manageAssignmentsDialog #saNote {
-    flex: 1 1 100%;
+/* nur der Inhalt scrollt */
+#manageEmailsDialog .dialog-body,
+#manageObjectsDialog .dialog-body,
+#manageDocTypesDialog .dialog-body,
+#manageAssignmentsDialog .dialog-body{
+  overflow: auto !important;
+  max-height: 90vh;
+  padding: 0;
+}
+
+/* Header bleibt oben und über allem */
+#manageEmailsDialog .dialog-titlebar,
+#manageObjectsDialog .dialog-titlebar,
+#manageDocTypesDialog .dialog-titlebar,
+#manageAssignmentsDialog .dialog-titlebar{
+  position: sticky;
+  top: 0;
+  background: linear-gradient(#fbfbfc,#f6f7f8);
+  border-bottom: 1px solid #EAE8E7;
+  z-index: 1002;                 /* über Body und Footer */
+  padding: 1rem 1.2rem;
+}
+
+/* Close-Button sicher klickbar */
+#manageEmailsDialog .dialog-close,
+#manageObjectsDialog .dialog-close,
+#manageDocTypesDialog .dialog-close,
+#manageAssignmentsDialog .dialog-close{
+  position: relative;
+  z-index: 1003;                 /* über allem im Dialog */
+  pointer-events: auto;
+}
+
+/* Innenabstand wie im Screenshot, keine Clipping-Fallen */
+#manageEmailsDialog .dialog-body > *:not(.dialog-titlebar):not(.dialog-actions),
+#manageObjectsDialog .dialog-body > *:not(.dialog-titlebar):not(.dialog-actions),
+#manageDocTypesDialog .dialog-body > *:not(.dialog-titlebar):not(.dialog-actions),
+#manageAssignmentsDialog .dialog-body > *:not(.dialog-titlebar):not(.dialog-actions){
+  padding: .6rem 1.2rem 0 1.2rem;
+  overflow: visible !important;
+}
+
+/* Footer klebt unten, überlappt nichts und bleibt sichtbar */
+#manageEmailsDialog .dialog-actions,
+#manageObjectsDialog .dialog-actions,
+#manageDocTypesDialog .dialog-actions,
+#manageAssignmentsDialog .dialog-actions{
+  position: sticky;
+  bottom: 0;
+  z-index: 1001;                 /* unter dem Header, aber über dem Body */
+  display: flex;
+  gap: .6rem;
+  padding: .9rem 1.2rem;
+  background: linear-gradient(to top,#fff 85%, rgba(255,255,255,0));
+  border-top: 1px solid #EAE8E7;
+}
+
+/* letzter Button (z. B. „Schließen“/„Speichern“) nach rechts */
+#manageEmailsDialog .dialog-actions > *:last-child,
+#manageObjectsDialog .dialog-actions > *:last-child,
+#manageDocTypesDialog .dialog-actions > *:last-child,
+#manageAssignmentsDialog .dialog-actions > *:last-child{
+  margin-left: auto;
+}
+
+/* Tabellen/Listen im Dialog: Spalten kürzen, Actions schmal halten */
+#manageEmailsDialog .table, #manageObjectsDialog .table,
+#manageDocTypesDialog .table, #manageAssignmentsDialog .table{ width:100%; table-layout:fixed; }
+#manageEmailsDialog th, #manageEmailsDialog td,
+#manageObjectsDialog th, #manageObjectsDialog td,
+#manageDocTypesDialog th, #manageDocTypesDialog td,
+#manageAssignmentsDialog th, #manageAssignmentsDialog td{
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+#manageEmailsDialog td.right, #manageObjectsDialog td.right,
+#manageDocTypesDialog td.right, #manageAssignmentsDialog td.right{
+  white-space:nowrap !important; width:1% !important;
+}
+/* ======================================================================
+   FINALER SCOPED PATCH — Liegenschaften + Dokumentarten
+   Erzwingt: 1 Scroll-Container (Body), Header sticky oben, Footer sticky unten,
+             List-Items korrekt im 1fr/auto-Grid, keine verschachtelten Scrolls.
+   Deckt mögliche IDs ab: manageObjectsDialog, manageDocTypesDialog,
+                          manageDocumentTypesDialog, manageTypesDialog
+   ====================================================================== */
+:root{ --dlgFooterH: 72px; }
+
+/* 0) Dialog-Rahmen: kein eigener Scroll */
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog){
+  max-width: min(760px,96vw) !important;
+  max-height: 90vh !important;
+  overflow: hidden !important;           /* Doppelscroll verhindern   */
+  background:#fff; border:0; border-radius:14px;
+  box-shadow:0 12px 28px rgba(0,0,0,.18);
+}
+
+/* 1) EINZIGER Scroll-Container = Body */
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .dialog-body{
+  display: flex !important;
+  flex-direction: column !important;
+  max-height: 90vh !important;
+  overflow: auto !important;             /* Scroll NUR hier           */
+  padding: 0 !important;
+  min-height: 0 !important;
+  padding-bottom: var(--dlgFooterH) !important; /* Platz für sticky Footer */
+}
+
+/* 2) Header sticky oben */
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .dialog-titlebar{
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 5 !important;
+  background:#fff !important;
+  border-bottom: 1px solid #eee !important;
+  padding: 1rem 1.2rem !important;
+}
+
+/* 3) Footer sticky unten (am Body, nicht am Viewport) */
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .dialog-actions,
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .row-actions{
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 4 !important;
+  margin: 0 !important;
+  background: linear-gradient(to top,#fff 85%,rgba(255,255,255,0)) !important;
+  border-top: 1px solid #eee !important;
+  padding: .9rem 1.2rem !important;
+}
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .dialog-actions > *:last-child,
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .row-actions > *:last-child{
+  margin-left: auto !important;
+}
+
+/* 4) LISTEN dürfen NICHT selbst scrollen (hebelt components.css aus) */
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .list{
+  max-height: none !important;
+  overflow: visible !important;
+  padding-right: 0 !important;
+}
+
+/* 5) LI → korrektes Grid, Eingabefeld links breit, Actions rechts schmal */
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .list li{
+  display: grid !important;
+  grid-template-columns: 1fr auto !important;
+  align-items: center !important;
+  gap: .6rem !important;
+  padding: .45rem 0 !important;
+  border-bottom: 1px solid #eee !important;
+}
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .list li > *:first-child{
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .list .actions{
+  display: flex !important;
+  gap: .4rem !important;
+}
+
+/* 6) Close-Button bleibt klickbar */
+:is(#manageObjectsDialog,
+    #manageDocTypesDialog,
+    #manageDocumentTypesDialog,
+    #manageTypesDialog) .dialog-close{
+  position: relative !important;
+  z-index: 6 !important;
+  pointer-events: auto !important;
+}
+/* === Toast-Fix: unstrukturierte Toasts zu Fließtext zusammenziehen ======= */
+/* Gilt nur für Toasts ohne eigene Strukturklassen (.t-title/.t-sub/.t-actions) */
+.toast:not(:has(.t-title, .t-sub, .t-actions)) {
+  display: inline-block;                 /* verhindert Grid-/Block-Zeilenbrüche */
+  max-width: min(520px, 92vw);
+  line-height: 1.45;
+  white-space: normal !important;        /* \n => normales Leerzeichen */
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* Alle direkten Kinder als Inline laufen lassen (statt blockige Zeilen) */
+.toast:not(:has(.t-title, .t-sub, .t-actions)) > * {
+  display: inline !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  white-space: inherit !important;
+}
+
+/* Harte <br> unterdrücken */
+.toast:not(:has(.t-title, .t-sub, .t-actions)) > br {
+  display: none !important;
+}
+
+/* winziger Abstand zwischen zusammengezogenen Fragmenten */
+.toast:not(:has(.t-title, .t-sub, .t-actions)) > * + *::before {
+  content: " ";
+}
+
+/* Icon-/Action-Varianten bleiben unberührt (falls vorhanden) */
+.toast .t-icon { display:inline-flex; }
+.toast .t-actions { display:flex; gap:.45rem; justify-self:end; }
+/* Header-Schrift gezielt verkleinern (nur im Header, global bleibt alles gleich) */
+.header{ --fs-h1: clamp(18px, 1.4vw, 22px); }   /* Titel */
+.header .subtitle{ font-size: clamp(11px, .9vw, 12px); }  /* Unterzeile optional kleiner */
+/* === Wide Screens: mehr Breite nutzen, Mobile bleibt wie ist ============== */
+@media (min-width: 1440px){
+  /* Kappe aufheben, aber dezente Innenränder lassen */
+  .header-inner,
+  .container{
+    max-width: none;
+    width: 100%;
   }
+  .container{ padding-left: 1.6rem; padding-right: 1.6rem; }
+
+  /* Linke Spalte bleibt moderat, rechte wächst fluid */
+  .grid{
+    grid-template-columns: clamp(380px, 28vw, 560px) 1fr;
+    gap: 1.2rem;
+  }
+
+  /* Optional: Zoom-Slider nicht endlos breit werden lassen */
+  #previewTools .zoom-range{ width: min(36vw, 360px); }
+}
+
+
+/* --- Save box: Pill-Layout reparieren --- */
+#saveBox{
+  display:flex !important;
+  flex-wrap:wrap !important;
+  gap:.6rem .7rem;
+  width:100%;
+  box-sizing:border-box;
+  overflow:visible;           /* nichts mehr abschneiden */
+  margin-bottom:.4rem;        /* Abstand zu den Countern */
+}
+
+#saveBox .chk{
+  display:flex;
+  align-items:center;
+  gap:.4rem;
+  padding:.38rem .72rem;
+  border-radius:999px;
+  white-space:nowrap;         /* ein Pill pro Zeile, aber kein Textumbruch im Pill */
+  max-width:100%;
+}
+
+#saveBox input[type="checkbox"]{
+  margin:0;
+  transform:translateY(1px);
+}
+
+/* Falls ein übergeordneter Container clippt: überschreiben */
+#accConnections,
+#accConnections .acc-sum,
+#accConnections .save-box{
+  overflow:visible !important;
 }

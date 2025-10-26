@@ -493,23 +493,7 @@ function attachMailUI(){
   }
 
   /* ---------------------------- Upload & Zoom ------------------------------ */
-// ===== Helper: Quelle im Inbox-ROOT erkennen (Name + Größe) =====
-async function tryBindInboxContextForFileByName(file) {
-  if (!inboxRootHandle || !file?.name) return false;
-  try {
-    // Versuche, im Inbox-ROOT eine Datei gleichen Namens zu holen
-    const h = await inboxRootHandle.getFileHandle(file.name, { create: false });
-    const f2 = await h.getFile();
-    // Heuristik: gleicher Name + gleiche Größe ⇒ wir behandeln es als Inbox-Quelle (Root)
-    if (f2 && f2.size && f2.size === file.size) {
-      currentInboxFileHandle = h;
-      currentInboxFileName   = file.name;
-      currentInboxRelPath    = [file.name]; // Root-Fall
-      return true;
-    }
-  } catch {}
-  return false;
-}
+
 
 // ==================================================================
 // attachUpload (angepasst: <input> & Drag&Drop erkennen Inbox-Quelle)
@@ -1248,8 +1232,9 @@ hidden.click();
 
   async function requestDirWrite(dirHandle){ try{ if(!dirHandle?.requestPermission) return true; let p = await dirHandle.queryPermission?.({ mode: "readwrite" }); if (p !== "granted") p = await dirHandle.requestPermission({ mode: "readwrite" }); return p === "granted"; }catch{ return true; } }
   async function ensureDirWithPrompt(rootHandle, segments){ if(!rootHandle) throw new Error("Kein Root-Handle"); let dir = rootHandle; for (const s of (segments||[])){ if(!s) continue; try { dir = await dir.getDirectoryHandle(s, { create:false }); } catch { const yes = window.confirm(`Ordner fehlt: "${s}". Jetzt anlegen?`); if (!yes) throw new Error(`Abgebrochen – fehlender Ordner: ${s}`); dir = await dir.getDirectoryHandle(s, { create:true }); } } return dir; }
- // Schreiben ins Ziel (mit Prompt für Berechtigungen und Ordner-Anlage)
-async function writeFileTo(rootHandle, segments, bytes, fileName){
+// Schreiben ins Ziel (mit Prompt für Berechtigungen und Ordner-Anlage)
+// Schreiben ins Ziel (mit optionaler Einzigartigkeits-Logik)
+async function writeFileTo(rootHandle, segments, bytes, fileName, opts = {}) {
   if (!rootHandle) throw new Error("Root-Handle fehlt");
   if (!fileName)   throw new Error("Dateiname fehlt");
 
@@ -1257,21 +1242,31 @@ async function writeFileTo(rootHandle, segments, bytes, fileName){
   if (!ok) throw new Error("Schreibberechtigung verweigert");
 
   const dir = await ensureDirWithPrompt(rootHandle, segments || []);
-  const fh  = await dir.getFileHandle(fileName, { create: true });
+
+  // Falls gewünscht, kollisionssicheren Namen bilden (… (2).pdf / … (3).pdf …)
+  const finalName = opts.unique ? await uniqueName(dir, fileName) : fileName;
+
+  const fh  = await dir.getFileHandle(finalName, { create: true });
 
   let ws;
   try {
     ws = await fh.createWritable({ keepExistingData: false });
     await ws.write(new Blob([bytes], { type: "application/pdf" }));
     await ws.close();
-    await tryRemoveCrSwap(dir, fileName);
-    ws = undefined;
 
+    // Chrome .crswap-Reste säubern
+    await tryRemoveCrSwap(dir, finalName);
+    ws = undefined;
   } catch (e) {
     try { await ws?.abort(); } catch {}
     throw e;
   }
+
+  // Optional nützlich, falls du den tatsächlich verwendeten Namen anzeigen willst
+  return finalName;
 }
+
+
 
 /* ---------------------- Verbindungen: Root-Ordner binden ---------------------- */
 
@@ -1300,9 +1295,9 @@ $("#btnBindConfig")?.addEventListener("click", async () => {
     await saveBoundHandles();
     toast("<strong>Config verbunden</strong>", 1500);
 
-    try { emailsCfg   = await loadJson("config/emails.json"); } catch {}
-    try { objectsCfg  = await loadJson("config/objects.json"); await loadObjects(); } catch {}
-    try { docTypesCfg = await loadJson("config/document_types.json"); await loadDocTypes(); } catch {}
+    try { emailsCfg   = await loadJson("emails.json"); } catch {}
+    try { objectsCfg  = await loadJson("objects.json"); await loadObjects(); } catch {}
+    try { docTypesCfg = await loadJson("document_types.json"); await loadDocTypes(); } catch {}
     populateMailSelect(); prefillMail();
   } catch {}
 });
@@ -1460,8 +1455,12 @@ async function loadJson(rel){
 // JSON im verbundenen Config-Ordner speichern
 async function saveJson(rel, data){
   // rel kann "config/assignments.json", "assignments.json" oder "assignments" sein
-  const raw = String(rel || "").replace(/^\.\//, "");
-  const segs = raw.split("/").filter(Boolean);
+  const raw0 = String(rel || "").replace(/^\.\//, "");
+  let segs = raw0.split("/").filter(Boolean);
+
+  // Schutz: wenn der gebundene Ordner bereits "config" heißt, führendes "config/" ignorieren
+  const rootIsConfig = (configDirHandle?.name || "").toLowerCase() === "config";
+  if (rootIsConfig && segs[0]?.toLowerCase() === "config") segs = segs.slice(1);
 
   // Dateiname + optionaler Unterordner
   let fileName = (segs.pop() || "config.json");
@@ -1480,7 +1479,7 @@ async function saveJson(rel, data){
     }
   }
 
-  // Schreibrecht anstoßen (innerhalb User-Gesture aufgerufen → Prompt sichtbar)
+  // Schreibrecht (innerhalb User-Gesture aufgerufen → Prompt sichtbar)
   const ok = await (typeof ensureWritePermissionWithPrompt === "function"
     ? ensureWritePermissionWithPrompt(configDirHandle, "Config")
     : true);
@@ -1523,7 +1522,7 @@ try {
   // ---- Laden / Defaults (ohne Markdown-Link!) ----
   let json;
   try {
-    json = await loadJson("config/emails.json");
+    json = await loadJson("emails.json");
   } catch {
     json = {
       addressBook: [],
@@ -1676,7 +1675,7 @@ btnDel.setAttribute("aria-label", "Löschen");
         poList   = $("#poList");
 
   try {
-    const o = await loadJson("config/objects.json");
+    const o = await loadJson("objects.json");
     poObjSel.innerHTML =
       '<option value="">(Liegenschaft wählen)</option>' +
       (o.objects || []).map(x => '<option value="'+ (x.code||"") +'">' + (x.displayName||x.code||"") + '</option>').join("");
@@ -1802,7 +1801,7 @@ btnDel.setAttribute("aria-label", "Löschen");
     };
 
     try {
-      await saveJson("config/emails.json", result);
+      await saveJson("emails.json", result);
       emailsCfg = result;               // direkt im laufenden State aktualisieren
       populateMailSelect();             // Datalist/Select neu füllen
       toast("E-Mail-Vorlagen gespeichert.", 2500);
@@ -1817,7 +1816,7 @@ btnDel.setAttribute("aria-label", "Löschen");
   wireDialogClose?.(dlg);
 }
 
-  async function openObjectsDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageObjectsDialog"); if(!dlg){ toast("Objekte-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("config/objects.json"); }catch{ j={objects:[]}; } const list = j.objects || []; const ul = $("#objectsList"); ul.innerHTML="";
+  async function openObjectsDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageObjectsDialog"); if(!dlg){ toast("Objekte-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("objects.json"); }catch{ j={objects:[]}; } const list = j.objects || []; const ul = $("#objectsList"); ul.innerHTML="";
     const addRow=(o={displayName:"", code:"", scopevisioName:"", pcloudName:""})=>{ const li=document.createElement("li"); li.innerHTML = `
         <div class="row tight">
           <input class="input slim ob-name"  placeholder="Anzeigename" value="${o.displayName||""}">
@@ -1831,7 +1830,7 @@ btnDel.setAttribute("aria-label", "Löschen");
     if (typeof dlg.showModal==="function") dlg.showModal(); else dlg.setAttribute("open","open"); wireDialogClose(dlg);
   }
 
-  async function openTypesDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageTypesDialog"); if(!dlg){ toast("Dokumentarten-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("config/document_types.json"); }catch{ j={types:[], defaultTypeKey:""}; } const list=j.types||[]; const ul=$("#typesList"); ul.innerHTML=""; const defaultKey=j.defaultTypeKey||"";
+  async function openTypesDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageTypesDialog"); if(!dlg){ toast("Dokumentarten-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("document_types.json"); }catch{ j={types:[], defaultTypeKey:""}; } const list=j.types||[]; const ul=$("#typesList"); ul.innerHTML=""; const defaultKey=j.defaultTypeKey||"";
     const addRow=(t={label:"", key:"", isInvoice:false})=>{ const li=document.createElement("li"); li.innerHTML = `
         <div class="row tight">
           <input class="input slim ty-label" placeholder="Label" value="${t.label||""}">
@@ -1854,7 +1853,7 @@ async function openAssignmentsDialog() {
 
   // Bestehende Regeln laden
   let j;
-  try { j = await loadJson("config/assignments.json"); }
+  try { j = await loadJson("assignments.json"); }
   catch { j = { patterns: [] }; }
 
   const tbody = $("#assignTbody");
@@ -1881,7 +1880,7 @@ async function openAssignmentsDialog() {
 
   // --- NEU: Objektliste für die Einfach-Eingabe (#saObject) füllen ---
   try {
-    const o = await loadJson("config/objects.json");
+    const o = await loadJson("objects.json");
     const sel = $("#saObject");
     if (sel) {
       const opts = (o.objects || []).map(x => {
@@ -2274,15 +2273,18 @@ $("#saveBtn")?.addEventListener("click", async ()=> {
 
 
     if (targets.scope){
-      try { await writeFileTo(targets.scope.root, targets.scope.seg, stamped, fileName); okScope=true; }
+      try { await writeFileTo(targets.scope.root, targets.scope.seg, stamped, fileName, { unique: true });
+ okScope=true; }
       catch(e){ toast(`⚠️ Schreiben nach <strong>Scopevisio</strong> fehlgeschlagen:<br><code>${targets.scope.seg.join("\\")}</code><br>${e?.message||e}`, 6000); }
     }
     if (targets.pcloud){
-      try { await writeFileTo(targets.pcloud.root, targets.pcloud.seg, stamped, fileName); okPcl=true; }
+      try { await writeFileTo(targets.pcloud.root, targets.pcloud.seg, stamped, fileName, { unique: true });
+ okPcl=true; }
       catch(e){ toast(`⚠️ Schreiben nach <strong>pCloud</strong> fehlgeschlagen:<br><code>${targets.pcloud.seg.join("\\")}</code><br>${e?.message||e}`, 6000); }
     }
     if (targets.pcloudBucket){
-      try { await writeFileTo(targets.pcloudBucket.root, targets.pcloudBucket.seg, stamped, fileName); okPclBucket=true; }
+      try { await writeFileTo(targets.pcloudBucket.root, targets.pcloudBucket.seg, stamped, fileName, { unique: true });
+ okPclBucket=true; }
       catch(e){ toast(`⚠️ Schreiben nach <strong>pCloud (Sammelordner)</strong> fehlgeschlagen:<br><code>${targets.pcloudBucket.seg.join("\\")}</code><br>${e?.message||e}`, 6000); }
     }
 
@@ -2437,14 +2439,14 @@ $("#saveBtn")?.addEventListener("click", async ()=> {
 }
 
   /* ------------------------------ Loaders ---------------------------------- */
-  async function loadDocTypes(){ try{ const j = await loadJson("config/document_types.json"); docTypesCfg = j; const list=(j?.types||[]); const def=j?.defaultTypeKey||""; typeSel.innerHTML = ""; const ph = new Option("(Dokumenttyp wählen)",""); ph.disabled = true; typeSel.appendChild(ph); list.forEach(t=>{ const o = new Option(t.label || t.key || "", t.key || t.label); if (t.isInvoice) o.dataset.isInvoice = "true"; if (t.key === def) o.selected = true; typeSel.appendChild(o); }); }catch{ typeSel.innerHTML = `
+  async function loadDocTypes(){ try{ const j = await loadJson("document_types.json"); docTypesCfg = j; const list=(j?.types||[]); const def=j?.defaultTypeKey||""; typeSel.innerHTML = ""; const ph = new Option("(Dokumenttyp wählen)",""); ph.disabled = true; typeSel.appendChild(ph); list.forEach(t=>{ const o = new Option(t.label || t.key || "", t.key || t.label); if (t.isInvoice) o.dataset.isInvoice = "true"; if (t.key === def) o.selected = true; typeSel.appendChild(o); }); }catch{ typeSel.innerHTML = `
         <option value="" disabled>(Dokumenttyp wählen)</option>
         <option value="rechnung" data-isinvoice="true">Rechnung</option>
         <option value="sonstiges">Sonstiges</option>`; } }
  async function loadObjects(){
   try{
     // 1) Datei laden
-    const j = await loadJson("config/objects.json");
+    const j = await loadJson("objects.json");
     objectsCfg = j;
 
     // 2) Liste holen (nichts filtern!)
@@ -2554,8 +2556,8 @@ async function boot() {
   // ⇩⇩⇩ WICHTIG: zuerst gespeicherte Handles wiederherstellen
   await restoreBoundHandles();
 
-  try { emailsCfg      = await loadJson("config/emails.json"); }       catch { emailsCfg = null; }
-  try { assignmentsCfg = await loadJson("config/assignments.json"); } catch { assignmentsCfg = null; }
+  try { emailsCfg      = await loadJson("emails.json"); }       catch { emailsCfg = null; }
+  try { assignmentsCfg = await loadJson("assignments.json"); } catch { assignmentsCfg = null; }
 
   paintChips();
   await loadObjects();
