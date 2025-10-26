@@ -809,7 +809,9 @@ async function autoRecognize() {
     /* 2) AUTO-ASSIGN: Objekt & (optional) Unterordner */
     let appliedMsg = null;
     if (assignmentsCfg && Array.isArray(assignmentsCfg.patterns) && assignmentsCfg.patterns.length) {
-      const tRaw = txt || "";
+      const tRaw = (txt || "")
+  .replace(/\u00A0/g, " ")          // geschütztes Leerzeichen → normales Leerzeichen
+  .replace(/[\u2013\u2014\u2212]/g, "-"); // „–“, „—“, „−“ → normales Minus
       let hit = null;
 
       const normalizeList = (rule) => {
@@ -1903,42 +1905,51 @@ async function openAssignmentsDialog() {
     }
   }
 
-  // --- Unterordner-Vorschläge für #saSub (D1, D4, Allgemein, 2023, …) ---
-  (function setupSaSubDatalist(){
-    const input = $("#saSub");
+
+// --- Unterordner-Vorschläge für #saSub (robust & ohne Duplikate) ---
+(function setupSaSubDatalist(){
+  try {
+    // nur einmal pro Seite initialisieren
+    if (window.__fdl_saSubSetupDone) return;
+    window.__fdl_saSubSetupDone = true;
+
+    const input = document.querySelector("#saSub");
     if (!input) return;
 
-    let dl = $("#saSubList");
+    // evtl. doppelte Datalists mit gleicher ID entfernen
+    document.querySelectorAll('[id="saSubList"]').forEach((n,i)=>{ if(i>0) n.remove(); });
+
+    // datalist erzeugen/holen
+    let dl = document.getElementById("saSubList");
     if (!dl) {
       dl = document.createElement("datalist");
       dl.id = "saSubList";
       input.setAttribute("list", "saSubList");
-      input.parentElement?.appendChild(dl);
+      (input.parentElement || document.body).appendChild(dl);
     }
 
     async function gatherSubfolders(code){
-      const out = new Set();
-      getKnownSubfolders(code).forEach(s => out.add(s));
+      const uniq = new Set();
+
+      (getKnownSubfolders(code) || []).forEach(s => { if (s) uniq.add(String(s).trim()); });
 
       const { scopeName, pcloudName } = getFolderNames(code);
 
-      const scopeJobs = [];
+      const jobs = [];
       if (scopeRootHandle) {
-        scopeJobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Rechnungsbelege"]));
-        scopeJobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Objektdokumente"]));
+        jobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Rechnungsbelege"]));
+        jobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Objektdokumente"]));
       }
-
-      const pclJobs = [];
       if (pcloudRootHandle && !isArndtCie(code)) {
-        pclJobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Rechnungsbelege"]));
-        pclJobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Objektdokumente"]));
+        jobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Rechnungsbelege"]));
+        jobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Objektdokumente"]));
       }
 
-      const lists = (await Promise.all([...scopeJobs, ...pclJobs]).catch(()=>[[]])).flat();
-      lists.forEach(n => out.add(n));
+      const lists = (await Promise.all(jobs).catch(()=>[[]])).flat();
+      lists.forEach(n => { if (n) uniq.add(String(n).trim()); });
 
       const priority = ["Allgemein","D1","D4"];
-      return Array.from(out)
+      return Array.from(uniq)
         .filter(Boolean)
         .sort((a,b)=>{
           const ia = priority.indexOf(a), ib = priority.indexOf(b);
@@ -1951,21 +1962,46 @@ async function openAssignmentsDialog() {
     }
 
     async function refill(){
-      const code = ($("#saObject")?.value || "").trim();
-      dl.innerHTML = "";
+      // Sicherheit: nur erste Datalist behalten
+      document.querySelectorAll('[id="saSubList"]').forEach((n,i)=>{ if(i>0) n.remove(); });
+      dl.textContent = "";
+
+      const code = (document.querySelector("#saObject")?.value || "").trim();
       if (!code) return;
+
       const items = await gatherSubfolders(code);
-      items.forEach(v => {
+      const seen = new Set();
+      for (const v of items) {
+        const val = String(v||"").trim();
+        const key = val.toLowerCase();
+        if (!val || seen.has(key)) continue;
+        seen.add(key);
         const opt = document.createElement("option");
-        opt.value = v;
+        opt.value = val;
         dl.appendChild(opt);
-      });
-      toast(`Unterordner-Vorschläge geladen: ${items.length || 0}`, 1800);
+      }
     }
 
-    $("#saObject")?.addEventListener("change", refill);
-    refill(); // initial, falls schon ein Objekt steht
-  })();
+    document.querySelector("#saObject")?.addEventListener("change", refill);
+    refill(); // initial füllen
+
+    // Datalist beim Fokus/Klick zeigen
+    input.setAttribute("autocomplete", "off");
+    const showAll = () => {
+      const prev = input.value;
+      input.value = " ";
+      input.dispatchEvent(new Event("input", { bubbles:true }));
+      setTimeout(() => { input.value = prev; }, 0);
+    };
+    input.addEventListener("focus", showAll);
+    input.addEventListener("click", showAll);
+    input.addEventListener("keydown", (e)=>{ if (e.key === "ArrowDown") showAll(); });
+  } catch(e) {
+    console.warn("setupSaSubDatalist failed:", e);
+  }
+})();
+
+
 
   // --- Pattern-Builder (wie gehabt) ---
   const escRx = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1975,7 +2011,8 @@ async function openAssignmentsDialog() {
     const chunks = raw.replace(/\s+/g, "").match(/[A-Za-z]+|\d+/g) || [raw];
     const expandDigits = (d) => (d.length >= 7 ? [d.slice(0, 3), d.slice(3)] : (d.match(/\d{1,2}/g) || [d]));
     const parts = chunks.flatMap(ch => /\d/.test(ch) ? expandDigits(ch) : [ch]);
-    return parts.map(p => escRx(p)).join("[-./\\s]?");
+   return parts.map(p => escRx(p)).join("[\\s./\\-–—−]*");
+
   };
   const buildPattern = (vendor, ident) => {
     const la = [];
@@ -1983,6 +2020,7 @@ async function openAssignmentsDialog() {
     if (ident)  la.push(`(?=.*${loosenId(ident)})`);
     return la.join("");
   };
+
 
   // → Regel erstellen (Einfach-Modus)
   $("#saAddBtn")?.addEventListener("click", (e) => {
