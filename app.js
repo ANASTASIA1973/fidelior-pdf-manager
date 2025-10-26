@@ -22,6 +22,13 @@
   const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
+  // pCloud Sammelordner (unterhalb des verbundenen pCloud-Roots)
+const PCL_COLLECT_FOLDER = "DMS BACKUP PCLOUD";
+
+// ganz oben bei den Helpers
+const isPcloudBucketChecked = () =>
+  ($("#chkPcloudBucket")?.checked || $("#chkPcloudCollect")?.checked) === true;
+
 // Entfernt evtl. Chrome-Swap-Dateien wie "Datei.pdf.crswap"
 async function tryRemoveCrSwap(dirHandle, baseName){
   if (!dirHandle || !baseName) return;
@@ -1027,29 +1034,148 @@ async function updateSubfolderOptions({ silent = false } = {}) {
   if (!silent) subRow.style.display = "grid";
 }
 
-  function refreshPreview(){
-    const hasDoc = !!pdfDoc;
-    if (fileNameInput){ if (!hasDoc){ if (fileNameInput.dataset.mode !== "manual") fileNameInput.value = ""; } else if (fileNameInput.dataset.mode !== "manual") { fileNameInput.value = computeFileNameAuto(); } }
-    else if (fileNamePrev) { fileNamePrev.textContent = hasDoc ? computeFileNameAuto() : "-"; }
-    if (!hasDoc){ targetPrev && (targetPrev.innerHTML = "—"); return; }
-    const code=(objSel?.value||"").trim(); const year=String(currentYear()); const invoice=isInvoice(); const sub=(subSel?.value||"").trim();
-    const wantScope=$("#chkScope")?.checked === true; const wantPcl=$("#chkPcloud")?.checked === true;
-    const { scopeName, pcloudName } = getFolderNames(code); const lines=[];
-    if (wantScope && code){ let seg; if (code === "FIDELIOR") seg=["FIDELIOR", (invoice?"Eingangsrechnungen":"Dokumente"), year]; else if (code === "PRIVAT") seg=["PRIVAT", (invoice?"Rechnungsbelege":"Dokumente"), year]; else if (isArndtCie(code)) seg=["ARNDT & CIE", (invoice?"Eingangsrechnungen":"Dokumente"), year]; else { const base=["OBJEKTE", scopeName, (invoice?"Rechnungsbelege":"Objektdokumente")]; const leaf=(sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year]; seg=base.concat(leaf); } lines.push("Scopevisio: " + seg.join("\\")); }
-    if (wantPcl && code){ let seg=null; if (code === "FIDELIOR") seg = invoice? ["FIDELIOR","VERWALTUNG","Finanzen - Buchhaltung","Eingangsrechnungen", year] : (sub ? ["FIDELIOR","VERWALTUNG", sub, year] : null); else if (code === "PRIVAT") seg=["FIDELIOR","PRIVAT", (invoice?"Rechnungsbelege":"Dokumente"), year]; else if (!isArndtCie(code)){ if (code === "A15" && invoice){ const base=["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"]; const leaf=(sub && sub!=="Rechnungsbelege")?[sub,year]:[year]; seg=base.concat(leaf);} else { if (!invoice && !sub){ seg=null; } else { const base=["FIDELIOR","OBJEKTE", pcloudName, (invoice?"Rechnungsbelege":"Objektdokumente")]; const leaf=(sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year]; seg=base.concat(leaf);} } } lines.push("pCloud: " + (seg ? seg.join("\\") : "—")); }
-    if (!wantScope && !wantPcl) lines.push($("#chkLocal")?.checked ? "Nur lokal" : "—");
-    targetPrev && (targetPrev.innerHTML = lines.join("<br>"));
+function refreshPreview(){
+  const hasDoc = !!pdfDoc;
+
+  // Dateiname-Preview
+  if (fileNameInput){
+    if (!hasDoc){
+      if (fileNameInput.dataset.mode !== "manual") fileNameInput.value = "";
+    } else if (fileNameInput.dataset.mode !== "manual"){
+      fileNameInput.value = computeFileNameAuto();
+    }
+  } else if (fileNamePrev){
+    fileNamePrev.textContent = hasDoc ? computeFileNameAuto() : "-";
   }
 
-  function resolveTargets(){
-    const code=(objSel?.value||"").trim(); const year=String(currentYear()); const invoice=isInvoice(); const sub=(subSel?.value||"").trim();
-    const wantScope=$("#chkScope")?.checked === true; const wantPcl=$("#chkPcloud")?.checked === true;
-    const { scopeName, pcloudName } = getFolderNames(code); const out={ scope:null, pcloud:null };
-    if(!code) return out;
-    if (wantScope && scopeRootHandle){ if (code === "FIDELIOR") out.scope = { root:scopeRootHandle, seg:["FIDELIOR", (invoice?"Eingangsrechnungen":"Dokumente"), year] }; else if (code === "PRIVAT") out.scope = { root:scopeRootHandle, seg:["PRIVAT", (invoice?"Rechnungsbelege":"Dokumente"), year] }; else if (isArndtCie(code)) out.scope = { root:scopeRootHandle, seg:["ARNDT & CIE", (invoice?"Eingangsrechnungen":"Dokumente"), year] }; else { const base=["OBJEKTE", scopeName, (invoice?"Rechnungsbelege":"Objektdokumente")]; const leaf=(sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year]; out.scope = { root:scopeRootHandle, seg: base.concat(leaf) }; } }
-    if (wantPcl && pcloudRootHandle){ if (code === "FIDELIOR") out.pcloud = invoice? { root: pcloudRootHandle, seg: ["FIDELIOR","VERWALTUNG","Finanzen - Buchhaltung","Eingangsrechnungen", year] } : (sub ? { root: pcloudRootHandle, seg: ["FIDELIOR","VERWALTUNG", sub, year] } : null); else if (code === "PRIVAT") out.pcloud = { root:pcloudRootHandle, seg:["FIDELIOR","PRIVAT", (invoice?"Rechnungsbelege":"Dokumente"), year] }; else if (!isArndtCie(code)){ if (code === "A15" && invoice){ const base=["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"]; const leaf=(sub && sub!=="Rechnungsbelege") ? [sub, year] : [year]; out.pcloud = { root:pcloudRootHandle, seg: base.concat(leaf) }; } else { if (!invoice && !sub){ out.pcloud = null; } else { const base=["FIDELIOR","OBJEKTE", pcloudName, (invoice?"Rechnungsbelege":"Objektdokumente")]; const leaf=(sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year]; out.pcloud = { root:pcloudRootHandle, seg: base.concat(leaf) }; } } } }
-    return out;
+  if (!hasDoc){ targetPrev && (targetPrev.innerHTML = "—"); return; }
+
+  const code    = (objSel?.value || "").trim();
+  const year    = String(currentYear());
+  const invoice = isInvoice();
+  const sub     = (subSel?.value || "").trim();
+
+  const wantScope      = $("#chkScope")?.checked === true;
+  const wantPcl        = $("#chkPcloud")?.checked === true;
+  const wantPclBucket  = isPcloudBucketChecked();
+
+  const { scopeName, pcloudName } = getFolderNames(code);
+  const lines = [];
+
+  // Scopevisio (nur mit Objekt sinnvoll)
+  if (wantScope && code){
+    let seg;
+    if (code === "FIDELIOR")      seg = ["FIDELIOR", (invoice?"Eingangsrechnungen":"Dokumente"), year];
+    else if (code === "PRIVAT")   seg = ["PRIVAT",   (invoice?"Rechnungsbelege":"Dokumente"), year];
+    else if (isArndtCie(code))    seg = ["ARNDT & CIE", (invoice?"Eingangsrechnungen":"Dokumente"), year];
+    else {
+      const base = ["OBJEKTE", scopeName, (invoice?"Rechnungsbelege":"Objektdokumente")];
+      const leaf = (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year];
+      seg = base.concat(leaf);
+    }
+    lines.push("Scopevisio: " + seg.join("\\"));
   }
+
+  // pCloud (Objektpfad)
+  if (wantPcl && code){
+    let seg = null;
+    if (code === "FIDELIOR"){
+      seg = invoice
+        ? ["FIDELIOR","VERWALTUNG","Finanzen - Buchhaltung","Eingangsrechnungen", year]
+        : (sub ? ["FIDELIOR","VERWALTUNG", sub, year] : null);
+    } else if (code === "PRIVAT"){
+      seg = ["FIDELIOR","PRIVAT", (invoice?"Rechnungsbelege":"Dokumente"), year];
+    } else if (!isArndtCie(code)){
+      if (code === "A15" && invoice){
+        const base = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"];
+        const leaf = (sub && sub!=="Rechnungsbelege") ? [sub, year] : [year];
+        seg = base.concat(leaf);
+      } else {
+        if (!invoice && !sub){
+          seg = null;
+        } else {
+          const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice?"Rechnungsbelege":"Objektdokumente")];
+          const leaf = (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year];
+          seg = base.concat(leaf);
+        }
+      }
+    }
+    lines.push("pCloud: " + (seg ? seg.join("\\") : "—"));
+  }
+
+  // … und den Pfad nicht hart coden:
+if (wantPclBucket){
+  const seg = ["FIDELIOR", PCL_COLLECT_FOLDER]; // <-- Konstante nutzen
+  lines.push("pCloud (Sammelordner): " + seg.join("\\"));
+}
+
+  // Lokal immer anzeigen, wenn ausgewählt
+  const wantLocal = $("#chkLocal")?.checked === true;
+  if (wantLocal) {
+    lines.push("Lokal: (Dateidialog)");
+  }
+
+
+  targetPrev && (targetPrev.innerHTML = lines.join("<br>"));
+}
+
+
+
+function resolveTargets(){
+  const code    = (objSel?.value || "").trim();
+  const year    = String(currentYear());
+  const invoice = isInvoice();
+  const sub     = (subSel?.value || "").trim();
+
+  const wantScope = $("#chkScope")?.checked === true;
+  const wantPcl   = $("#chkPcloud")?.checked === true;
+
+  // ⬇️ out zuerst deklarieren
+  const out = { scope: null, pcloud: null, pcloudBucket: null };
+
+  // dann Bucket-Flag prüfen und befüllen
+  const wantPclBucket = isPcloudBucketChecked();
+  if (wantPclBucket && pcloudRootHandle){
+    out.pcloudBucket = { root: pcloudRootHandle, seg: ["FIDELIOR", PCL_COLLECT_FOLDER] };
+  }
+
+  const { scopeName, pcloudName } = getFolderNames(code);
+
+  // … dein bestehender Scope-/pCloud-Block unverändert …
+  if (wantScope && scopeRootHandle && code){
+    if (code === "FIDELIOR")      out.scope = { root: scopeRootHandle, seg: ["FIDELIOR", (invoice?"Eingangsrechnungen":"Dokumente"), year] };
+    else if (code === "PRIVAT")   out.scope = { root: scopeRootHandle, seg: ["PRIVAT",   (invoice?"Rechnungsbelege":"Dokumente"), year] };
+    else if (isArndtCie(code))    out.scope = { root: scopeRootHandle, seg: ["ARNDT & CIE", (invoice?"Eingangsrechnungen":"Dokumente"), year] };
+    else {
+      const base = ["OBJEKTE", scopeName, (invoice?"Rechnungsbelege":"Objektdokumente")];
+      const leaf = (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year];
+      out.scope = { root: scopeRootHandle, seg: base.concat(leaf) };
+    }
+  }
+
+  if (wantPcl && pcloudRootHandle && code && !isArndtCie(code)){
+    if (code === "FIDELIOR"){
+      out.pcloud = invoice
+        ? { root: pcloudRootHandle, seg: ["FIDELIOR","VERWALTUNG","Finanzen - Buchhaltung","Eingangsrechnungen", year] }
+        : (sub ? { root: pcloudRootHandle, seg: ["FIDELIOR","VERWALTUNG", sub, year] } : null);
+    } else if (code === "PRIVAT"){
+      out.pcloud = { root: pcloudRootHandle, seg: ["FIDELIOR","PRIVAT", (invoice?"Rechnungsbelege":"Dokumente"), year] };
+    } else {
+      if (code === "A15" && invoice){
+        const base = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"];
+        const leaf = (sub && sub!=="Rechnungsbelege") ? [sub, year] : [year];
+        out.pcloud = { root: pcloudRootHandle, seg: base.concat(leaf) };
+      } else if (invoice || sub){
+        const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice?"Rechnungsbelege":"Objektdokumente")];
+        const leaf = (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year];
+        out.pcloud = { root: pcloudRootHandle, seg: base.concat(leaf) };
+      }
+    }
+  }
+
+  return out;
+}
+
 
   /* --------------------------- Date-Picker (native) ------------------------ */
  function attachNativeDatePicker(textInput){
@@ -2104,85 +2230,133 @@ if (okIn) {
   async function stampPdf(buf){ if(!window.PDFLib) return buf; const { PDFDocument, StandardFonts, rgb, degrees } = PDFLib; const doc = await PDFDocument.load(buf); const page = doc.getPages()[0]; if(!page) return buf; const font = await doc.embedFont(StandardFonts.HelveticaBold); const text = `${(objSel?.value||"—")} – EINGEGANGEN: ${recvDateEl?.value||today()}`; const size = Math.max(10, Math.round(page.getWidth()*0.018)); page.drawText(text, { x: 16, y: page.getHeight()-40, size, font, color: rgb(0.886,0,0.102), rotate: degrees(-90) }); const out = await doc.save({ useObjectStreams:true }); return out.buffer; }
   async function pickAndWriteLocal(fileName, bytes){ if (!window.showSaveFilePicker) return false; const handle=await window.showSaveFilePicker({ suggestedName:fileName, types:[{description:"PDF", accept:{ "application/pdf":[".pdf"] }}] }).catch(()=>null); if(!handle) return false; const ws=await handle.createWritable(); await ws.write(new Blob([bytes],{type:"application/pdf"})); await ws.close(); return true; }
 
-  $("#saveBtn")?.addEventListener("click", async ()=>{
-    try{
-      if(!saveArrayBuffer || !pdfDoc || !lastFile) { toast("Kein Dokument geladen.",2500); return; }
-      if ($("#chkScope")?.checked && !scopeRootHandle) { toast("Nicht verbunden: <strong>Scopevisio</strong>. Bitte zuerst verbinden.", 3500); return; }
-      if ($("#chkPcloud")?.checked && !pcloudRootHandle){ toast("Nicht verbunden: <strong>pCloud</strong>. Bitte zuerst verbinden.", 3500); return; }
-      const wantLocal = $("#chkLocal")?.checked === true;
-      const fileName = effectiveFileName();
-      const stamped = await stampPdf(saveArrayBuffer);
-      const targets = resolveTargets();
-      // --- Schreibrechte hart anstoßen (nur innerhalb des Klick-Handlers klappt der Prompt) ---
-if (targets.scope) {
-  const ok = await ensureWritePermissionWithPrompt(targets.scope.root, "Scopevisio");
-  if (!ok) return;
-}
-if (targets.pcloud) {
-  const ok = await ensureWritePermissionWithPrompt(targets.pcloud.root, "pCloud");
-  if (!ok) return;
-}
-
-
-      if (targets.scope) toast(`Ziel (Scopevisio):<br><code>${targets.scope.seg.join("\\")}\\${fileName}</code>`, 2800);
-      if (targets.pcloud) toast(`Ziel (pCloud):<br><code>${targets.pcloud.seg.join("\\")}\\${fileName}</code>`, 2800);
-      let okScope=false, okPcl=false;
-      if(targets.scope){ try{ await writeFileTo(targets.scope.root, targets.scope.seg, stamped, fileName); okScope=true; } catch(e){ toast(`⚠️ Schreiben nach <strong>Scopevisio</strong> fehlgeschlagen:<br><code>${targets.scope.seg.join("\\")}</code><br>${e?.message||e}`,6000); } }
-      if(targets.pcloud){ try{ await writeFileTo(targets.pcloud.root, targets.pcloud.seg, stamped, fileName); okPcl=true; } catch(e){ toast(`⚠️ Schreiben nach <strong>pCloud</strong> fehlgeschlagen:<br><code>${targets.pcloud.seg.join("\\")}</code><br>${e?.message||e}`,6000); } }
-      if(!okScope && !okPcl && !wantLocal){ if ((objSel?.value||"") === "FIDELIOR" && !isInvoice() && !subSel?.value){ toast("Kein pCloud-Ziel: Bitte unter „VERWALTUNG“ einen Unterordner wählen.", 4500); } else { toast("Es wurde in kein Ziel geschrieben.", 3500); } return; }
-      if(wantLocal){ const localSaved = await pickAndWriteLocal(fileName, stamped); if(localSaved) toast("Lokale Kopie gespeichert.",1200); }
-      { 
-  const to=[...Mail.to], cc=[...Mail.cc], bcc=[...Mail.bcc];
-  const { subject, replyTo } = computeSubjectAndReply();
-
-  // Nur bei EGYO + Rechnung: vor Versand bestätigen
-  const isEGYO = (objSel?.value || "").trim().toUpperCase() === "EGYO";
-  let allowSend = true;
-
-  if (isEGYO && isInvoice() && (to.length || cc.length || bcc.length)) {
-    const lines = [
-      "Soll die automatisch gesetzte E-Mail gesendet werden?",
-      "",
-      `An:      ${to.join(", ") || "—"}`,
-      cc.length ? `CC:      ${cc.join(", ")}` : "",
-      bcc.length ? `BCC:     ${bcc.join(", ")}` : "",
-      `Betreff: ${subject || "—"}`,
-      `Anhang:  ${fileName}`
-    ].filter(Boolean).join("\n");
-
-    allowSend = window.confirm(lines);
-  }
-
-  if (allowSend && (to.length || cc.length || bcc.length)) {
-    try{
-      await sendMail({
-        to, cc, bcc,
-        subject,
-        text: computeMailBody(),
-        replyTo: replyTo || undefined,
-        attachmentBytes: stamped,
-        attachmentName: fileName
-      });
-      toast("<strong>E-Mail versendet</strong>", 2500);
-    } catch(e){
-      toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message||e}`, 4000);
+$("#saveBtn")?.addEventListener("click", async ()=> {
+  try{
+    if(!saveArrayBuffer || !pdfDoc || !lastFile){
+      toast("Kein Dokument geladen.", 2500); return;
     }
-  } else if (!allowSend) {
-    toast("E-Mail-Versand abgebrochen (EGYO).", 1800);
-  }
+    if ($("#chkScope")?.checked && !scopeRootHandle){
+      toast("Nicht verbunden: <strong>Scopevisio</strong>. Bitte zuerst verbinden.", 3500); return;
+    }
+    if (($("#chkPcloud")?.checked || $("#chkPcloudBucket")?.checked) && !pcloudRootHandle){
+      toast("Nicht verbunden: <strong>pCloud</strong>. Bitte zuerst verbinden.", 3500); return;
+    }
+
+    const wantLocal = $("#chkLocal")?.checked === true;
+    const fileName  = effectiveFileName();
+    const stamped   = await stampPdf(saveArrayBuffer);
+    const targets   = resolveTargets(); // liefert {scope, pcloud, pcloudBucket}
+
+    // --- Schreibrechte (Prompt nur im Klick-Handler sicher) ---
+    if (targets.scope) {
+      const ok = await ensureWritePermissionWithPrompt(targets.scope.root, "Scopevisio");
+      if (!ok) return;
+    }
+    if (targets.pcloud) {
+      const ok = await ensureWritePermissionWithPrompt(targets.pcloud.root, "pCloud");
+      if (!ok) return;
+    }
+    if (targets.pcloudBucket) {
+      const ok = await ensureWritePermissionWithPrompt(targets.pcloudBucket.root, "pCloud (Sammelordner)");
+      if (!ok) return;
+    }
+
+    // Zielvorschau
+    if (targets.scope)
+      toast(`Ziel (Scopevisio):<br><code>${targets.scope.seg.join("\\")}\\${fileName}</code>`, 2400);
+    if (targets.pcloud)
+      toast(`Ziel (pCloud):<br><code>${targets.pcloud.seg.join("\\")}\\${fileName}</code>`, 2400);
+    if (targets.pcloudBucket)
+      toast(`Ziel (pCloud Sammelordner):<br><code>${targets.pcloudBucket.seg.join("\\")}\\${fileName}</code>`, 2400);
+
+    // Schreiben
+    let okScope=false, okPcl=false, okPclBucket=false, okLocal=false;
+
+
+    if (targets.scope){
+      try { await writeFileTo(targets.scope.root, targets.scope.seg, stamped, fileName); okScope=true; }
+      catch(e){ toast(`⚠️ Schreiben nach <strong>Scopevisio</strong> fehlgeschlagen:<br><code>${targets.scope.seg.join("\\")}</code><br>${e?.message||e}`, 6000); }
+    }
+    if (targets.pcloud){
+      try { await writeFileTo(targets.pcloud.root, targets.pcloud.seg, stamped, fileName); okPcl=true; }
+      catch(e){ toast(`⚠️ Schreiben nach <strong>pCloud</strong> fehlgeschlagen:<br><code>${targets.pcloud.seg.join("\\")}</code><br>${e?.message||e}`, 6000); }
+    }
+    if (targets.pcloudBucket){
+      try { await writeFileTo(targets.pcloudBucket.root, targets.pcloudBucket.seg, stamped, fileName); okPclBucket=true; }
+      catch(e){ toast(`⚠️ Schreiben nach <strong>pCloud (Sammelordner)</strong> fehlgeschlagen:<br><code>${targets.pcloudBucket.seg.join("\\")}</code><br>${e?.message||e}`, 6000); }
+    }
+
+    if (!okScope && !okPcl && !okPclBucket && !wantLocal){
+      toast("Es wurde in kein Ziel geschrieben.", 3500); return;
+    }
+
+   if (wantLocal){
+  const localSaved = await pickAndWriteLocal(fileName, stamped);
+  if (localSaved){ okLocal = true; toast("Lokale Kopie gespeichert.", 1200); }
 }
 
-      if(currentInboxFileHandle && (okScope || okPcl || wantLocal)){console.log("MOVE? ", {
-  hasHandle: !!currentInboxFileHandle,
-  name: currentInboxFileName,
-  okScope, okPcl, wantLocal
+
+    // --- E-Mail unverändert ---
+    {
+      const to=[...Mail.to], cc=[...Mail.cc], bcc=[...Mail.bcc];
+      const { subject, replyTo } = computeSubjectAndReply();
+      const isEGYO = (objSel?.value || "").trim().toUpperCase() === "EGYO";
+      let allowSend = true;
+
+      if (isEGYO && isInvoice() && (to.length || cc.length || bcc.length)) {
+        const lines = [
+          "Soll die automatisch gesetzte E-Mail gesendet werden?",
+          "",
+          `An:      ${to.join(", ") || "—"}`,
+          cc.length ? `CC:      ${cc.join(", ")}` : "",
+          bcc.length ? `BCC:     ${bcc.join(", ")}` : "",
+          `Betreff: ${subject || "—"}`,
+          `Anhang:  ${fileName}`
+        ].filter(Boolean).join("\n");
+        allowSend = window.confirm(lines);
+      }
+
+      if (allowSend && (to.length || cc.length || bcc.length)) {
+        try{
+          await sendMail({
+            to, cc, bcc,
+            subject,
+            text: computeMailBody(),
+            replyTo: replyTo || undefined,
+            attachmentBytes: stamped,
+            attachmentName: fileName
+          });
+          toast("<strong>E-Mail versendet</strong>", 2500);
+        } catch(e){
+          toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message||e}`, 4000);
+        }
+      } else if (!allowSend) {
+        toast("E-Mail-Versand abgebrochen (EGYO).", 1800);
+      }
+    }
+
+    // Inbox → Bearbeitet, wenn irgendwo gespeichert oder lokal gespeichert
+    if (currentInboxFileHandle && (okScope || okPcl || okPclBucket || wantLocal)){
+      const moved = await moveInboxToProcessed();
+      if (moved) toast("Inbox → Bearbeitet verschoben.", 1600);
+    }
+
+ const okTargets = [
+  okScope ? "Scopevisio" : null,
+  okPcl ? "pCloud" : null,
+  okPclBucket ? "pCloud (Sammelordner)" : null,
+  okLocal ? "Lokal" : null
+].filter(Boolean).join(" & ") || "—";
+
+
+    toast(`<strong>Gespeichert</strong><br>${fileName}<br><em>${okTargets}</em>`, 4200);
+    hardReset();
+  }catch(e){
+    console.error(e);
+    toast(`<strong>Fehler</strong><br>${e?.message||e}`, 6000);
+  }
 });
-const moved = await moveInboxToProcessed(); if(moved) toast("Inbox → Bearbeitet verschoben.",1600); }
-      const okTargets = [okScope?"Scopevisio":null, okPcl?"pCloud":null].filter(Boolean).join(" & ") || (wantLocal?"lokal":"—");
-      toast(`<strong>Gespeichert</strong><br>${fileName}<br><em>${okTargets}</em>`, 4200);
-      hardReset();
-    }catch(e){ console.error(e); toast(`<strong>Fehler</strong><br>${e?.message||e}`,6000); }
-  });
+
 
   // Cancel: full reset
   $("#cancelBtn")?.addEventListener("click",(e)=>{ e.preventDefault(); hardReset(); toast("Vorgang abgebrochen.",1500); });
@@ -2395,6 +2569,8 @@ async function boot() {
 
   $("#chkScope") ?.addEventListener("change", refreshPreview);
   $("#chkPcloud")?.addEventListener("change", refreshPreview);
+  $("#chkPcloudBucket") ?.addEventListener("change", refreshPreview); // ← NEU
+  $("#chkPcloudCollect")?.addEventListener("change", refreshPreview); // <— NEU
   $("#chkLocal") ?.addEventListener("change", refreshPreview);
 
   // Eingangsdatum standardmäßig auf HEUTE setzen (falls leer)
