@@ -961,19 +961,27 @@ async function updateSubfolderOptions({ silent = false } = {}) {
   if (!code || code === "PRIVAT") return;
 
   // Spezialfall FIDELIOR (nur bei Nicht-Rechnung sinnvoll)
-  if (code === "FIDELIOR") {
-    if (!invoice) {
-      if (!pcloudRootHandle) return;
-      const base = ["FIDELIOR", "VERWALTUNG"];
-      const options = await listChildFolders(pcloudRootHandle, base);
-      if (options.length) {
-        subSel.innerHTML = options.map(v => `<option value="${v}">${v}</option>`).join("");
-        subSel.value = options[0] || "";
-        if (!silent) subRow.style.display = "grid";
-      }
+ if (code === "FIDELIOR") {
+  if (!invoice) {
+    if (!pcloudRootHandle) return;
+
+    const base = ["FIDELIOR", "VERWALTUNG"];
+    const raw  = await listChildFolders(pcloudRootHandle, base);
+
+    // Alphabetisch sortieren (de, case-insensitiv, numerisch), Duplikate entfernen
+    const options = [...new Set(raw)]
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "de", { sensitivity: "base", numeric: true }));
+
+    if (options.length) {
+      const prev = subSel.value; // Auswahl behalten, falls möglich
+      subSel.innerHTML = options.map(v => `<option value="${v}">${v}</option>`).join("");
+      subSel.value = options.includes(prev) ? prev : (options[0] || "");
+      if (!silent) subRow.style.display = "grid";
     }
-    return;
   }
+  return;
+}
 
   // Allgemeine Ermittlung aus Config + realen Ordnern
   const { scopeName, pcloudName } = getFolderNames(code);
