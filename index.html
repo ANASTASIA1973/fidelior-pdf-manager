@@ -6,23 +6,39 @@
   <meta name="app-build" content="2025.10.20-r11" />
   <title>Fidelior - PDF Management</title>
 
-  <link rel="stylesheet" href="style.css" />
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-  <!-- PDF.js (Preview) -->
+  <!-- Design-CSS (Reihenfolge wichtig) -->
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="style.css" /> <!-- projekt-spezifische Overrides -->
+
+  <!-- Scripts -->
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <!-- pdf-lib (Schreiben / Stempeln) – genau EINMAL laden -->
   <script defer src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
-  <!-- App -->
-  <script defer src="app.js"></script>
+  <script defer src="app.js?v=2025.10.26-r1"></script>
 </head>
-<body>
-  <!-- Header -->
-  <header class="header header--pro" role="banner">
+
+
+
+<body data-theme="light">
+
+<header class="header header--pro" role="banner">
+  <div class="header-inner">
     <div class="titles">
-      <h1 id="appTitle">Fidelior</h1>
-      <p class="subtitle">PDF Management - Grundbesitzverwaltung</p>
+      <h1 id="appTitle">Fidelior DMS</h1>
+      <p class="subtitle">PDF Management – Grundbesitzverwaltung</p>
     </div>
-  </header>
+    <!-- optional right side
+    <div class="header-actions"></div>
+    -->
+  </div>
+</header>
+
+
 
   <!-- Main -->
   <main class="container" role="main" aria-labelledby="appTitle">
@@ -185,11 +201,28 @@
             </div>
 <fieldset class="save-box" id="saveBox">
   <legend>Speichern in</legend>
-  <label class="chk"><input type="checkbox" id="chkScope" checked /> Scopevisio</label>
-  <label class="chk"><input type="checkbox" id="chkPcloud" /> pCloud</label>
-  <label class="chk"><input type="checkbox" id="chkLocal" /> Lokal</label>
-</fieldset>
 
+  <label class="chk">
+    <input type="checkbox" id="chkScope" checked />
+    <span>Scopevisio</span>
+  </label>
+
+  <label class="chk">
+    <input type="checkbox" id="chkPcloud" />
+    <span>pCloud</span>
+  </label>
+
+  <!-- NEU: Sammelordner-Umschalter direkt neben pCloud -->
+  <label class="chk" id="pcloudCollectWrap" title="Wenn aktiv: immer in den Sammelordner speichern">
+    <input type="checkbox" id="chkPcloudCollect" />
+    <span>pCloud: in Sammelordner</span>
+  </label>
+
+  <label class="chk">
+    <input type="checkbox" id="chkLocal" />
+    <span>Lokal</span>
+  </label>
+</fieldset>
 
             <div class="status" id="counters" aria-live="polite">Offen: -  In Arbeit: -  Fertig: -  Session: 0</div>
             <ul id="inboxList" class="list slim" aria-live="polite"></ul>
