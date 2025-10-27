@@ -1059,12 +1059,17 @@ function refreshPreview(){
   // Scopevisio (nur mit Objekt sinnvoll)
   if (wantScope && code){
     let seg;
-    if (code === "FIDELIOR")      seg = ["FIDELIOR", (invoice?"Eingangsrechnungen":"Dokumente"), year];
-    else if (code === "PRIVAT")   seg = ["PRIVAT",   (invoice?"Rechnungsbelege":"Dokumente"), year];
-    else if (isArndtCie(code))    seg = ["ARNDT & CIE", (invoice?"Eingangsrechnungen":"Dokumente"), year];
+    if (code === "FIDELIOR")      seg = ["FIDELIOR", (invoice ? "Eingangsrechnungen" : "Dokumente"), year];
+    else if (code === "PRIVAT")   seg = ["PRIVAT",   (invoice ? "Rechnungsbelege" : "Dokumente"), year];
+    else if (isArndtCie(code))    seg = ["ARNDT & CIE", (invoice ? "Eingangsrechnungen" : "Dokumente"), year];
     else {
-      const base = ["OBJEKTE", scopeName, (invoice?"Rechnungsbelege":"Objektdokumente")];
-      const leaf = (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year];
+      const base = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
+
+      // B75 + Rechnung => immer nur Jahresordner
+      const leaf = (code === "B75" && invoice)
+        ? [year]
+        : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
+
       seg = base.concat(leaf);
     }
     lines.push("Scopevisio: " + seg.join("\\"));
@@ -1078,18 +1083,23 @@ function refreshPreview(){
         ? ["FIDELIOR","VERWALTUNG","Finanzen - Buchhaltung","Eingangsrechnungen", year]
         : (sub ? ["FIDELIOR","VERWALTUNG", sub, year] : null);
     } else if (code === "PRIVAT"){
-      seg = ["FIDELIOR","PRIVAT", (invoice?"Rechnungsbelege":"Dokumente"), year];
+      seg = ["FIDELIOR","PRIVAT", (invoice ? "Rechnungsbelege" : "Dokumente"), year];
     } else if (!isArndtCie(code)){
       if (code === "A15" && invoice){
         const base = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"];
-        const leaf = (sub && sub!=="Rechnungsbelege") ? [sub, year] : [year];
+        const leaf = (sub && sub !== "Rechnungsbelege") ? [sub, year] : [year];
         seg = base.concat(leaf);
       } else {
         if (!invoice && !sub){
           seg = null;
         } else {
-          const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice?"Rechnungsbelege":"Objektdokumente")];
-          const leaf = (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year];
+          const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
+
+          // B75 + Rechnung => immer nur Jahresordner
+          const leaf = (code === "B75" && invoice)
+            ? [year]
+            : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
+
           seg = base.concat(leaf);
         }
       }
@@ -1097,22 +1107,18 @@ function refreshPreview(){
     lines.push("pCloud: " + (seg ? seg.join("\\") : "—"));
   }
 
-  // … und den Pfad nicht hart coden:
-if (wantPclBucket){
-  const seg = ["FIDELIOR", PCL_COLLECT_FOLDER]; // <-- Konstante nutzen
-  lines.push("pCloud (Sammelordner): " + seg.join("\\"));
-}
-
-  // Lokal immer anzeigen, wenn ausgewählt
-  const wantLocal = $("#chkLocal")?.checked === true;
-  if (wantLocal) {
-    lines.push("Lokal: (Dateidialog)");
+  // pCloud Sammelordner (Konstante PCL_COLLECT_FOLDER nutzen)
+  if (wantPclBucket){
+    const seg = ["FIDELIOR", PCL_COLLECT_FOLDER];
+    lines.push("pCloud (Sammelordner): " + seg.join("\\"));
   }
 
+  // Lokal
+  const wantLocal = $("#chkLocal")?.checked === true;
+  if (wantLocal) lines.push("Lokal: (Dateidialog)");
 
   targetPrev && (targetPrev.innerHTML = lines.join("<br>"));
 }
-
 
 
 function resolveTargets(){
@@ -1124,10 +1130,9 @@ function resolveTargets(){
   const wantScope = $("#chkScope")?.checked === true;
   const wantPcl   = $("#chkPcloud")?.checked === true;
 
-  // ⬇️ out zuerst deklarieren
   const out = { scope: null, pcloud: null, pcloudBucket: null };
 
-  // dann Bucket-Flag prüfen und befüllen
+  // Sammelordner
   const wantPclBucket = isPcloudBucketChecked();
   if (wantPclBucket && pcloudRootHandle){
     out.pcloudBucket = { root: pcloudRootHandle, seg: ["FIDELIOR", PCL_COLLECT_FOLDER] };
@@ -1135,33 +1140,47 @@ function resolveTargets(){
 
   const { scopeName, pcloudName } = getFolderNames(code);
 
-  // … dein bestehender Scope-/pCloud-Block unverändert …
+  // Scopevisio
   if (wantScope && scopeRootHandle && code){
-    if (code === "FIDELIOR")      out.scope = { root: scopeRootHandle, seg: ["FIDELIOR", (invoice?"Eingangsrechnungen":"Dokumente"), year] };
-    else if (code === "PRIVAT")   out.scope = { root: scopeRootHandle, seg: ["PRIVAT",   (invoice?"Rechnungsbelege":"Dokumente"), year] };
-    else if (isArndtCie(code))    out.scope = { root: scopeRootHandle, seg: ["ARNDT & CIE", (invoice?"Eingangsrechnungen":"Dokumente"), year] };
-    else {
-      const base = ["OBJEKTE", scopeName, (invoice?"Rechnungsbelege":"Objektdokumente")];
-      const leaf = (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year];
+    if (code === "FIDELIOR"){
+      out.scope = { root: scopeRootHandle, seg: ["FIDELIOR", (invoice ? "Eingangsrechnungen" : "Dokumente"), year] };
+    } else if (code === "PRIVAT"){
+      out.scope = { root: scopeRootHandle, seg: ["PRIVAT", (invoice ? "Rechnungsbelege" : "Dokumente"), year] };
+    } else if (isArndtCie(code)){
+      out.scope = { root: scopeRootHandle, seg: ["ARNDT & CIE", (invoice ? "Eingangsrechnungen" : "Dokumente"), year] };
+    } else {
+      const base = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
+
+      // B75 + Rechnung => immer nur Jahresordner
+      const leaf = (code === "B75" && invoice)
+        ? [year]
+        : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
+
       out.scope = { root: scopeRootHandle, seg: base.concat(leaf) };
     }
   }
 
+  // pCloud
   if (wantPcl && pcloudRootHandle && code && !isArndtCie(code)){
     if (code === "FIDELIOR"){
       out.pcloud = invoice
         ? { root: pcloudRootHandle, seg: ["FIDELIOR","VERWALTUNG","Finanzen - Buchhaltung","Eingangsrechnungen", year] }
         : (sub ? { root: pcloudRootHandle, seg: ["FIDELIOR","VERWALTUNG", sub, year] } : null);
     } else if (code === "PRIVAT"){
-      out.pcloud = { root: pcloudRootHandle, seg: ["FIDELIOR","PRIVAT", (invoice?"Rechnungsbelege":"Dokumente"), year] };
+      out.pcloud = { root: pcloudRootHandle, seg: ["FIDELIOR","PRIVAT", (invoice ? "Rechnungsbelege" : "Dokumente"), year] };
     } else {
       if (code === "A15" && invoice){
         const base = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"];
-        const leaf = (sub && sub!=="Rechnungsbelege") ? [sub, year] : [year];
+        const leaf = (sub && sub !== "Rechnungsbelege") ? [sub, year] : [year];
         out.pcloud = { root: pcloudRootHandle, seg: base.concat(leaf) };
       } else if (invoice || sub){
-        const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice?"Rechnungsbelege":"Objektdokumente")];
-        const leaf = (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub)) ? [sub, year] : [year];
+        const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
+
+        // B75 + Rechnung => immer nur Jahresordner
+        const leaf = (code === "B75" && invoice)
+          ? [year]
+          : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
+
         out.pcloud = { root: pcloudRootHandle, seg: base.concat(leaf) };
       }
     }
