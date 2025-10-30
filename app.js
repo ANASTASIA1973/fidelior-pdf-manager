@@ -6,7 +6,7 @@
      keine Duplikate, Abwahl erlaubt → manueller Betreff.
    • Dateiname live & korrekt; ARNDT & CIE exakt so im Dateinamen; keine „·“-DisplayNames
      in Pfadberechnung (Scopevisio nutzt scopevisioName, pCloud nutzt pcloudName).
-   • Subfolder-Dropdown wieder da (auch für Nicht‑Rechnung); B75 Spezialordner sichtbar.
+   • Subfolder-Dropdown wieder da (auch für Nicht-Rechnung); B75-Spezialordner sichtbar.
    • PDF.js workerSrc gesetzt (keine Deprecation-Warnung).
    • Inbox→Bearbeitet: stabil, löscht Ursprungsdatei aus Inbox (wenn möglich).
    • Vollständiges Reset auch für Dateiname & Zielvorschau.
@@ -14,6 +14,7 @@
      auf Wunsch die Config-Verbindung hergestellt (falls nicht verbunden).
    • Keine stillen Ordner-Neuanlagen – immer Confirm.
    ========================================================================== */
+
 (() => {
   /* ------------------------------- Helpers -------------------------------- */
   const $  = (s, el=document) => el.querySelector(s);
@@ -95,6 +96,29 @@ async function ensureWritePermissionWithPrompt(dirHandle, label = "Ordner") {
   } catch (e) {
     toast(`${label}: Permission-Check fehlgeschlagen: ${e?.message || e}`, 4000);
     return false;
+  }
+}
+// --- UI-Refresh-Helfer: Inbox-Eintrag sofort entfernen + Liste/Zähler neu zeichnen ---
+function __fdlCssEsc(s = "") {
+  return String(s).replace(/(["'\\])/g, "\\$1");
+}
+
+/** Entfernt den sichtbaren Inbox-Listeneintrag anhand des Dateinamens. */
+function __fdlRemoveInboxListItemByName(name) {
+  if (!name) return;
+  // Dein Markup: <button class="linklike" data-file="NAME.pdf">…</button>
+  const btn = document.querySelector(`button.linklike[data-file="${__fdlCssEsc(name)}"]`);
+  const li  = btn?.closest("li");
+  if (li) li.remove();
+}
+
+/** Baut die Inbox-Liste/Zähler neu auf (nutzt vorhandene Funktionen, fällt sonst still zurück). */
+function __fdlRepaintInboxList() {
+  if (typeof refreshInbox === "function") {
+    try { refreshInbox(); return; } catch(e) { console.warn("refreshInbox() failed:", e); }
+  }
+  if (typeof updateCounters === "function") {
+    try { updateCounters(); } catch {}
   }
 }
 
@@ -2279,156 +2303,268 @@ if (okIn) {
     currentInboxRelPath = null;
     currentInboxFileHandle = null;
     currentInboxFileName = "";
+// >>> UI-Refresh (sofort, ohne F5) — self-contained, ohne globale Helfer
+try {
+  // 1) Entferne den Eintrag rein über DOM
+  const esc = s => String(s).replace(/(["'\\])/g, "\\$1");
+  const sel = `button.linklike[data-file="${esc(fileName)}"]`;
+  document.querySelector(sel)?.closest("li")?.remove();
 
-    return true;
+  // 2) Liste aus dem Dateisystem neu aufbauen (falls vorhanden)
+  const list = document.querySelector("#inboxList");
+  const counters = document.querySelector("#counters");
+  if (list && inboxRootHandle) {
+    list.innerHTML = "";
+    let offen = 0;
 
+    for await (const e of inboxRootHandle.values()){
+      if (e.kind !== "file") continue;
+      if (!e.name.toLowerCase().endsWith(".pdf")) continue;
+
+      // 0-Byte-Platzhalter ausblenden
+      let f;
+      try {
+        const h = await inboxRootHandle.getFileHandle(e.name, { create:false });
+        f = await h.getFile();
+      } catch { continue; }
+      if (!f || f.size === 0) continue;
+
+      offen++;
+      const li = document.createElement("li");
+      li.innerHTML = `<button class="linklike" data-file="${e.name}">${e.name}</button><span class="badge">Inbox</span>`;
+      list.appendChild(li);
+
+      // Click-Handler wie in deiner Inbox-Auswahl
+      li.querySelector("button").addEventListener("click", async () => {
+        try {
+          const h = await inboxRootHandle.getFileHandle(e.name, { create:false });
+          const fileNow = await h.getFile();
+          if (!fileNow.size) { toast(`„${e.name}“ ist 0 Byte – bitte zuerst lokal synchronisieren.`, 4000); return; }
+          currentInboxFileHandle = h;
+          currentInboxFileName   = e.name;
+          currentInboxRelPath    = [e.name];
+          toast(`Inbox-Datei ausgewählt: <code>${e.name}</code>`, 1400);
+          if (typeof window.__fdl_takeFile === "function"){
+            await window.__fdl_takeFile(fileNow, { fromInbox:true });
+          }
+        } catch (err) {
+          console.warn("Inbox-Auswahl fehlgeschlagen:", err);
+          toast("Konnte Datei nicht öffnen.", 2500);
+        }
+      });
+    }
+
+    if (counters){
+      counters.textContent = `Offen: ${offen} · In Arbeit: 0 · Fertig: 0 · Session: 0`;
+    }
+  }
+
+  // 3) Event trotzdem feuern (falls später Listener existieren)
+  window.dispatchEvent(new CustomEvent("fdl:file-moved", {
+    detail: { from: "Inbox", to: "Bearbeitet", srcName: fileName, dstName: finalName }
+  }));
+} catch(e){
+  console.warn("post-move UI refresh failed:", e);
+}
+
+return true;
+
+} catch (e) {
+  console.error("moveInboxToProcessed failed:", e);
+  toast(`Verschieben fehlgeschlagen: ${e?.message || e}`, 4000);
+  return false;
+}
+}
+/* -------------------------------- Speichern ------------------------------ */
+/** Stempelt links vertikal: Datum – EINGEGANGEN – Kürzel (einzeilig, rotiert). */
+async function stampPdf(buf){
+  if (!window.PDFLib) return buf;
+  const { PDFDocument, StandardFonts, rgb, degrees } = PDFLib;
+
+  try {
+    const doc  = await PDFDocument.load(buf);
+    const page = doc.getPages()[0];
+    if (!page) return buf;
+
+    const font = await doc.embedFont(StandardFonts.HelveticaBold);
+
+    // Text in gewünschter Reihenfolge
+    const dateStr = (recvDateEl?.value || (typeof today === "function" ? today() : new Date().toLocaleDateString("de-DE")));
+    const objStr  = (objSel?.value || "—");
+    const text    = `${dateStr} – EINGEGANGEN – ${objStr}`;
+
+    // Größe/Farbe wie bisher, Position links oben, vertikal nach unten
+    const size = Math.max(10, Math.round(page.getWidth() * 0.018));
+    page.drawText(text, {
+      x: 16,
+      y: page.getHeight() - 40,
+      size,
+      font,
+      color: rgb(0.886, 0, 0.102),
+      rotate: degrees(-90)
+    });
+
+    const out = await doc.save({ useObjectStreams: true });
+    return out.buffer || out; // kompatibel bleiben
   } catch (e) {
-    console.error("moveInboxToProcessed failed:", e);
-    toast(`Verschieben fehlgeschlagen: ${e?.message || e}`, 4000);
-    return false;
+    console.error("[stampPdf] Fehler:", e);
+    return buf; // niemals blockieren
   }
 }
 
 
-  /* -------------------------------- Speichern ------------------------------ */
-  async function stampPdf(buf){ if(!window.PDFLib) return buf; const { PDFDocument, StandardFonts, rgb, degrees } = PDFLib; const doc = await PDFDocument.load(buf); const page = doc.getPages()[0]; if(!page) return buf; const font = await doc.embedFont(StandardFonts.HelveticaBold); const text = `${(objSel?.value||"—")} – EINGEGANGEN: ${recvDateEl?.value||today()}`; const size = Math.max(10, Math.round(page.getWidth()*0.018)); page.drawText(text, { x: 16, y: page.getHeight()-40, size, font, color: rgb(0.886,0,0.102), rotate: degrees(-90) }); const out = await doc.save({ useObjectStreams:true }); return out.buffer; }
-  async function pickAndWriteLocal(fileName, bytes){ if (!window.showSaveFilePicker) return false; const handle=await window.showSaveFilePicker({ suggestedName:fileName, types:[{description:"PDF", accept:{ "application/pdf":[".pdf"] }}] }).catch(()=>null); if(!handle) return false; const ws=await handle.createWritable(); await ws.write(new Blob([bytes],{type:"application/pdf"})); await ws.close(); return true; }
 
-$("#saveBtn")?.addEventListener("click", async ()=> {
-  try{
-    if(!saveArrayBuffer || !pdfDoc || !lastFile){
-      toast("Kein Dokument geladen.", 2500); return;
-    }
-    if ($("#chkScope")?.checked && !scopeRootHandle){
-      toast("Nicht verbunden: <strong>Scopevisio</strong>. Bitte zuerst verbinden.", 3500); return;
-    }
-    if (($("#chkPcloud")?.checked || $("#chkPcloudBucket")?.checked) && !pcloudRootHandle){
-      toast("Nicht verbunden: <strong>pCloud</strong>. Bitte zuerst verbinden.", 3500); return;
+// === SPEICHERN: Klick-Handler ===
+$("#saveBtn")?.addEventListener("click", async (ev) => {
+  ev.preventDefault();
+
+  try {
+    if (!pdfDoc || !saveArrayBuffer) {
+      toast("Keine PDF geladen.", 2000);
+      return;
     }
 
-    const wantLocal = $("#chkLocal")?.checked === true;
-    const fileName  = effectiveFileName();
-    const stamped   = await stampPdf(saveArrayBuffer);
-    const targets   = resolveTargets(); // liefert {scope, pcloud, pcloudBucket}
+    // 1) Dateiname & Bytes vorbereiten
+    const fileName = (typeof effectiveFileName === "function")
+      ? effectiveFileName()
+      : (lastFile?.name || "dokument.pdf");
 
-    // --- Schreibrechte (Prompt nur im Klick-Handler sicher) ---
-    if (targets.scope) {
-      const ok = await ensureWritePermissionWithPrompt(targets.scope.root, "Scopevisio");
-      if (!ok) return;
-    }
-    if (targets.pcloud) {
-      const ok = await ensureWritePermissionWithPrompt(targets.pcloud.root, "pCloud");
-      if (!ok) return;
-    }
-    if (targets.pcloudBucket) {
-      const ok = await ensureWritePermissionWithPrompt(targets.pcloudBucket.root, "pCloud (Sammelordner)");
-      if (!ok) return;
-    }
+    let stampedBytes = saveArrayBuffer;
+    try { stampedBytes = await stampPdf(saveArrayBuffer); } catch {}
 
-    // Zielvorschau
-    if (targets.scope)
-      toast(`Ziel (Scopevisio):<br><code>${targets.scope.seg.join("\\")}\\${fileName}</code>`, 2400);
-    if (targets.pcloud)
-      toast(`Ziel (pCloud):<br><code>${targets.pcloud.seg.join("\\")}\\${fileName}</code>`, 2400);
-    if (targets.pcloudBucket)
-      toast(`Ziel (pCloud Sammelordner):<br><code>${targets.pcloudBucket.seg.join("\\")}\\${fileName}</code>`, 2400);
-
-    // Schreiben
+    // 2) Ziele auflösen & schreiben
+    const t = (typeof resolveTargets === "function") ? resolveTargets() : {};
     let okScope=false, okPcl=false, okPclBucket=false, okLocal=false;
 
-
-    if (targets.scope){
-      try { await writeFileTo(targets.scope.root, targets.scope.seg, stamped, fileName, { unique: true });
- okScope=true; }
-      catch(e){ toast(`⚠️ Schreiben nach <strong>Scopevisio</strong> fehlgeschlagen:<br><code>${targets.scope.seg.join("\\")}</code><br>${e?.message||e}`, 6000); }
-    }
-    if (targets.pcloud){
-      try { await writeFileTo(targets.pcloud.root, targets.pcloud.seg, stamped, fileName, { unique: true });
- okPcl=true; }
-      catch(e){ toast(`⚠️ Schreiben nach <strong>pCloud</strong> fehlgeschlagen:<br><code>${targets.pcloud.seg.join("\\")}</code><br>${e?.message||e}`, 6000); }
-    }
-    if (targets.pcloudBucket){
-      try { await writeFileTo(targets.pcloudBucket.root, targets.pcloudBucket.seg, stamped, fileName, { unique: true });
- okPclBucket=true; }
-      catch(e){ toast(`⚠️ Schreiben nach <strong>pCloud (Sammelordner)</strong> fehlgeschlagen:<br><code>${targets.pcloudBucket.seg.join("\\")}</code><br>${e?.message||e}`, 6000); }
-    }
-
-    if (!okScope && !okPcl && !okPclBucket && !wantLocal){
-      toast("Es wurde in kein Ziel geschrieben.", 3500); return;
-    }
-
-   if (wantLocal){
-  const localSaved = await pickAndWriteLocal(fileName, stamped);
-  if (localSaved){ okLocal = true; toast("Lokale Kopie gespeichert.", 1200); }
-}
-
-
-    // --- E-Mail unverändert ---
-    {
-      const to=[...Mail.to], cc=[...Mail.cc], bcc=[...Mail.bcc];
-      const { subject, replyTo } = computeSubjectAndReply();
-      const isEGYO = (objSel?.value || "").trim().toUpperCase() === "EGYO";
-      let allowSend = true;
-
-      if (isEGYO && isInvoice() && (to.length || cc.length || bcc.length)) {
-        const lines = [
-          "Soll die automatisch gesetzte E-Mail gesendet werden?",
-          "",
-          `An:      ${to.join(", ") || "—"}`,
-          cc.length ? `CC:      ${cc.join(", ")}` : "",
-          bcc.length ? `BCC:     ${bcc.join(", ")}` : "",
-          `Betreff: ${subject || "—"}`,
-          `Anhang:  ${fileName}`
-        ].filter(Boolean).join("\n");
-        allowSend = window.confirm(lines);
+    // Scopevisio
+    if (t?.scope?.root && t.scope.seg?.length) {
+      try {
+        await writeFileTo(t.scope.root, t.scope.seg, stampedBytes, fileName, { unique:true });
+        okScope = true;
+      } catch (e) {
+        console.warn("Scopevisio-Write failed:", e);
+        toast("Scopevisio: Speichern fehlgeschlagen.", 2200);
       }
+    }
 
-      if (allowSend && (to.length || cc.length || bcc.length)) {
-        try{
+    // pCloud (Objektpfad)
+    if (t?.pcloud?.root && t.pcloud.seg?.length) {
+      try {
+        await writeFileTo(t.pcloud.root, t.pcloud.seg, stampedBytes, fileName, { unique:true });
+        okPcl = true;
+      } catch (e) {
+        console.warn("pCloud-Write failed:", e);
+        toast("pCloud: Speichern fehlgeschlagen.", 2200);
+      }
+    }
+
+    // pCloud Sammelordner
+    if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
+      try {
+        await writeFileTo(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, fileName, { unique:true });
+        okPclBucket = true;
+      } catch (e) {
+        console.warn("pCloud (Sammelordner) failed:", e);
+        toast("pCloud (Sammelordner): Speichern fehlgeschlagen.", 2200);
+      }
+    }
+
+    // Lokal (optional)
+    const wantLocal = $("#chkLocal")?.checked === true;
+    if (wantLocal && window.showSaveFilePicker) {
+      try {
+        const fh = await window.showSaveFilePicker({
+          suggestedName: fileName,
+          types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }]
+        });
+        const ws = await fh.createWritable({ keepExistingData:false });
+        await ws.write(new Blob([stampedBytes], { type:"application/pdf" }));
+        await ws.close();
+        okLocal = true;
+      } catch (e) {
+        if (e?.name !== "AbortError") {
+          console.warn("Local save failed:", e);
+          toast("Lokal: Speichern fehlgeschlagen.", 2200);
+        }
+      }
+    }
+
+    // 3) E-Mail – nur wenn Empfänger vorhanden
+    const to  = [...Mail.to];
+    const cc  = [...Mail.cc];
+    const bcc = [...Mail.bcc];
+    const rc  = to.length + cc.length + bcc.length;
+
+    if (rc) {
+      const { subject, replyTo } = (typeof computeSubjectAndReply === "function")
+        ? computeSubjectAndReply()
+        : { subject:"", replyTo:"" };
+
+      const subj = (subject && subject.trim()) || "(ohne Betreff)";
+
+      const confirmText = [
+        "E-Mail jetzt senden?",
+        "",
+        `An:       ${to.join(", ") || "—"}`,
+        cc.length  ? `CC:       ${cc.join(", ")}`  : "",
+        bcc.length ? `BCC:      ${bcc.join(", ")}` : "",
+        `Betreff:  ${subj}`,
+        `Reply-To: ${replyTo || "—"}`,
+        `Anhang:   ${fileName}`
+      ].filter(Boolean).join("\n");
+
+      if (window.confirm(confirmText)) {
+        try {
           await sendMail({
             to, cc, bcc,
-            subject,
-            text: computeMailBody(),
+            subject: subject || "",
+            text: (typeof computeMailBody === "function" ? computeMailBody() : ""),
             replyTo: replyTo || undefined,
-            attachmentBytes: stamped,
+            attachmentBytes: stampedBytes,
             attachmentName: fileName
           });
           toast("<strong>E-Mail versendet</strong>", 2500);
-        } catch(e){
-          toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message||e}`, 4000);
+        } catch (e) {
+          toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message || e}`, 4000);
         }
-      } else if (!allowSend) {
-        toast("E-Mail-Versand abgebrochen (EGYO).", 1800);
+      } else {
+        toast("E-Mail-Versand abgebrochen.", 1800);
       }
     }
 
-    // Inbox → Bearbeitet, wenn irgendwo gespeichert oder lokal gespeichert
-    if (currentInboxFileHandle && (okScope || okPcl || okPclBucket || wantLocal)){
-      const moved = await moveInboxToProcessed();
-      if (moved) toast("Inbox → Bearbeitet verschoben.", 1600);
+    // 4) Inbox → Bearbeitet, wenn irgendwas gespeichert wurde oder Lokal gewünscht war
+    if (currentInboxFileHandle && (okScope || okPcl || okPclBucket || okLocal || wantLocal)) {
+      try {
+        const moved = await moveInboxToProcessed();
+        if (moved) toast("Inbox → Bearbeitet verschoben.", 1600);
+      } catch (e) {
+        console.warn("post-move failed:", e);
+        toast("Verschieben in 'Bearbeitet' fehlgeschlagen.", 2500);
+      }
     }
 
- const okTargets = [
-  okScope ? "Scopevisio" : null,
-  okPcl ? "pCloud" : null,
-  okPclBucket ? "pCloud (Sammelordner)" : null,
-  okLocal ? "Lokal" : null
-].filter(Boolean).join(" & ") || "—";
-
+    // 5) Feedback & Reset
+    const okTargets = [
+      okScope     ? "Scopevisio"            : null,
+      okPcl       ? "pCloud"                : null,
+      okPclBucket ? "pCloud (Sammelordner)" : null,
+      okLocal     ? "Lokal"                 : null
+    ].filter(Boolean).join(" & ") || "—";
 
     toast(`<strong>Gespeichert</strong><br>${fileName}<br><em>${okTargets}</em>`, 4200);
-    hardReset();
-  }catch(e){
-    console.error(e);
-    toast(`<strong>Fehler</strong><br>${e?.message||e}`, 6000);
+    if (typeof hardReset === "function") hardReset();
+
+  } catch (e) {
+    console.error("[SAVE] Fehler:", e);
+    toast(`<strong>Fehler</strong><br>${e?.message || e}`, 6000);
   }
 });
 
+// Cancel: full reset
+$("#cancelBtn")?.addEventListener("click",(e)=>{ e.preventDefault(); hardReset(); toast("Vorgang abgebrochen.",1500); });
 
-  // Cancel: full reset
-  $("#cancelBtn")?.addEventListener("click",(e)=>{ e.preventDefault(); hardReset(); toast("Vorgang abgebrochen.",1500); });
 
-  function hardReset(){
+function hardReset(){
   // PDF/Preview state
   pdfDoc = null;
   renderTasks = [];
@@ -2436,7 +2572,6 @@ $("#saveBtn")?.addEventListener("click", async ()=> {
   saveArrayBuffer = null;
   previewArrayBuffer = null;
   setStatus("");        // Statuszeile leeren
-
 
   // Inbox-Kontext vollständig leeren
   currentInboxFileHandle = null;
@@ -2464,10 +2599,9 @@ $("#saveBtn")?.addEventListener("click", async ()=> {
 
   if (invDateEl) { invDateEl.value = ""; invDateEl.classList.remove("auto"); }
   if (recvDateEl){
-  recvDateEl.value = today();
-  recvDateEl.classList.add("auto");
-}
-
+    recvDateEl.value = today();
+    recvDateEl.classList.add("auto");
+  }
 
   if (typeSel){ typeSel.selectedIndex = 0; }
   if (objSel){  objSel.selectedIndex  = 0; }
@@ -2503,12 +2637,13 @@ $("#saveBtn")?.addEventListener("click", async ()=> {
   refreshPreview();
 }
 
-  /* ------------------------------ Loaders ---------------------------------- */
-  async function loadDocTypes(){ try{ const j = await loadJson("document_types.json"); docTypesCfg = j; const list=(j?.types||[]); const def=j?.defaultTypeKey||""; typeSel.innerHTML = ""; const ph = new Option("(Dokumenttyp wählen)",""); ph.disabled = true; typeSel.appendChild(ph); list.forEach(t=>{ const o = new Option(t.label || t.key || "", t.key || t.label); if (t.isInvoice) o.dataset.isInvoice = "true"; if (t.key === def) o.selected = true; typeSel.appendChild(o); }); }catch{ typeSel.innerHTML = `
+/* ------------------------------ Loaders ---------------------------------- */
+async function loadDocTypes(){ try{ const j = await loadJson("document_types.json"); docTypesCfg = j; const list=(j?.types||[]); const def=j?.defaultTypeKey||""; typeSel.innerHTML = ""; const ph = new Option("(Dokumenttyp wählen)",""); ph.disabled = true; typeSel.appendChild(ph); list.forEach(t=>{ const o = new Option(t.label || t.key || "", t.key || t.label); if (t.isInvoice) o.dataset.isInvoice = "true"; if (t.key === def) o.selected = true; typeSel.appendChild(o); }); }catch{ typeSel.innerHTML = `
         <option value="" disabled>(Dokumenttyp wählen)</option>
         <option value="rechnung" data-isinvoice="true">Rechnung</option>
         <option value="sonstiges">Sonstiges</option>`; } }
- async function loadObjects(){
+
+async function loadObjects(){
   try{
     // 1) Datei laden
     const j = await loadJson("objects.json");
@@ -2575,7 +2710,6 @@ objSel?.addEventListener("change", async () => {
   refreshPreview();
 });
 
-
 typeSel?.addEventListener("change", async () => {
   // Mail-State leeren
   Mail.to.clear();
@@ -2608,7 +2742,6 @@ subSel?.addEventListener("change", () => {
   }
   refreshPreview();
 });
-
 
 /* ------------------------------- Boot ------------------------------------ */
 async function boot() {
@@ -2646,6 +2779,49 @@ async function boot() {
     recvDateEl.classList.add("auto");
   }
 
+  // === Defaults + Merken der Auswahl ===
+function loadTargetPrefs(){
+  try { return JSON.parse(localStorage.getItem("fdlTargets")||"{}"); }
+  catch { return {}; }
+}
+function saveTargetPrefs(prefs){
+  try { localStorage.setItem("fdlTargets", JSON.stringify(prefs)); } catch {}
+}
+function applyPrefs(p){
+  const s  = $("#chkScope");
+  const pc = $("#chkPcloud");
+  const pb = $("#chkPcloudBucket") || $("#chkPcloudCollect"); // je nach ID
+  const lo = $("#chkLocal");
+  if (s)  s.checked  = !!p.scope;
+  if (pc) pc.checked = !!p.pcloud;
+  if (pb) pb.checked = !!p.bucket;
+  if (lo) lo.checked = !!p.local;
+}
+
+let prefs = loadTargetPrefs();
+if (!("scope" in prefs) && !("bucket" in prefs) && !("pcloud" in prefs) && !("local" in prefs)) {
+  // Erststart → unsere Defaults
+  prefs = { scope:true, bucket:true, pcloud:false, local:false };
+  saveTargetPrefs(prefs);
+}
+applyPrefs(prefs);
+
+// bei Änderungen sofort speichern
+["#chkScope","#chkPcloud","#chkPcloudBucket","#chkPcloudCollect","#chkLocal"].forEach(sel=>{
+  const el = $(sel);
+  el?.addEventListener("change", ()=>{
+    const next = {
+      scope:  $("#chkScope")?.checked || false,
+      pcloud: $("#chkPcloud")?.checked || false,
+      bucket: ($("#chkPcloudBucket")?.checked || $("#chkPcloudCollect")?.checked) || false,
+      local:  $("#chkLocal")?.checked || false
+    };
+    saveTargetPrefs(next);
+    refreshPreview();
+  });
+});
+
+
   refreshPreview();
 
 }
@@ -2678,6 +2854,10 @@ try {
   FDLDBG.loadDocTypes= loadDocTypes;
 } catch {}
 
+// Reagiere global auf Verschiebe-Events (zusätzliche Sicherheit)
+window.addEventListener("fdl:file-moved", () => {
+  try { repaintInboxList(); } catch {}
+});
 
 
 // ===== DEBUG-HELPER: __FDL_DEBUG() =====
@@ -2709,6 +2889,30 @@ window.__FDL_DEBUG = async function(){
   }
 };
 
+// --- UI-Helfer: Inbox-Chip direkt entfernen + Repaint triggern ---
+function cssEscape_(s=""){ return String(s).replace(/("|'|\\)/g,"\\$1"); }
+
+function removeInboxChipUIByName(name){
+  if(!name) return;
+  // versuche über data-Attribute; passe ggf. an dein Markup an
+  const sel = [
+    `.file-chip[data-name="${cssEscape_(name)}"]`,
+    `.file-chip[data-path$="/${cssEscape_(name)}"]`
+  ].join(", ");
+  const el = document.querySelector(sel);
+  if(el) el.remove();
+}
+
+// globale Repaint-Strategie: preferiere zentrales paintChips(), fallback DOM-only
+function repaintInboxList(){
+  if (typeof paintChips === "function") {
+    try { paintChips(); return; } catch(e){ console.warn("paintChips() failed:", e); }
+  }
+  // Falls kein zentraler Renderer existiert, wenigstens Zähler neu setzen, wenn du eine Funktion hast:
+  if (typeof updateCounters === "function") {
+    try { updateCounters(); } catch {}
+  }
+}
 
 
 })();
