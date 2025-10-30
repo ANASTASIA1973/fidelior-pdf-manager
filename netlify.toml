@@ -1,4 +1,4 @@
-# netlify.toml — Fidelior PDF Manager (statisches Frontend + Functions)
+# netlify.toml — Fidelior PDF Manager (static frontend + Netlify Functions)
 
 [build]
   command   = ""                     # kein Build-Schritt
@@ -9,9 +9,9 @@
   NODE_VERSION = "20"
 
 [functions]
-  node_bundler   = "esbuild"
-  # Falls Functions JSON/Assets aus dem Repo brauchen (z. B. Adressbuch etc.):
-  included_files = ["config/**"]     # ggf. entfernen, wenn nicht benötigt
+  node_bundler = "esbuild"
+  # Falls Functions JSON/Assets aus dem Repo brauchen (Adressbuch etc.):
+  included_files = ["config/**"]     # <— entfernen, wenn nicht benötigt
 
 [[plugins]]
   package = "@netlify/plugin-functions-install-core"
@@ -24,9 +24,25 @@
   status = 200
 
 # -------- Caching-Strategie --------
-# JS/CSS nicht hart cachen → schnelle Updates ohne Hard-Reload
+# HTML nie cachen → Updates sofort sichtbar
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-store"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-store"
+
+# JS/CSS nicht hart cachen (auch in Unterordnern)
 [[headers]]
   for = "/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/**/*.js"
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 
@@ -35,7 +51,12 @@
   [headers.values]
     Cache-Control = "public, max-age=0, must-revalidate"
 
-# Falls du CSS/JS auch in Unterordnern hast, ergänze:
+[[headers]]
+  for = "/**/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Assets-Ordner explizit (falls dort JS/CSS/JSON liegen)
 [[headers]]
   for = "/assets/*"
   [headers.values]
@@ -52,7 +73,12 @@
   [headers.values]
     Cache-Control = "no-store"
 
-# Optional: PDF.js Worker nicht hart cachen
+[[headers]]
+  for = "/**/*.json"
+  [headers.values]
+    Cache-Control = "no-store"
+
+# Optional: PDF.js Worker nicht hart cachen (falls lokal gehostet)
 [[headers]]
   for = "/pdf.worker.min.js"
   [headers.values]
