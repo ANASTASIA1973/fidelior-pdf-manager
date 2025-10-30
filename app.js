@@ -278,6 +278,21 @@ let currentInboxRelPath=null; // NEU: Pfadsegmente relativ zur Inbox (für korre
   const typeSel=$("#docTypeSelect"), objSel=$("#objectSelect");
   const subRow=$("#subfolderRow"), subSel=$("#genericSubfolder");
   const fileNamePrev=$("#fileNamePreview"), targetPrev=$("#targetPreview");
+  // Manuelle Eingaben merken (überschreibt Auto-Erkennung)
+// Manuelle Eingaben merken (überschreibt Auto-Erkennung) + Preview sofort aktualisieren
+invNoEl?.addEventListener("input", ()=>{
+  invNoEl.dataset.userTyped = "1";
+  invNoEl.classList.remove("auto");
+  refreshPreview();                 // <<< sofort Dateiname/Ziel neu berechnen
+});
+invNoEl?.addEventListener("change", ()=>{ refreshPreview(); }); // Fallback für Autofill/Paste
+
+senderEl?.addEventListener("input", ()=>{
+  senderEl.dataset.userTyped = "1";
+  refreshPreview();                 // <<< sofort aktualisieren
+});
+
+
 
 /* ----------------------------- Mail State (clean) ------------------------- */
 const Mail = {
@@ -708,59 +723,52 @@ document.getElementById("downloadBtn")?.addEventListener("click", () => {
 });
 
 
- // === Helper: robuste Rechnungsnummer-Erkennung (unabhängig von Zuordnungsregeln) ===
-function findInvoiceNumber(rawText) {
+// === Helper: STRIKTE Rechnungsnummer-Erkennung (lieber leer als falsch) ===
+function findInvoiceNumberStrict(rawText) {
   if (!rawText) return "";
-  const text = String(rawText).replace(/\s+/g, " ");
 
-  const hits = [];
+  const text = String(rawText)
+    .replace(/\s+/g, " ")
+    .replace(/\u00A0/g, " ")
+    .replace(/[\u2013\u2014\u2212]/g, "-");
 
-  // 1) Label-basierte Treffer (bevorzugt)
   const labelRxs = [
-    /(?:rechnungs(?:nummer|nr\.?)|rechnung\s*nr\.?|rg-?nr\.?|rn\.?|belegnr\.?|belegnummer)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})/gi,
-    /(?:invoice(?:\s*no\.?| number)?|inv\.?\s*no\.?|billing\s*no\.?)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})/gi,
-    /(?:rechnung|invoice)[^.\n]{0,50}?\b(?:nr\.?|no\.?)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9./\-]{2,})/gi,
+    /\b(rechnungs?(nummer|nr|no)\.?|rg-?nr\.?|rn\.?|beleg(nr|nummer)|rechnung\s*#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{2,})/gi,
+    /\b(invoice\s*(no|nr|number)?|inv\.?\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{2,})/gi,
   ];
+  const candidates = [];
+
   for (const rx of labelRxs) {
-    let m; while ((m = rx.exec(text))) hits.push(m[1]);
+    let m; while ((m = rx.exec(text))) candidates.push({ c: m[4], score: 3 });
   }
 
-  // 2) Nähe-Fallback: ein plausibles Token kurz nach „Rechnung/Invoice“
-  for (const m of text.matchAll(/(?:rechnung|invoice)[^.\n]{0,50}?([A-Z0-9][A-Z0-9./\-]{4,})/gi)) {
-    hits.push(m[1]);
+  for (const m of text.matchAll(/\b([A-Z]{1,5}[-_/]?\d{3,}|\d{3,}[-_/][A-Z0-9]{2,})\b/gi)) {
+    candidates.push({ c: m[1], score: 1 });
   }
 
-  // 3) Numerischer Fallback 6–12 Ziffern in Nähe „Rechn…/Invoice“
-  for (const m of text.matchAll(/(?:rechn\w*|invoice)\D{0,40}(\d{6,12})/gi)) {
-    hits.push(m[1]);
+  const bad = {
+    date: /^(\d{1,2}[.\-/]){2}\d{2,4}$/i,
+    iban: /^[A-Z]{2}\d{2}[A-Z0-9]{10,}$/i,
+    phone:/^\+?\d{2,3}[\s/-]?(?:\d{2,4}[\s/-]?){2,4}\d{2,}$/i,
+    zip:  /^\d{5}$/,
+    money: /(?:€|\bEUR\b)\s*\d/,
+    badPrefix: /^(kdnr|kunde|kundennr|bestell|auftrag)\b/i
+  };
+  const clean = s => String(s||"").trim().replace(/^[#:.\-]+/,"").replace(/[,;:.]+$/,"").toUpperCase();
+  const invalid = s => !s || s.length<4 || bad.date.test(s) || bad.iban.test(s) || bad.phone.test(s) ||
+                       bad.zip.test(s)  || bad.money.test(s) || bad.badPrefix.test(s);
+
+  const pool = [];
+  for (const k of candidates){
+    const x = clean(k.c);
+    if (!invalid(x)) {
+      let sc = k.score + (/[A-Z]/.test(x)?1:0) + ((x.length>=6&&x.length<=20)?1:0);
+      pool.push({ c:x, score:sc });
+    }
   }
-
-  // Filter: keine IBAN/Datums/Kunden-/Bestellnummern etc.
-  const looksLikeDate1 = /^(\d{1,2}[.\-\/]){2}\d{2,4}$/;
-  const looksLikeDate2 = /^\d{2}\.\d{2}\.\d{2,4}$/;
-  const looksLikeIBAN  = /^[A-Z]{2}\d{2}[A-Z0-9]{10,}$/i;
-  const badLabelStart  = /^(kdnr|kunde|kundennr|kundennummer|bestellnr|bestellnummer|auftrag|auftragsnr|auftragsnummer)\b/i;
-
-  const clean = Array.from(new Set(hits.map(c =>
-    String(c).trim().replace(/[,;:]+$/, "").replace(/^[#:.\-]+/, "")
-  ))).filter(c =>
-    c.length >= 4 &&
-    !looksLikeDate1.test(c) &&
-    !looksLikeDate2.test(c) &&
-    !/^\d{1,5}$/.test(c) &&
-    !looksLikeIBAN.test(c) &&
-    !badLabelStart.test(c)
-  );
-
-  // Ranking: alphanumerisch > rein numerisch; längere zuerst
-  clean.sort((a, b) => {
-    const aAlpha = /[A-Z]/i.test(a) ? 1 : 0;
-    const bAlpha = /[A-Z]/i.test(b) ? 1 : 0;
-    if (bAlpha !== aAlpha) return bAlpha - aAlpha;
-    return b.length - a.length;
-  });
-
-  return clean[0] || "";
+  if (!pool.length) return "";
+  pool.sort((a,b)=>b.score-a.score);
+  return pool[0].c;
 }
 
 /* --------------------------- Auto-Erkennung ------------------------------ */
@@ -781,6 +789,7 @@ function euroToNum(s){
   const v=Number(x); return isFinite(v)?v:NaN;
 }
 
+
 // ====== ERSATZ: autoRecognize (Block 2) ======
 async function autoRecognize() {
   try {
@@ -789,54 +798,65 @@ async function autoRecognize() {
     /* Betrag */
     const moneyHits = [...txt.matchAll(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g)].map(m => m[0]);
     if (moneyHits.length) {
-      const pick = moneyHits.map(v => ({ v, n: euroToNum(v) }))
-                            .sort((a,b)=>b.n-a.n)[0].v;
+      const pick = moneyHits
+        .map(v => ({ v, n: euroToNum(v) }))
+        .sort((a, b) => b.n - a.n)[0].v;
       amountEl.dataset.raw = pick;
       amountEl.value = formatAmountDisplay(pick);
       amountEl.classList.add("auto");
     }
+ d
+   /* Datum (konservativ; nur plausibles jüngstes Datum ≤ heute, sonst leer) */
+const MONTHS = { januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12 };
+const isoFromDMY = (d,m,y)=>{ const yy=String(y).length===2?(+y<50?2000+ +y:1900+ +y):+y; return `${yy}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; };
 
-    /* Datum */
-    const MONTHS = { januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12 };
-    const isoFromDMY = (d,m,y)=>{ const yy=String(y).length===2?(+y<50?2000+ +y:1900+ +y):+y; return `${yy}-${pad2(m)}-${pad2(d)}`; };
-
-    const dateHits=[];
-    for (const m of txt.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) dateHits.push(isoFromDMY(+m[1],+m[2],m[3]));
-    for (const m of txt.matchAll(/\b(\d{1,2})\.\s*(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)){
-      const mon = MONTHS[m[2].toLowerCase()]; if (mon) dateHits.push(isoFromDMY(+m[1],mon,m[3]));
-    }
-    for (const m of txt.matchAll(/\b(?:im\s+)?(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)){
-      const mon = MONTHS[m[1].toLowerCase()]; if (mon) dateHits.push(isoFromDMY(1,mon,m[2]));
-    }
-    const todayIso = new Date().toISOString().slice(0,10);
-    const uniq = Array.from(new Set(dateHits)).filter(Boolean).sort();
-    const nonFuture = uniq.filter(d => d <= todayIso);
-    const picked = nonFuture.length ? nonFuture[nonFuture.length - 1] : todayIso;
+const dateHits=[];
+for (const m of txt.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
+  dateHits.push(isoFromDMY(+m[1],+m[2],m[3]));
+}
+for (const m of txt.matchAll(/\b(\d{1,2})\.\s*(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)){
+  const mon = MONTHS[m[2].toLowerCase()]; if (mon) dateHits.push(isoFromDMY(+m[1],mon,m[3]));
+}
+const todayIso = new Date().toISOString().slice(0,10);
+const uniq = Array.from(new Set(dateHits)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+const nonFuture = uniq.filter(d => d <= todayIso).sort();
+if (invDateEl && !invDateEl.value.trim()) {
+  if (nonFuture.length) {
+    const picked = nonFuture[nonFuture.length - 1];
     invDateEl.value = isoToDisp(picked);
-    invDateEl.classList.add("auto");
+    invDateEl.classList.add('auto');
+  } else {
+    invDateEl.value = '';                      // nichts Plausibles → leer
+    invDateEl.classList.remove('auto');
+  }
+}
 
-    /* Rechnungsnummer */
-    const autoInvNo = findInvoiceNumber(txt);
-    if (autoInvNo && invNoEl && !invNoEl.value.trim()) {
-      invNoEl.value = autoInvNo.trim();
-      invNoEl.classList.add("auto");
-    }
+
+ /* Rechnungsnummer (nur setzen, wenn plausibel; sonst leer lassen) */
+const autoInv = findInvoiceNumberStrict(txt);
+if (invNoEl && !invNoEl.dataset.userTyped) {
+  if (autoInv) {
+    invNoEl.value = autoInv;
+    invNoEl.classList.add('auto');
+  } else {
+    invNoEl.value = "";
+    invNoEl.classList.remove('auto');
+  }
+}
+
 
     /* 1) Dokumenttyp früh setzen → Unterordner können korrekt geladen werden */
-    const hadType = !!(typeSel?.value);
     if (typeSel && typeSel.value !== "rechnung") {
-      // Falls deine Keys anders lauten: hier ggf. auf den korrekten Key anpassen
       typeSel.value = "rechnung";
-      toast("Dokumentenart gesetzt: <strong>Rechnung</strong>", 2000);
+      toast('Dokumentenart gesetzt: <strong>Rechnung</strong>', 2000);
     }
 
     /* 2) AUTO-ASSIGN: Objekt & (optional) Unterordner */
     let appliedMsg = null;
     if (assignmentsCfg && Array.isArray(assignmentsCfg.patterns) && assignmentsCfg.patterns.length) {
       const tRaw = (txt || "")
-  .replace(/\u00A0/g, " ")          // geschütztes Leerzeichen → normales Leerzeichen
-  .replace(/[\u2013\u2014\u2212]/g, "-"); // „–“, „—“, „−“ → normales Minus
-      let hit = null;
+        .replace(/\u00A0/g, " ")
+        .replace(/[\u2013\u2014\u2212]/g, "-"); // – — −  -> -
 
       const normalizeList = (rule) => {
         if (Array.isArray(rule.patterns)) return rule.patterns;
@@ -845,29 +865,29 @@ async function autoRecognize() {
         return [];
       };
 
+      let hit = null;
       for (const rule of assignmentsCfg.patterns) {
         const list = normalizeList(rule);
         const matched = list.some(pat => {
           try { return new RegExp(pat, "i").test(tRaw); }
-          catch { return tRaw.toLowerCase().includes(String(pat||"").toLowerCase()); }
+          catch { return tRaw.toLowerCase().includes(String(pat || "").toLowerCase()); }
         });
         if (matched) { hit = rule; break; }
       }
 
       if (hit) {
-        // Objekt setzen
         if (hit.object) {
           const before = objSel.value;
-          objSel.value = hit.object;
-          if (objSel.value !== before) appliedMsg = `Zuordnung: <strong>${hit.object}</strong>`;
+          objSel.value = String(hit.object);
+          if (objSel.value !== before) {
+            appliedMsg = `Zuordnung: <strong>${hit.object}</strong>`;
+          }
         }
 
-        // Unterordner-Optionen (müssen nach Typ/Objekt geladen werden)
         if (typeof updateSubfolderOptions === "function") {
           await updateSubfolderOptions({ silent: !hit.subfolder });
         }
 
-        // gewünschten Unterordner auswählen (falls vorhanden)
         if (hit.subfolder && subSel) {
           const wanted = String(hit.subfolder).trim();
           const has = Array.from(subSel.options).some(o => o.value === wanted);
@@ -893,9 +913,10 @@ async function autoRecognize() {
     if (amountEl.value)  found.push("Betrag");
     if (invDateEl.value) found.push("Rechnungsdatum");
     if (invNoEl?.value)  found.push("Rechnungsnr.");
-    if (found.length) toast(`<strong>Automatisch erkannt</strong><br>${found.join(" · ")}`, 2800);
-    if (appliedMsg) toast(appliedMsg, 2200);
+    if (found.length)    toast(`<strong>Automatisch erkannt</strong><br>${found.join(" · ")}`, 2800);
+    if (appliedMsg)      toast(appliedMsg, 2200);
 
+    // am Ende UI aktualisieren
     refreshPreview();
   } catch (e) {
     console.warn("Auto-Erkennung fehlgeschlagen", e);
@@ -918,37 +939,65 @@ async function autoRecognize() {
   }
   ensureEditableFileName();
 
- function computeFileNameAuto(){
-  const betragRaw = (amountEl?.value || "").trim();
-  const objCode   = (objSel?.value  || "").trim();
-  const sub       = (subSel?.value  || "").trim();   // Unterordner
+function computeFileNameAuto() {
+  // Eingaben einsammeln
+  const betragRaw = (amountEl?.value || "").trim();           // z. B. "45,22"
+  const absender  = (senderEl?.value || "").trim();
+  const reNummer  = (invNoEl?.value || "").trim();            // RE-/Rechnungsnummer (roh)
+  const objCode   = (objSel?.value  || "").trim();            // z. B. "EGYO" / "B75" ...
+  const sub       = (subSel?.value  || "").trim();            // Unterordner (für B75-Sonderfall)
 
-  // Objekt-Teil (Standard)
-  let objektPart = (() => {
+  // Objekt-/Liegenschafts-Part wie bisher (ARNDT & CIE fix, B75-D1/D4)
+  let liegenschaft = (() => {
     const c = String(objCode).toUpperCase();
     if (c === "ARNDTCIE" || c === "ARNDT&CIE" || c === "ARNDT & CIE") return "ARNDT & CIE";
     return objCode;
   })();
-
-  // B75 + D1/D4 → B75-D1 / B75-D4
   if (/^B75$/i.test(objCode) && /^(D1|D4)$/i.test(sub)) {
-    objektPart = `B75-${sub.toUpperCase()}`;
+    liegenschaft = `B75-${sub.toUpperCase()}`;
   }
 
-  const absender = (senderEl?.value || "").trim();
+  // Datum in "JJJJ.MM.TT"
   const datum =
-    (dispToIso(invDateEl?.value) || dispToIso(recvDateEl?.value) || "").replace(/-/g,".")
-    || today().split(".").reverse().join(".");
+    (dispToIso(invDateEl?.value) || dispToIso(recvDateEl?.value) || "")
+      .replace(/-/g, ".") || today().split(".").reverse().join(".");
 
+  // Betrag nur bei Rechnung verwenden und nur wenn sinnvoll
   const includeAmount = isInvoice() && betragRaw && !/^0+(?:[.,]00)?$/.test(betragRaw);
 
-  const parts = [];
-  if (includeAmount) parts.push(betragRaw);
-  if (objektPart)    parts.push(objektPart);
-  if (absender)      parts.push(absender);
-  parts.push(datum);
+  // RE-Teil: Präfix nicht doppeln (RE/RG/RN/INV/INVOICE)
+// RE-Teil: Nur numerische IDs bekommen "RE" davor; alphanumerische bleiben unverändert.
+let rePart = "";
+if (reNummer) {
+  const id = reNummer.trim().toUpperCase();
+  if (/^\d+$/.test(id)) {
+    rePart = "RE " + id;          // z.B. "1244" -> "RE 1244"
+  } else {
+    rePart = id;                  // z.B. "RE1244", "RG-2025-0317", "W7-55321"
+  }
+}
 
-  return (parts.join("_") || "dokument") + ".pdf";
+
+  // =======================
+  // Rechnung:      [Betrag]_[Absender]_[RE …]_[Liegenschaft]_[JJJJ.MM.TT].pdf
+  // Nicht-Rechnung: [Absender]_[Liegenschaft]_[JJJJ.MM.TT].pdf
+  // =======================
+  const parts = [];
+  if (isInvoice()) {
+    if (includeAmount) parts.push(betragRaw);
+    if (absender)      parts.push(absender);
+    if (rePart)        parts.push(rePart);
+    if (liegenschaft)  parts.push(liegenschaft);
+    parts.push(datum);
+  } else {
+    if (absender)      parts.push(absender);
+    if (liegenschaft)  parts.push(liegenschaft);
+    parts.push(datum);
+  }
+
+  // Fallback falls alles leer
+  const base = parts.filter(Boolean).join("_") || "dokument";
+  return base + ".pdf";
 }
 
 
@@ -2915,4 +2964,91 @@ function repaintInboxList(){
 }
 
 
+})();
+
+
+(function () {
+  "use strict";
+
+  // Falls bereits ein Namespace existiert, nutzen – sonst neu anlegen
+  const Naming = (window.Naming = window.Naming || {});
+
+  // Hilfen (neutral, kollisionsarm)
+  function _normAmount(input) {
+    const raw = String(input || "").trim();
+    if (!raw) return { display: "", value: null };
+    const numeric = raw.replace(/\s+/g, "").replace(/\./g, "").replace(",", ".");
+    const v = Number(numeric);
+    if (!isFinite(v)) return { display: "", value: null };
+    const display = v.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return { display, value: v };
+  }
+
+  function _toYmdDots(s) {
+    const str = String(s || "").trim();
+    if (!str) return "";
+    let m = str.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (m) return `${m[3]}.${m[2].padStart(2,"0")}.${m[1].padStart(2,"0")}`;
+    m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return `${m[1]}.${m[2]}.${m[3]}`;
+    const dt = new Date(str);
+    if (!isNaN(dt.getTime())) {
+      const y = String(dt.getFullYear());
+      const mo = String(dt.getMonth() + 1).padStart(2, "0");
+      const d = String(dt.getDate()).padStart(2, "0");
+      return `${y}.${mo}.${d}`;
+    }
+    return "";
+  }
+
+  function _safeChunk(s) {
+    return String(s || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .replace(/[^\wÄÖÜäöüß ,\-]/g, "")
+      .replace(/_/g, " ");
+  }
+
+  function _deriveObjectCode(desc) {
+    const raw = String(desc || "").trim();
+    if (!raw) return "";
+    const tokens = raw.split(/\s+|[\\/]/).map(t => t.replace(/[^A-Za-z0-9]/g, ""));
+    const candidate = tokens.sort((a,b) => b.length - a.length).find(t => t.length >= 3) || tokens[0] || "";
+    return (candidate || "").toUpperCase();
+  }
+
+  /**
+   * buildNameV2 – zentrale neue Regel
+   * @param {Object} p
+   * @param {boolean} p.isInvoice
+   * @param {string}  p.amount   – Rohtext (z.B. "45,22")
+   * @param {string}  p.sender   – Aussteller
+   * @param {string}  p.invoiceNo
+   * @param {string}  p.targetCode   – optional (EGYO). Wenn leer, wird aus targetDesc abgeleitet.
+   * @param {string}  p.targetDesc   – Beschreibung (für Ableitung)
+   * @param {string}  p.date         – beliebiges Datumsformat (TT.MM.JJJJ / JJJJ-MM-TT)
+   * @returns {string} Dateiname (mit .pdf), leer wenn nicht baubar
+   */
+  Naming.buildNameV2 = function buildNameV2(p = {}) {
+    const { isInvoice, amount, sender, invoiceNo, targetCode, targetDesc, date } = p;
+
+    const amtDisp = _normAmount(amount).display;
+    const ymd     = _toYmdDots(date);
+    const objCode = (targetCode && String(targetCode).trim()) || _deriveObjectCode(targetDesc);
+
+    const parts = [];
+    if (isInvoice) {
+      if (amtDisp)    parts.push(_safeChunk(amtDisp));
+      if (sender)     parts.push(_safeChunk(sender));
+      if (invoiceNo)  parts.push(`RE ${_safeChunk(invoiceNo)}`);
+      if (objCode)    parts.push(_safeChunk(objCode));
+      if (ymd)        parts.push(_safeChunk(ymd));
+    } else {
+      if (sender)     parts.push(_safeChunk(sender));
+      if (objCode)    parts.push(_safeChunk(objCode));
+      if (ymd)        parts.push(_safeChunk(ymd));
+    }
+    const base = parts.filter(Boolean).join("_");
+    return base ? `${base}.pdf` : "";
+  };
 })();
