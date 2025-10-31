@@ -805,7 +805,7 @@ async function autoRecognize() {
       amountEl.value = formatAmountDisplay(pick);
       amountEl.classList.add("auto");
     }
- d
+ 
    /* Datum (konservativ; nur plausibles jüngstes Datum ≤ heute, sonst leer) */
 const MONTHS = { januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12 };
 const isoFromDMY = (d,m,y)=>{ const yy=String(y).length===2?(+y<50?2000+ +y:1900+ +y):+y; return `${yy}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; };
