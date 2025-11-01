@@ -112,15 +112,7 @@ function __fdlRemoveInboxListItemByName(name) {
   if (li) li.remove();
 }
 
-/** Baut die Inbox-Liste/Zähler neu auf (nutzt vorhandene Funktionen, fällt sonst still zurück). */
-function __fdlRepaintInboxList() {
-  if (typeof refreshInbox === "function") {
-    try { refreshInbox(); return; } catch(e) { console.warn("refreshInbox() failed:", e); }
-  }
-  if (typeof updateCounters === "function") {
-    try { updateCounters(); } catch {}
-  }
-}
+
 
 // ===== Persistenz für Directory-Handles (IndexedDB) =====
 const FDL_IDB_DB = "fdl-handles-v1";
@@ -3195,12 +3187,18 @@ function removeInboxChipUIByName(name){
   if(el) el.remove();
 }
 
-// globale Repaint-Strategie: preferiere zentrales paintChips(), fallback DOM-only
+// === EINZIGE zentrale Repaint-Funktion ===
 function repaintInboxList(){
+  // Globale Repaint-Strategie: bevorzuge zentrales paintChips(), fallback DOM-only
   if (typeof paintChips === "function") {
-    try { paintChips(); return; } catch(e){ console.warn("paintChips() failed:", e); }
+    try { 
+      paintChips(); 
+      return; 
+    } catch (e) { 
+      console.warn("paintChips() failed:", e); 
+    }
   }
-  // Falls kein zentraler Renderer existiert, wenigstens Zähler neu setzen, wenn du eine Funktion hast:
+  // Falls kein zentraler Renderer existiert: wenigstens Zähler neu setzen
   if (typeof updateCounters === "function") {
     try { updateCounters(); } catch {}
   }
