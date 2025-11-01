@@ -336,6 +336,10 @@ function updateStatusPillsVisibility(){
   const row=$("#mailStatusRow");
   if(row) row.style.display = isFideliorInvoice()?"grid":"none";
 }
+function numToEuro(n){
+  // 75.16 -> "75,16"
+  return (isFinite(n) ? Number(n) : 0).toFixed(2).replace(".", ",");
+}
 
 /* ---------- subject/reply computation without hidden spans ---------- */
 function computeSubjectAndReply(){
@@ -485,12 +489,20 @@ function attachMailUI(){
 }
 
   /* ----------------------------- Betrag/Inputs live ----------------------- */
-   function formatAmountDisplay(raw){
-    const r=(raw||"").replace(/[^\d,]/g,"").replace(/,+/g,","); const parts=r.split(",");
-    const euros=(parts[0]||"0").replace(/^0+(?=\d)/,"").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-    const cents=((parts[1]||"")+"00").slice(0,2);
-    return `${euros||"0"},${cents}`;
-  }
+  function formatAmountDisplay(raw){
+  let r = String(raw ?? "").trim().replace(/−/g,"-");
+  // Wenn nur Punkt vorhanden -> als Dezimalpunkt behandeln
+  if (r.includes(".") && !r.includes(",")) r = r.replace(".", ",");
+  // Wenn beides vorhanden -> Punkte als Tausender entfernen
+  if (r.includes(",") && r.includes(".")) r = r.replace(/\./g, "");
+  // Nur Ziffern, Komma, Minus behalten
+  r = r.replace(/[^\d,-]/g,"");
+  const parts = r.split(",");
+  const euros = (parts[0]||"0").replace(/^0+(?=\d)/,"").replace(/\B(?=(\d{3})+(?!\d))/g,".");
+  const cents = ((parts[1]||"")+"00").slice(0,2);
+  return `${euros||"0"},${cents}`;
+}
+
   if (amountEl){
     amountEl.addEventListener("input",(e)=>{ amountEl.dataset.raw = e.target.value; refreshPreview(); });
     amountEl.addEventListener("blur",()=>{ amountEl.value = formatAmountDisplay(amountEl.dataset.raw||amountEl.value||""); refreshPreview(); });
@@ -579,6 +591,8 @@ function attachUpload(){
     $("#previewPlaceholder")?.setAttribute("style","display:none");
 
     await renderAll();
+
+
     autoRecognize();
     $("#saveBtn")?.removeAttribute("disabled");
     toast("<strong>Datei geladen</strong>", 1500);
@@ -722,54 +736,294 @@ document.getElementById("downloadBtn")?.addEventListener("click", () => {
   a.remove();
 });
 
-
-// === Helper: STRIKTE Rechnungsnummer-Erkennung (lieber leer als falsch) ===
-function findInvoiceNumberStrict(rawText) {
+// === Helper: STRIKTE Rechnungsnummer-Erkennung (robust & konservativ) ===
+function findInvoiceNumberStrict(rawText){
   if (!rawText) return "";
+  function numToEuro(n){
+  return (isFinite(n) ? Number(n) : 0).toFixed(2).replace(".", ",");
+}
 
+
+  // 1) Normalisieren (PDF-Artefakte entfernen)
   const text = String(rawText)
+    .replace(/\u00A0/g, " ")                    // NBSP -> Space
+    .replace(/[\u2010-\u2015\u2212]/g, "-")     // typogr. Bindestriche -> "-"
     .replace(/\s+/g, " ")
-    .replace(/\u00A0/g, " ")
-    .replace(/[\u2013\u2014\u2212]/g, "-");
+    .trim();
 
+  // 2) Label-basierte Kandidaten (de/en)
   const labelRxs = [
-    /\b(rechnungs?(nummer|nr|no)\.?|rg-?nr\.?|rn\.?|beleg(nr|nummer)|rechnung\s*#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{2,})/gi,
-    /\b(invoice\s*(no|nr|number)?|inv\.?\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._\/-]{2,})/gi,
+    /\b(rechnungs?(nummer|nr|no)\.?|rechnung\s*#|rg-?nr\.?|rn\.?|beleg(nr|nummer))\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi,
+    /\b(invoice\s*(no|nr|number)?|inv\.?\s*no\.?|bill\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi,
+    // Muster: "Rechnungs-Nr. 5080235099" / "Rechnungsnummer 5080..."
   ];
+
   const candidates = [];
 
-  for (const rx of labelRxs) {
-    let m; while ((m = rx.exec(text))) candidates.push({ c: m[4], score: 3 });
-  }
-
-  for (const m of text.matchAll(/\b([A-Z]{1,5}[-_/]?\d{3,}|\d{3,}[-_/][A-Z0-9]{2,})\b/gi)) {
-    candidates.push({ c: m[1], score: 1 });
-  }
-
-  const bad = {
-    date: /^(\d{1,2}[.\-/]){2}\d{2,4}$/i,
-    iban: /^[A-Z]{2}\d{2}[A-Z0-9]{10,}$/i,
-    phone:/^\+?\d{2,3}[\s/-]?(?:\d{2,4}[\s/-]?){2,4}\d{2,}$/i,
-    zip:  /^\d{5}$/,
-    money: /(?:€|\bEUR\b)\s*\d/,
-    badPrefix: /^(kdnr|kunde|kundennr|bestell|auftrag)\b/i
-  };
-  const clean = s => String(s||"").trim().replace(/^[#:.\-]+/,"").replace(/[,;:.]+$/,"").toUpperCase();
-  const invalid = s => !s || s.length<4 || bad.date.test(s) || bad.iban.test(s) || bad.phone.test(s) ||
-                       bad.zip.test(s)  || bad.money.test(s) || bad.badPrefix.test(s);
-
-  const pool = [];
-  for (const k of candidates){
-    const x = clean(k.c);
-    if (!invalid(x)) {
-      let sc = k.score + (/[A-Z]/.test(x)?1:0) + ((x.length>=6&&x.length<=20)?1:0);
-      pool.push({ c:x, score:sc });
+  for (const rx of labelRxs){
+    let m;
+    while ((m = rx.exec(text))){
+      const token = m[m.length - 1]; // letzter capture
+      candidates.push({ c: token, score: 5, why: "label" });
     }
   }
+
+  // 3) Fallback: freie Tokens, die invoice-ähnlich aussehen
+  //    (mind. 4 Zeichen, max 24, enthält mind. 1 Ziffer; erlaubt . _ / -)
+  for (const m of text.matchAll(/\b(?!DE\d{9}\b)[A-Z0-9][A-Z0-9._/-]{3,23}\b/gi)){
+    candidates.push({ c: m[0], score: 1, why: "generic" });
+  }
+
+  // 4) harte Negativ-Filter (weg damit)
+  const BAD = {
+
+    
+maskedIbanLike: /^DE[\dxX*]{6,}$/i,
+    
+
+    // Daten
+    date1: /^(\d{1,2}[.\-/]){2}\d{2,4}$/i,
+    date2: /^(20\d{2}[.\-/]?\d{2}[.\-/]?\d{2})$/,     // 20251031 / 2025-10-31
+    // USt-Id
+    ustid: /^DE[\s-]?\d{9}$/i,
+    // IBAN sehr grob
+    iban: /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i,
+    // Telefonnr. grob
+    phone: /^\+?\d{2,3}[\s/-]?(?:\d{2,4}[\s/-]?){2,4}\d{2,}$/i,
+    // PLZ
+    zip: /^\d{5}$/,
+
+    // Offenkundige Nicht-Rechnungs-IDs
+    uuid: /^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i,
+    money: /(?:€|\bEUR\b)\s*\d/i,
+
+    // Prefixe, die wir nicht wollen
+    badPrefix: /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC)\b/i,
+  };
+
+  const clean = s => String(s||"")
+    .trim()
+    .replace(/^[#:.,\-\s]+/, "")
+    .replace(/[,:.;]+$/, "");
+
+  const invalid = s => {
+    if (!s) return true;
+    const x = s.toUpperCase();
+    // invalid(x):
+if (BAD.maskedIbanLike.test(x)) return true;
+// NEU: mindestens 6 aufeinanderfolgende Ziffern erzwingen
+if (!/\d{6,}/.test(x)) return true;
+
+    // Länge & Zusammensetzung
+    if (x.length < 4 || x.length > 24) return true;
+    if (!/\d/.test(x)) return true;                 // muss mind. eine Ziffer haben
+
+    // harte Muster
+    if (BAD.date1.test(x) || BAD.date2.test(x)) return true;
+    if (BAD.ustid.test(x)) return true;
+    if (BAD.iban.test(x)) return true;
+    if (BAD.phone.test(x)) return true;
+    if (BAD.zip.test(x)) return true;
+    if (BAD.uuid.test(x)) return true;
+    if (BAD.money.test(x)) return true;
+    if (BAD.badPrefix.test(x)) return true;
+
+    // reine große Zahl mit 10–15 Stellen → eher Kunden-/Vertrags-/Telefonnummer
+    if (/^\d{10,15}$/.test(x)) return true;
+
+    return false;
+  };
+
+  // 5) Scoring & Auswahl
+  const pool = [];
+for (const k of candidates){
+  const x = clean(k.c);
+  if (invalid(x)) continue;
+
+  let score = k.score;
+  if (/[A-Z]/.test(x) && /\d/.test(x)) score += 2;
+  if (x.length >= 6 && x.length <= 18) score += 1;
+  if (/^(RE|RG|RN|INV|INVOICE)[\s._/-]?/i.test(x)) score += 2;
+
+  pool.push({ c: x, score });
+}
+
+
   if (!pool.length) return "";
-  pool.sort((a,b)=>b.score-a.score);
+  pool.sort((a,b) => b.score - a.score);
   return pool[0].c;
 }
+
+// — Text + Zeilen (mit x/y) extrahieren —
+async function extractTextAndLinesFirstPages(pdf, maxPages = 3){
+  const N = Math.min(maxPages, pdf.numPages);
+  let allItems = [];
+  for (let i = 1; i <= N; i++){
+    const p = await pdf.getPage(i);
+    const c = await p.getTextContent({ normalizeWhitespace:true, disableCombineTextItems:false });
+    allItems = allItems.concat(c.items || []);
+  }
+  const rows = new Map();
+  for (const it of allItems){
+    const y = Math.round((it.transform?.[5] || 0));
+    const x = (it.transform?.[4] || 0);
+    const arr = rows.get(y) || [];
+    arr.push({ x, str: it.str });
+    rows.set(y, arr);
+  }
+  const lines = [...rows.entries()]
+    .sort((a,b)=>b[0]-a[0])
+    .map(([_, arr]) => {
+      const sorted = arr.sort((a,b)=>a.x-b.x);
+      return { text: sorted.map(t=>t.str).join(" "), parts: sorted };
+    });
+  const text = lines.map(l => l.text).join("\n");
+  return { text, lines };
+}
+
+// — Betrag erkennen (Fälliger Betrag > Gesamt brutto) —
+function detectTotalAmountFromLines(lines){
+  if (!Array.isArray(lines) || !lines.length) return NaN;
+
+ const PRI = [
+  /Zu\s+zahlender\s+Betrag|Zahlungsbetrag|Fälliger Betrag|Zahlbetrag|Amount due|Total due/i,
+  /Gesamtsumme\s+brutto|Grand total|Gesamtbetrag|Brutto\s+gesamt/i,
+  /Gesamtsumme(?!.*netto)/i
+];
+
+  const IGN = /Zwischensumme|Subtotal|Netto\b|Rabatt|Discount|USt|MwSt|Steuer|Versand/i;
+
+  const parseNum = (s) => {
+    let x = (s||"").replace(/[ €\u00A0]/g,"").replace(/−/g,"-");
+    if (/,/.test(x) && /\./.test(x)) x = x.replace(/\./g,"").replace(",",".");
+    else if (/,/.test(x)) x = x.replace(",",".");
+    const v = Number((x.match(/-?\d+(?:\.\d+)?/)||[""])[0]);
+    return isFinite(v) ? v : NaN;
+  };
+
+  const rightMostAmount = (L) => {
+    const nums = L.text.match(/-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+(?:\.\d{2})/g);
+    if (!nums || !nums.length) return NaN;
+    return parseNum(nums[nums.length-1]);
+  };
+
+  for (const rx of PRI){
+    let best = null;
+    for (let i=0;i<lines.length;i++){
+      const L = lines[i];
+      if (!rx.test(L.text)) continue;
+      if (IGN.test(L.text)) continue;
+
+      let v = rightMostAmount(L);
+      if (!isFinite(v) || isNaN(v)){
+        const N = lines[i+1];
+        if (N && !IGN.test(N.text)) v = rightMostAmount(N);
+      }
+      if (isFinite(v) && !isNaN(v)){
+        if (!best || v >= best.val) best = { val: v };
+      }
+    }
+    if (best) return best.val;
+  }
+  return NaN;
+}
+
+
+function rightMostNumberToken(s){
+  const nums = String(s||"").match(/\b\d{6,}\b/g); // mind. 6-stellig
+  return nums ? nums[nums.length-1] : "";
+}
+
+
+function isMaskedIbanLike(tok){
+  // fängt DE + Ziffern/X/* (auch maskiert) ab
+  return /^DE[\dxX*]{6,}$/i.test(tok);
+}
+
+/** Holt die Rechnungsnummer aus den Zeilen:
+ *  – sucht nach 'Rechnungsnummer' / 'Invoice number'
+ *  – nimmt die rechteste 6+stellige Zahl derselben oder nächsten Zeile
+ *  – ignoriert Kundennummer/Vertragsnummer/Maske 'DE…'
+ */
+function findInvoiceNumberFromLines(lines){
+  if (!Array.isArray(lines)) return "";
+
+  const LABEL = /(Rechnungs\s*nummer|Rechnungs-?Nr\.?|Invoice\s*(number|no\.?)?)/i;
+  const BAN   = /(Kunden\s*nummer|Vertrags\s*nummer|Customer|Contract)/i;
+
+  for (let i=0;i<lines.length;i++){
+    const L = lines[i];
+    if (!LABEL.test(L.text) || BAN.test(L.text)) continue;
+
+    // gleiche Zeile: rechteste 6+stellige Zahl
+    let tok = rightMostNumberToken(L.text);
+    if (tok && tok.length >= 6) return tok;
+
+    // sonst nächste Zeile (typisch bei tabellarischem Layout)
+    const N = lines[i+1];
+    if (N && !BAN.test(N.text)){
+      tok = rightMostNumberToken(N.text);
+      if (tok && tok.length >= 6) return tok;
+    }
+  }
+  return "";
+}
+
+// Robust: bewertet Regeln gegen 3 Text-Varianten, mit Fallback auf .includes()
+function evaluateAssignmentRules(rawText, cfg){
+  if (!cfg || !Array.isArray(cfg.patterns)) return null;
+
+  const T1 = String(rawText || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const T2 = T1;
+  const T3 = T2.replace(/[^\wäöüÄÖÜß\-/.#]+/g, " ");
+
+  const variants = [T1, T2, T3];
+
+  const normalizeList = (rule) => {
+    if (Array.isArray(rule.patterns)) return rule.patterns;
+    if (Array.isArray(rule.pattern))  return rule.pattern;
+    if (typeof rule.pattern === "string" && rule.pattern.trim()) return [rule.pattern];
+    return [];
+  };
+
+  let best = null;
+  for (const rule of (cfg.patterns || [])){
+    const pats = normalizeList(rule);
+    if (!pats.length) continue;
+
+    let matched = false, score = 0;
+
+    for (const pat of pats){
+      let rx = null, isRegex = false;
+      try { rx = new RegExp(pat, "i"); isRegex = true; } catch {}
+
+      for (const V of variants){
+        if (isRegex ? rx.test(V) : V.toLowerCase().includes(String(pat||"").toLowerCase())){
+          matched = true;
+          score += isRegex ? 3 : 2;
+          break;
+        }
+      }
+    }
+    if (!matched) continue;
+
+    if (rule.object){
+      try {
+        const esc = rule.object.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+        if (new RegExp(`\\b${esc}\\b`, "i").test(T2)) score += 1;
+      } catch {}
+    }
+
+    if (!best || score > best.score) best = { rule, score };
+  }
+  return best ? best.rule : null;
+}
+
 
 /* --------------------------- Auto-Erkennung ------------------------------ */
 async function extractTextFirstPages(pdf, maxPages=3){
@@ -793,18 +1047,22 @@ function euroToNum(s){
 // ====== ERSATZ: autoRecognize (Block 2) ======
 async function autoRecognize() {
   try {
-    const txt = (await extractTextFirstPages(pdfDoc, 3)) || "";
+    const { text: txt, lines } = await extractTextAndLinesFirstPages(pdfDoc, 3);
 
-    /* Betrag */
-    const moneyHits = [...txt.matchAll(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g)].map(m => m[0]);
-    if (moneyHits.length) {
-      const pick = moneyHits
-        .map(v => ({ v, n: euroToNum(v) }))
-        .sort((a, b) => b.n - a.n)[0].v;
-      amountEl.dataset.raw = pick;
-      amountEl.value = formatAmountDisplay(pick);
-      amountEl.classList.add("auto");
-    }
+
+    /* Betrag – Priorität statt „größter Wert“ */
+const total = detectTotalAmountFromLines(lines);
+if (amountEl && !amountEl.dataset.userTyped){
+  if (isFinite(total) && !isNaN(total)){
+  amountEl.dataset.raw = numToEuro(total);
+amountEl.value = numToEuro(total);
+amountEl.classList.add("auto");
+  } else {
+    amountEl.value = "";
+    amountEl.classList.remove("auto");
+  }
+}
+
  
    /* Datum (konservativ; nur plausibles jüngstes Datum ≤ heute, sonst leer) */
 const MONTHS = { januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12 };
@@ -833,9 +1091,13 @@ if (invDateEl && !invDateEl.value.trim()) {
 
 
  /* Rechnungsnummer (nur setzen, wenn plausibel; sonst leer lassen) */
-const autoInv = findInvoiceNumberStrict(txt);
+/* Rechnungsnummer zuerst aus Zeilen lesen; Fallback: strikter Parser */
+let autoInv = "";
+if (lines && lines.length) autoInv = findInvoiceNumberFromLines(lines);
+if (!autoInv) autoInv = findInvoiceNumberStrict(txt);
+
 if (invNoEl && !invNoEl.dataset.userTyped) {
-  if (autoInv) {
+  if (autoInv && !isMaskedIbanLike(autoInv)) {
     invNoEl.value = autoInv;
     invNoEl.classList.add('auto');
   } else {
@@ -851,58 +1113,40 @@ if (invNoEl && !invNoEl.dataset.userTyped) {
       toast('Dokumentenart gesetzt: <strong>Rechnung</strong>', 2000);
     }
 
-    /* 2) AUTO-ASSIGN: Objekt & (optional) Unterordner */
-    let appliedMsg = null;
-    if (assignmentsCfg && Array.isArray(assignmentsCfg.patterns) && assignmentsCfg.patterns.length) {
-      const tRaw = (txt || "")
-        .replace(/\u00A0/g, " ")
-        .replace(/[\u2013\u2014\u2212]/g, "-"); // – — −  -> -
+   /* 2) AUTO-ASSIGN: Objekt & (optional) Unterordner (robuste Scoring-Engine) */
+let appliedMsg = null;
+if (assignmentsCfg && Array.isArray(assignmentsCfg.patterns) && assignmentsCfg.patterns.length) {
+  const hit = evaluateAssignmentRules(txt, assignmentsCfg);
 
-      const normalizeList = (rule) => {
-        if (Array.isArray(rule.patterns)) return rule.patterns;
-        if (Array.isArray(rule.pattern))  return rule.pattern;
-        if (typeof rule.pattern === "string" && rule.pattern.trim()) return [rule.pattern];
-        return [];
-      };
-
-      let hit = null;
-      for (const rule of assignmentsCfg.patterns) {
-        const list = normalizeList(rule);
-        const matched = list.some(pat => {
-          try { return new RegExp(pat, "i").test(tRaw); }
-          catch { return tRaw.toLowerCase().includes(String(pat || "").toLowerCase()); }
-        });
-        if (matched) { hit = rule; break; }
-      }
-
-      if (hit) {
-        if (hit.object) {
-          const before = objSel.value;
-          objSel.value = String(hit.object);
-          if (objSel.value !== before) {
-            appliedMsg = `Zuordnung: <strong>${hit.object}</strong>`;
-          }
-        }
-
-        if (typeof updateSubfolderOptions === "function") {
-          await updateSubfolderOptions({ silent: !hit.subfolder });
-        }
-
-        if (hit.subfolder && subSel) {
-          const wanted = String(hit.subfolder).trim();
-          const has = Array.from(subSel.options).some(o => o.value === wanted);
-          if (has) {
-            subSel.value = wanted;
-            if (subRow) subRow.style.display = "grid";
-            appliedMsg = appliedMsg
-              ? `${appliedMsg} · Unterordner: <strong>${wanted}</strong>`
-              : `Unterordner: <strong>${wanted}</strong>`;
-          } else {
-            toast(`Hinweis: Unterordner „<code>${wanted}</code>“ ist für <strong>${hit.object}</strong> nicht bekannt.`, 3500);
-          }
-        }
+  if (hit) {
+    if (hit.object) {
+      const before = objSel.value;
+      objSel.value = String(hit.object);
+      if (objSel.value !== before) {
+        appliedMsg = `Zuordnung: <strong>${hit.object}</strong>`;
       }
     }
+
+    if (typeof updateSubfolderOptions === "function") {
+      await updateSubfolderOptions({ silent: !hit.subfolder });
+    }
+
+    if (hit.subfolder && subSel) {
+      const wanted = String(hit.subfolder).trim();
+      const has = Array.from(subSel.options).some(o => o.value === wanted);
+      if (has) {
+        subSel.value = wanted;
+        if (subRow) subRow.style.display = "grid";
+        appliedMsg = appliedMsg
+          ? `${appliedMsg} · Unterordner: <strong>${wanted}</strong>`
+          : `Unterordner: <strong>${wanted}</strong>`;
+      } else {
+        toast(`Hinweis: Unterordner „<code>${wanted}</code>“ ist für <strong>${hit.object}</strong> nicht bekannt.`, 3500);
+      }
+    }
+  }
+}
+
 
     /* Mail-Vorbelegung & Meta */
     applyPerObjectMailRules();
@@ -1023,7 +1267,7 @@ if (reNummer) {
 async function updateSubfolderOptions({ silent = false } = {}) {
   if (!subRow || !subSel) return;
 
-  const code = (objSel?.value || "").trim();
+  const code    = (objSel?.value || "").trim();
   const invoice = isInvoice();
 
   // Standard: ausblenden & leeren
@@ -1033,62 +1277,61 @@ async function updateSubfolderOptions({ silent = false } = {}) {
   // PRAGMATIK: Für PRV/ohne Code nichts anzeigen
   if (!code || code === "PRIVAT") return;
 
-  // Spezialfall FIDELIOR (nur bei Nicht-Rechnung sinnvoll)
- if (code === "FIDELIOR") {
-  if (!invoice) {
-    if (!pcloudRootHandle) return;
+  // Sichtbarkeits-Flag statt mehrfacher DOM-Schalter
+  let show = false;
 
-    const base = ["FIDELIOR", "VERWALTUNG"];
-    const raw  = await listChildFolders(pcloudRootHandle, base);
+  // ---- Spezialfall FIDELIOR (nur bei Nicht-Rechnung) ----
+  if (code === "FIDELIOR") {
+    if (!invoice && pcloudRootHandle) {
+      const base = ["FIDELIOR", "VERWALTUNG"];
+      const raw  = await listChildFolders(pcloudRootHandle, base);
 
-    // Alphabetisch sortieren (de, case-insensitiv, numerisch), Duplikate entfernen
-    const options = [...new Set(raw)]
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b, "de", { sensitivity: "base", numeric: true }));
+      const options = [...new Set(raw)]
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b, "de", { sensitivity: "base", numeric: true }));
 
-    if (options.length) {
-      const prev = subSel.value; // Auswahl behalten, falls möglich
-      subSel.innerHTML = options.map(v => `<option value="${v}">${v}</option>`).join("");
-      subSel.value = options.includes(prev) ? prev : (options[0] || "");
-      if (!silent) subRow.style.display = "grid";
+      if (options.length) {
+        const prev = subSel.value; // Auswahl behalten, falls möglich
+        subSel.innerHTML = options.map(v => `<option value="${v}">${v}</option>`).join("");
+        subSel.value = options.includes(prev) ? prev : (options[0] || "");
+        show = true;
+      }
     }
+    subRow.style.display = (!silent && show) ? "grid" : "none";
+    return;
   }
-  return;
-}
 
-  // Allgemeine Ermittlung aus Config + realen Ordnern
+  // ---- Allgemeiner Zweig ----
   const { scopeName, pcloudName } = getFolderNames(code);
   const scopeBase = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
 
   let pclBase = null;
   if (!isArndtCie(code)) {
     if (code === "A15" && invoice) {
-      pclBase = ["FIDELIOR", "OBJEKTE", "A15 Ahrweiler Straße 15", "Buchhaltung", "Rechnungsbelege"];
+      pclBase = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"];
     } else {
-      pclBase = ["FIDELIOR", "OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
+      pclBase = ["FIDELIOR","OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
     }
   }
 
   const known = new Set(getKnownSubfolders(code));
-  if (invoice) known.add("Rechnungsbelege");
-  else known.add("Objektdokumente");
+  known.add(invoice ? "Rechnungsbelege" : "Objektdokumente");
 
   const lists = [];
-  if (scopeRootHandle) lists.push(listChildFolders(scopeRootHandle, scopeBase));
-  if (pcloudRootHandle && pclBase) lists.push(listChildFolders(pcloudRootHandle, pclBase));
+  if (scopeRootHandle)                 lists.push(listChildFolders(scopeRootHandle,  scopeBase));
+  if (pcloudRootHandle && pclBase)     lists.push(listChildFolders(pcloudRootHandle,  pclBase));
 
   const foundLists = (await Promise.all(lists).catch(() => [[]])).flat();
-  foundLists.forEach(n => known.add(n));
+  for (const n of foundLists) if (n) known.add(n);
 
   const options = [...known].filter(Boolean);
 
-  // Wenn gar keine Optionen bekannt sind → nichts anzeigen (optional bleibt möglich via Regel)
   if (!options.length) {
-    // Bei Nicht-Rechnung fallback „Objektdokumente“ als Option anbieten
     if (!invoice) {
       subSel.innerHTML = `<option value="Objektdokumente">Objektdokumente</option>`;
-      if (!silent) subRow.style.display = "grid";
+      show = true;
     }
+    subRow.style.display = (!silent && show) ? "grid" : "none";
     return;
   }
 
@@ -1097,8 +1340,8 @@ async function updateSubfolderOptions({ silent = false } = {}) {
     ? (options.includes("Rechnungsbelege") ? "Rechnungsbelege" : options[0])
     : (options.includes("Objektdokumente") ? "Objektdokumente" : options[0]);
 
-  // Sichtbarkeit NUR wenn nicht „silent“ angefordert
-  if (!silent) subRow.style.display = "grid";
+  show = true;
+  subRow.style.display = (!silent && show) ? "grid" : "none";
 }
 
 function refreshPreview(){
