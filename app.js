@@ -1583,24 +1583,56 @@ async function writeFileTo(rootHandle, segments, bytes, fileName, opts = {}) {
   // Falls gewünscht, kollisionssicheren Namen bilden (… (2).pdf / … (3).pdf …)
   const finalName = opts.unique ? await uniqueName(dir, fileName) : fileName;
 
-  const fh  = await dir.getFileHandle(finalName, { create: true });
-
-  let ws;
+  // --- BEGIN: robuster Schreib-Block mit Slash-Fallback ------------------
+async function doWrite(targetName){
+  const h  = await dir.getFileHandle(targetName, { create: true });
+  const ws = await h.createWritable({ keepExistingData: false });
   try {
-    ws = await fh.createWritable({ keepExistingData: false });
     await ws.write(new Blob([bytes], { type: "application/pdf" }));
     await ws.close();
-
-    // Chrome .crswap-Reste säubern
-    await tryRemoveCrSwap(dir, finalName);
-    ws = undefined;
   } catch (e) {
-    try { await ws?.abort(); } catch {}
-    throw e;
-  }
+  try { await ws?.abort(); } catch {}
+  const msg = (e && (e.message || e.name)) ? `${e.name||"Error"}: ${e.message}` : "Unbekannter Fehler";
+  // 6s statt 2.2s, damit man es in Ruhe lesen kann
+  try { toast(`Speichern fehlgeschlagen<br>${safeName}<br><small>${e?.message || e}</small>`, 8000);
+ } catch {}
+  throw e;
+}
+}
 
-  // Optional nützlich, falls du den tatsächlich verwendeten Namen anzeigen willst
-  return finalName;
+let attemptedName = finalName;
+try {
+  // 1) Erst mit dem ursprünglichen Namen versuchen
+  await doWrite(attemptedName);
+} catch (e1) {
+  // 2) Fallback: optische / volle Slashes ersetzen, falls Ziel sie nicht erlaubt
+  //    U+2215 (∕) und U+FF0F (／) → "-"
+  let fallbackName = attemptedName.replace(/\u2215/g, "-").replace(/\uFF0F/g, "-");
+
+  if (fallbackName !== attemptedName) {
+    // bei Bedarf erneut eindeutigen Namen bilden
+    if (opts.unique) fallbackName = await uniqueName(dir, fallbackName);
+    try {
+      await doWrite(fallbackName);
+      attemptedName = fallbackName;
+      if (typeof toast === "function") {
+        toast("Hinweis: „/“ im Dateinamen wurde für das Ziel ersetzt.", 5200);
+      }
+    } catch (e2) {
+      throw e2; // endgültig scheitern
+    }
+  } else {
+    throw e1;   // keine Änderung möglich → Fehler weitergeben
+  }
+}
+
+// Chrome .crswap-Reste säubern
+await tryRemoveCrSwap(dir, attemptedName);
+
+// tatsächlich verwendeten Namen zurückgeben
+return attemptedName;
+// --- END: robuster Schreib-Block --------------------------------------
+
 }
 
 
@@ -2707,71 +2739,100 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
       toast("Keine PDF geladen.", 2000);
       return;
     }
-
     // 1) Dateiname & Bytes vorbereiten
     const fileName = (typeof effectiveFileName === "function")
       ? effectiveFileName()
       : (lastFile?.name || "dokument.pdf");
+// NEU: OS-sicheren Namen bilden (falls fileSafe vorhanden)
+const safeName = (typeof fileSafe === "function") ? fileSafe(fileName) : fileName;
 
     let stampedBytes = saveArrayBuffer;
     try { stampedBytes = await stampPdf(saveArrayBuffer); } catch {}
 
-    // 2) Ziele auflösen & schreiben
-    const t = (typeof resolveTargets === "function") ? resolveTargets() : {};
-    let okScope=false, okPcl=false, okPclBucket=false, okLocal=false;
+   // 2) Ziele auflösen & schreiben
+const t = (typeof resolveTargets === "function") ? resolveTargets() : {};
+let okScope=false, okPcl=false, okPclBucket=false, okLocal=false;
 
-    // Scopevisio
-    if (t?.scope?.root && t.scope.seg?.length) {
-      try {
-        await writeFileTo(t.scope.root, t.scope.seg, stampedBytes, fileName, { unique:true });
-        okScope = true;
-      } catch (e) {
-        console.warn("Scopevisio-Write failed:", e);
-        toast("Scopevisio: Speichern fehlgeschlagen.", 2200);
-      }
-    }
+// NEU: Fehler sammeln (für lesbare Gesamtausgabe)
+const errs = {};
 
-    // pCloud (Objektpfad)
-    if (t?.pcloud?.root && t.pcloud.seg?.length) {
-      try {
-        await writeFileTo(t.pcloud.root, t.pcloud.seg, stampedBytes, fileName, { unique:true });
-        okPcl = true;
-      } catch (e) {
-        console.warn("pCloud-Write failed:", e);
-        toast("pCloud: Speichern fehlgeschlagen.", 2200);
-      }
-    }
+// Scopevisio
+if (t?.scope?.root && t.scope.seg?.length) {
+  try {
+    await writeFileTo(t.scope.root, t.scope.seg, stampedBytes, safeName, { unique:true });
+    okScope = true;
+  } catch (e) {
+    errs.scope = e?.message || String(e);
+    toast("Scopevisio: Speichern fehlgeschlagen.", 6000);
+  }
+}
 
-    // pCloud Sammelordner
-    if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
-      try {
-        await writeFileTo(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, fileName, { unique:true });
-        okPclBucket = true;
-      } catch (e) {
-        console.warn("pCloud (Sammelordner) failed:", e);
-        toast("pCloud (Sammelordner): Speichern fehlgeschlagen.", 2200);
-      }
-    }
+// pCloud (Objektpfad)
+if (t?.pcloud?.root && t.pcloud.seg?.length) {
+  try {
+    await writeFileTo(t.pcloud.root, t.pcloud.seg, stampedBytes, safeName, { unique:true });
+    okPcl = true;
+  } catch (e) {
+    errs.pcloud = e?.message || String(e);
+    toast("pCloud: Speichern fehlgeschlagen.", 6000);
+  }
+}
 
-    // Lokal (optional)
-    const wantLocal = $("#chkLocal")?.checked === true;
-    if (wantLocal && window.showSaveFilePicker) {
-      try {
-        const fh = await window.showSaveFilePicker({
-          suggestedName: fileName,
-          types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }]
-        });
-        const ws = await fh.createWritable({ keepExistingData:false });
-        await ws.write(new Blob([stampedBytes], { type:"application/pdf" }));
-        await ws.close();
-        okLocal = true;
-      } catch (e) {
-        if (e?.name !== "AbortError") {
-          console.warn("Local save failed:", e);
-          toast("Lokal: Speichern fehlgeschlagen.", 2200);
-        }
-      }
+// pCloud Sammelordner
+if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
+  try {
+    await writeFileTo(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, safeName, { unique:true });
+    okPclBucket = true;
+  } catch (e) {
+    errs.bucket = e?.message || String(e);
+    toast("pCloud (Sammelordner): Speichern fehlgeschlagen.", 6000);
+  }
+}
+
+// Lokal (optional)
+const wantLocal = $("#chkLocal")?.checked === true;
+if (wantLocal && window.showSaveFilePicker) {
+  try {
+    const fh = await window.showSaveFilePicker({
+      suggestedName: safeName, // statt fileName
+      types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }]
+    });
+    const ws = await fh.createWritable({ keepExistingData:false });
+    await ws.write(new Blob([stampedBytes], { type:"application/pdf" }));
+    await ws.close();
+    okLocal = true;
+  } catch (e) {
+    if (e?.name !== "AbortError") {
+      errs.local = e?.message || String(e);
+      toast("Lokal: Speichern fehlgeschlagen.", 6000);
     }
+  }
+}
+
+// NEU: zentrale Erfolgsauswertung (kein „Gespeichert“, wenn alles fehlgeschlagen)
+const successTargets = [
+  okScope ? "Scopevisio" : null,
+  okPcl ? "pCloud" : null,
+  okPclBucket ? "pCloud (Sammelordner)" : null,
+  okLocal ? "Lokal" : null
+].filter(Boolean);
+
+if (successTargets.length === 0) {
+  // Gründe zusammenbauen (nur vorhandene Fehler zeigen)
+  const reasons = [
+    errs.scope  ? `Scopevisio: ${errs.scope}` : null,
+    errs.pcloud ? `pCloud: ${errs.pcloud}` : null,
+    errs.bucket ? `Sammelordner: ${errs.bucket}` : null,
+    (wantLocal && errs.local) ? `Lokal: ${errs.local}` : null
+  ].filter(Boolean).join("<br>");
+
+  toast(
+    `<strong>Speichern fehlgeschlagen</strong><br>${safeName}` +
+    (reasons ? `<br><small>${reasons}</small>` : ""),
+    8000
+  );
+  return; // → WICHTIG: nicht verschieben, kein Reset, sofort raus
+}
 
     // 3) E-Mail – nur wenn Empfänger vorhanden
     const to  = [...Mail.to];
@@ -2794,7 +2855,7 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
         bcc.length ? `BCC:      ${bcc.join(", ")}` : "",
         `Betreff:  ${subj}`,
         `Reply-To: ${replyTo || "—"}`,
-        `Anhang:   ${fileName}`
+        `Anhang:   ${safeName}`
       ].filter(Boolean).join("\n");
 
       if (window.confirm(confirmText)) {
@@ -2805,7 +2866,7 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
             text: (typeof computeMailBody === "function" ? computeMailBody() : ""),
             replyTo: replyTo || undefined,
             attachmentBytes: stampedBytes,
-            attachmentName: fileName
+            attachmentName: safeName
           });
           toast("<strong>E-Mail versendet</strong>", 2500);
         } catch (e) {
@@ -2816,26 +2877,30 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
       }
     }
 
-    // 4) Inbox → Bearbeitet, wenn irgendwas gespeichert wurde oder Lokal gewünscht war
-    if (currentInboxFileHandle && (okScope || okPcl || okPclBucket || okLocal || wantLocal)) {
-      try {
-        const moved = await moveInboxToProcessed();
-        if (moved) toast("Inbox → Bearbeitet verschoben.", 1600);
-      } catch (e) {
-        console.warn("post-move failed:", e);
-        toast("Verschieben in 'Bearbeitet' fehlgeschlagen.", 2500);
-      }
-    }
+    // 4) Inbox → Bearbeitet nur wenn mindestens EIN Ziel erfolgreich war
+if (currentInboxFileHandle && (okScope || okPcl || okPclBucket || okLocal)) {
+  try {
+    const moved = await moveInboxToProcessed();
+    if (moved) toast("Inbox → Bearbeitet verschoben.", 2000);
+  } catch (e) {
+    console.warn("post-move failed:", e);
+    toast("Verschieben in 'Bearbeitet' fehlgeschlagen.", 6000);
+  }
+}
+
 
     // 5) Feedback & Reset
-    const okTargets = [
-      okScope     ? "Scopevisio"            : null,
-      okPcl       ? "pCloud"                : null,
-      okPclBucket ? "pCloud (Sammelordner)" : null,
-      okLocal     ? "Lokal"                 : null
-    ].filter(Boolean).join(" & ") || "—";
+  const okTargets = [
+  okScope     ? "Scopevisio"            : null,
+  okPcl       ? "pCloud"                : null,
+  okPclBucket ? "pCloud (Sammelordner)" : null,
+  okLocal     ? "Lokal"                 : null
+].filter(Boolean).join(" & ");
 
-    toast(`<strong>Gespeichert</strong><br>${fileName}<br><em>${okTargets}</em>`, 4200);
+const usedName = safeName || fileName;
+toast(`<strong>Gespeichert</strong><br>${usedName}<br><em>${okTargets}</em>`, 5000);
+
+
     if (typeof hardReset === "function") hardReset();
 
   } catch (e) {
@@ -3241,7 +3306,17 @@ function repaintInboxList(){
     }
     return "";
   }
+function fileSafe(s=""){
+  // Alternative fileSafe: ersetze "/" durch U+2215 statt "-"
+const map = { '/':'\u2215', '\\':'-', ':':'-', '*':'x', '?':'-', '"':'-', '<':'-', '>':'-', '|':'-' };
 
+  return String(s || "")
+    .split("")
+    .map(ch => Object.prototype.hasOwnProperty.call(map, ch) ? map[ch] : ch)
+    .join("");
+}
+// unter fileSafe(...)
+try { window.fileSafe = fileSafe; Naming.fileSafe = fileSafe; } catch {}
   function _safeChunk(s) {
     return String(s || "")
       .trim()
@@ -3249,7 +3324,25 @@ function repaintInboxList(){
       .replace(/[^\wÄÖÜäöüß ,\-]/g, "")
       .replace(/_/g, " ");
   }
+function safeInvoiceId(s){
+  const raw = String(s || "").trim();
+  if (!raw) return "";
+  // Whitespace normalisieren
+  let t = raw.replace(/\s+/g, " ");
 
+  // Zuerst ASCII-Slashes in optische Varianten umwandeln
+  //  U+2215  ∕  (fraction slash)
+  //  U+FF0F  ／ (fullwidth solidus) – Zweitoption
+  t = t.replace(/\//g, "∕").replace(/\\/g, "⧵");
+
+  // Steuerzeichen ausschließen (Cloud-/WebDAV-Clients mögen die nicht)
+  t = t.replace(/[\u0000-\u001F]/g, "");
+
+  return t;
+}
+
+// unter safeInvoiceId(...)
+try { window.safeInvoiceId = safeInvoiceId; Naming.safeInvoiceId = safeInvoiceId; } catch {}
   function _deriveObjectCode(desc) {
     const raw = String(desc || "").trim();
     if (!raw) return "";
@@ -3281,7 +3374,7 @@ function repaintInboxList(){
     if (isInvoice) {
       if (amtDisp)    parts.push(_safeChunk(amtDisp));
       if (sender)     parts.push(_safeChunk(sender));
-      if (invoiceNo)  parts.push(`RE ${_safeChunk(invoiceNo)}`);
+      if (invoiceNo)  parts.push(`RE ${safeInvoiceId(invoiceNo)}`);
       if (objCode)    parts.push(_safeChunk(objCode));
       if (ymd)        parts.push(_safeChunk(ymd));
     } else {
@@ -3289,7 +3382,10 @@ function repaintInboxList(){
       if (objCode)    parts.push(_safeChunk(objCode));
       if (ymd)        parts.push(_safeChunk(ymd));
     }
-    const base = parts.filter(Boolean).join("_");
-    return base ? `${base}.pdf` : "";
+   const base = parts.filter(Boolean).join("_");
+const safeBase = (typeof fileSafe === "function")
+  ? fileSafe(base)
+  : base.replace(/[\/\\:*?"<>|\u2215]/g, "-"); // Fallback, falls fileSafe nicht geladen ist
+return safeBase ? `${safeBase}.pdf` : "";
   };
 })();
