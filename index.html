@@ -22,7 +22,8 @@
   <!-- Scripts -->
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
-  <script defer src="app.js?v=2025.10.26-r2"></script>
+  <script defer src="app.js?v=2025.11.06-r23"></script>
+
 </head>
 
 
@@ -138,8 +139,9 @@
   <!-- An -->
   <div class="mail-row">
     <label class="label mail-col--label" for="mailFree">An</label>
-    <input id="mailFree" class="input" placeholder="E-Mail-Adresse eingeben und Enter drücken" list="mailBook" />
-    <datalist id="mailBook"></datalist>
+    <input id="mailFree" class="input" placeholder="E-Mail-Adresse eingeben und Enter drücken" />
+<datalist id="mailBook"></datalist> <!-- darf bleiben -->
+
     <select id="mailSelect" class="select" hidden></select>
     <a href="#" id="linkShowCc"  class="linklike mail-col--addon">+ CC</a>
     <a href="#" id="linkShowBcc" class="linklike mail-col--addon">+ BCC</a>
