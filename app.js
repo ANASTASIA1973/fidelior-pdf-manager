@@ -16,14 +16,40 @@
    ========================================================================== */
 
 (() => {
-  /* ------------------------------- Helpers -------------------------------- */
-  const $  = (s, el=document) => el.querySelector(s);
-  const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
-  const pad2 = n => (n<10?"0":"")+n;
-  const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
-  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+/* ------------------------------- Helpers -------------------------------- */
+const $  = (s, el=document) => el.querySelector(s);
+const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
+// ---- Config-Handle vereinheitlichen ----
+function syncConfigHandle(from){
+  // Nimm das erste, was gesetzt ist
+  const cfg = from
+    || configDirHandle
+    || window.configDirHandle
+    || window.pcloudConfigDir
+    || null;
 
-  // pCloud Sammelordner (unterhalb des verbundenen pCloud-Roots)
+  if (!cfg) return null;
+
+  configDirHandle        = cfg;
+  window.configDirHandle = cfg;
+  window.pcloudConfigDir = cfg;
+
+  return cfg;
+}
+
+
+/* NEU (Schritt 1): Checkbox-Flag-Helfer – liest NEUE oder ALTE IDs */
+function flag(newId, oldId){
+  const a = document.getElementById(newId);
+  const b = document.getElementById(oldId);
+  return !!(a?.checked || b?.checked);
+}
+
+const pad2 = n => (n<10?"0":"")+n;
+const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
+// pCloud Sammelordner (unterhalb des verbundenen pCloud-Roots)
 const PCL_COLLECT_FOLDER = "DMS BACKUP PCLOUD";
 
 // ganz oben bei den Helpers
@@ -46,11 +72,13 @@ async function tryRemoveCrSwap(dirHandle, baseName){
   } catch {}
 }
 
+
   // Erkennt: stammt die geladene Datei faktisch aus dem Inbox-ROOT?
 async function tryBindInboxContextForFileByName(file) {
-  if (!inboxRootHandle || !file?.name) return false;
+  const inboxRoot = window.inboxRootHandle || inboxRootHandle;
+  if (!inboxRoot || !file?.name) return false;
   try {
-    const h = await inboxRootHandle.getFileHandle(file.name, { create: false });
+    const h  = await inboxRoot.getFileHandle(file.name, { create: false });
     const f2 = await h.getFile();
     // Simple, robuste Heuristik: gleicher Name + gleiche Größe -> wir sind im Inbox-Root
     if (f2 && f2.size && f2.size === file.size) {
@@ -154,7 +182,6 @@ async function idbGet(key) {
 }
 
 // Speichern der verbundenen Handles
-// Speichern der verbundenen Handles
 async function saveBoundHandles() {
   try {
     await idbSet("scopeRootHandle",     scopeRootHandle     || null);
@@ -174,16 +201,17 @@ async function restoreBoundHandles() {
     const s = await idbGet("scopeRootHandle");
     const i = await idbGet("inboxRootHandle");
     const b = await idbGet("processedRootHandle");
-    const p = await idbGet("pcloudRootHandle");   // optional
-    const c = await idbGet("configDirHandle");    // optional
+    const p = await idbGet("pcloudRootHandle");
+    const c = await idbGet("configDirHandle");
 
-    if (s) scopeRootHandle     = s;
-    if (i) inboxRootHandle     = i;
-    if (b) processedRootHandle = b;
-    if (p) pcloudRootHandle    = p;
-    if (c) configDirHandle     = c;
+    // WICHTIG: immer beide setzen – lokal und window.*
+    if (s) { scopeRootHandle     = s; window.scopeRootHandle     = s; }
+    if (i) { inboxRootHandle     = i; window.inboxRootHandle     = i; }
+    if (b) { processedRootHandle = b; window.processedRootHandle = b; }
+    if (p) { pcloudRootHandle    = p; window.pcloudRootHandle    = p; }
+    if (c) { syncConfigHandle(c); }
 
-    // Permissions prüfen (ohne Popup). 'prompt' ist ok — wir fragen erst beim Schreiben aktiv nach.
+    // Permissions prüfen (ohne Popup)
     const check = async (h) => {
       if (!h?.queryPermission) return !!h;
       try {
@@ -199,53 +227,149 @@ async function restoreBoundHandles() {
     // Guard: Bearbeitet darf nicht innerhalb der Inbox liegen
     if (okInbox && okBearb && inboxRootHandle && processedRootHandle) {
       try { await assertProcessedNotInsideInbox(inboxRootHandle, processedRootHandle); }
-      catch { processedRootHandle = null; }
+      catch { processedRootHandle = null; window.processedRootHandle = null; }
     }
 
     paintChips();
     if (okInbox) await refreshInbox();
 
     if (!okScope || !okInbox || !okBearb) {
-      // nur ein Hinweis, kein Fehler
       toast("Hinweis: Ordner ggf. einmalig freigeben (beim Speichern erscheint die Abfrage).", 2800);
     }
   } catch (e) {
     console.warn("restoreBoundHandles failed:", e);
   }
+      // sicherheitshalber Config aus allen Quellen zusammenziehen
+    syncConfigHandle();
+
 }
 
 
-// ----- Zusatz-Helper: sichere Dateinamen & Ordner-Guards -----
-
-// Falls im Ziel bereits eine Datei gleichen Namens existiert, hänge " (2)", " (3)", … an.
-async function uniqueName(dirHandle, baseName) {
-  const m = String(baseName).match(/^(.*?)(\.[^.]+)?$/);
-  const stem = m?.[1] ?? baseName, ext = m?.[2] ?? "";
-  let n = 1, candidate = baseName;
-  while (true) {
-    try {
-      await dirHandle.getFileHandle(candidate, { create: false });
-      n += 1; candidate = `${stem} (${n})${ext}`;
-    } catch {
-      return candidate; // frei
-    }
+// --- Root-Verbindungen direkt herstellen (mit echtem System-Picker) ---
+// --- PICKER & BINDING: pCloud ---
+// ---------- Hilfsfunktion: Picker sicher mit User-Geste starten ----------
+async function pickDirectoryWithUserGesture() {
+  // Wenn noch eine User-Aktivierung da ist, direkt versuchen
+  if (navigator.userActivation?.isActive) {
+    return await window.showDirectoryPicker({ mode: "readwrite" });
   }
+
+  // Sonst: Einmaliger, unsichtbarer Trampolin-Button
+  return new Promise((resolve, reject) => {
+    const cover = document.createElement("button");
+    Object.assign(cover.style, {
+      position: "fixed", inset: "0", opacity: "0", zIndex: "2147483647",
+      border: "0", padding: "0", margin: "0", background: "transparent", cursor: "default"
+    });
+    cover.setAttribute("aria-hidden", "true");
+    cover.addEventListener("pointerdown", async (e) => {
+      e.preventDefault();
+      try {
+        const dir = await window.showDirectoryPicker({ mode: "readwrite" });
+        resolve(dir);
+      } catch (err) {
+        reject(err);
+      } finally {
+        try { cover.remove(); } catch {}
+      }
+    }, { once: true });
+
+    document.body.appendChild(cover);
+    // Optionaler Hinweis für den Nutzer:
+    toast("Bitte einmal klicken, um den Ordner auszuwählen…", 2000);
+  });
 }
 
-// Prüft, ob processedRootHandle fälschlich unterhalb der Inbox liegt (gefährlich!)
-async function assertProcessedNotInsideInbox(inboxDir, processedDir) {
-  if (!inboxDir || !processedDir || typeof inboxDir.resolve !== "function") return;
+// ---------- pCloud verbinden (robust) ----------
+async function bindPcloudInteractive(){
+  // schon verbunden?
+  if (window.pcloudRootHandle || pcloudRootHandle) return true;
+
   try {
-    const path = await inboxDir.resolve(processedDir); // Array oder null
-    if (Array.isArray(path) && path.length) {
-      // processedDir ist innerhalb inboxDir → strikt untersagen
-      throw new Error("Konfiguration fehlerhaft: 'Bearbeitet' liegt innerhalb der Inbox.");
+    if (!("showDirectoryPicker" in window)) {
+      alert("Dieser Browser unterstützt keinen Ordner-Picker.");
+      return false;
     }
+
+    // Ordner auswählen – muss in echter User-Geste aufgerufen sein
+    const dir = await window.showDirectoryPicker({ mode: "readwrite" });
+
+    // Schreibrecht erzwingen
+    if (dir.requestPermission) {
+      const st = await dir.requestPermission({ mode: "readwrite" });
+      if (st !== "granted") {
+        alert("Zugriff auf pCloud-Ordner wurde nicht gewährt.");
+        return false;
+      }
+    }
+
+    // WICHTIG: beide Variablen setzen!
+    window.pcloudRootHandle = pcloudRootHandle = dir;
+
+    // persistieren
+    try { await idbSet("pcloudRootHandle", dir); } catch {}
+
+    // UI refresh (best effort)
+    try { paintConnectionsCompact(); } catch {}
+    try { renderTargetSummary(); } catch {}
+    try { refreshPreview(); } catch {}
+
+    toast("<strong>pCloud verbunden</strong>", 1500);
+    return true;
   } catch (e) {
-    if (/fehlerhaft/i.test(String(e))) throw e;
-    // ältere Browser ohne resolve(): kein harter Fehler
+    console.warn("bindPcloudInteractive failed:", e?.name, e?.message, e);
+    alert("pCloud konnte nicht verbunden werden.");
+    return false;
   }
 }
+// global verfügbar machen
+window.bindPcloudInteractive = bindPcloudInteractive;
+
+
+// ---------- Scopevisio verbinden (robust) ----------
+async function bindScopeInteractive(){
+  // schon verbunden?
+  if (window.scopeRootHandle || scopeRootHandle) return true;
+
+  try {
+    if (!("showDirectoryPicker" in window)) {
+      alert("Dieser Browser unterstützt keinen Ordner-Picker.");
+      return false;
+    }
+
+    // Ordner auswählen – muss in echter User-Geste aufgerufen sein
+    const dir = await window.showDirectoryPicker({ mode: "readwrite" });
+
+    // Schreibrecht erzwingen
+    if (dir.requestPermission) {
+      const st = await dir.requestPermission({ mode: "readwrite" });
+      if (st !== "granted") {
+        alert("Zugriff auf Scopevisio-Ordner wurde nicht gewährt.");
+        return false;
+      }
+    }
+
+    // WICHTIG: beide Variablen setzen!
+    window.scopeRootHandle = scopeRootHandle = dir;
+
+    // persistieren
+    try { await idbSet("scopeRootHandle", dir); } catch {}
+
+    // UI refresh (best effort)
+    try { paintConnectionsCompact(); } catch {}
+    try { renderTargetSummary(); } catch {}
+    try { refreshPreview(); } catch {}
+
+    toast("<strong>Scopevisio verbunden</strong>", 1500);
+    return true;
+  } catch (e) {
+    console.warn("bindScopeInteractive failed:", e?.name, e?.message, e);
+    alert("Scopevisio konnte nicht verbunden werden.");
+    return false;
+  }
+}
+// global verfügbar machen
+window.bindScopeInteractive = bindScopeInteractive;
 
 
   /* ------------------------------ Globals --------------------------------- */
@@ -270,7 +394,7 @@ let currentInboxRelPath=null; // NEU: Pfadsegmente relativ zur Inbox (für korre
   const typeSel=$("#docTypeSelect"), objSel=$("#objectSelect");
   const subRow=$("#subfolderRow"), subSel=$("#genericSubfolder");
   const fileNamePrev=$("#fileNamePreview"), targetPrev=$("#targetPreview");
-  // Manuelle Eingaben merken (überschreibt Auto-Erkennung)
+
 // Manuelle Eingaben merken (überschreibt Auto-Erkennung) + Preview sofort aktualisieren
 invNoEl?.addEventListener("input", ()=>{
   invNoEl.dataset.userTyped = "1";
@@ -285,6 +409,13 @@ senderEl?.addEventListener("input", ()=>{
 });
 
 
+// --- Helper: Button klicken, auf Handle warten, UI refreshen ---
+function __on(id){ return document.getElementById(id)?.checked === true; }
+
+// ALT-Logik deaktiviert – neue Logik läuft über preflightTargets()
+async function ensureTargetsReady(){
+  return true;
+}
 
 /* ----------------------------- Mail State (clean) ------------------------- */
 const Mail = {
@@ -530,7 +661,11 @@ function attachMailUI(){
       wrap.className = "pdf-page"; wrap.style.width = viewport.width + "px"; wrap.style.position = "relative";
       const canvas = document.createElement("canvas"); wrap.appendChild(canvas);
       const ctx = fitCanvas(canvas, viewport); const task = page.render({ canvasContext: ctx, viewport }); renderTasks.push(task);
-      await task.promise; if (myToken !== zoomToken) return; wmPreview(wrap, viewport, i); frag.appendChild(wrap);
+await task.promise;
+await new Promise(r => setTimeout(r, 0)); // Event-Loop freigeben
+wmPreview(wrap, viewport, i);
+frag.appendChild(wrap);
+
     }
     pdfViewer.replaceChildren(frag); $("#previewPlaceholder")?.setAttribute("style","display:none");
   }
@@ -595,70 +730,75 @@ function attachUpload(){
   window.__fdl_takeFile = takeFile;
 
   // Neuer, minimaler Picker-Handler (nur Inbox-ROOT prüfen + Debug-Ausgaben)
-  btnPick?.addEventListener("click", async () => {
-    try {
-      if (!window.showOpenFilePicker) {
-        // Fallback auf <input type="file">
-        input?.click();
-        return;
-      }
-
-      const picks = await window.showOpenFilePicker({
-        startIn: inboxRootHandle || "documents",
-        multiple: false,
-        types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }]
-      });
-      if (!picks?.length) return;
-
-      const pickedFileHandle = picks[0];
-      const pickedFile = await pickedFileHandle.getFile();
-
-      console.debug("[PICK] picked:", pickedFileHandle.name, pickedFile.size, "bytes");
-      console.debug("[PICK] have inboxRootHandle:", !!inboxRootHandle, "name:", inboxRootHandle?.name || "(?)");
-
-      // --- MINIMAL: Nur Inbox-ROOT prüfen (kein resolve, keine Rekursion) ---
-      let isInInbox = false;
-      let relPath = null;
-      let inboxFileHandle = null;
-
-      try {
-        if (inboxRootHandle) {
-          // Einmalig Schreibrecht anstoßen (innerhalb User-Gesture)
-          await ensureWritePermissionWithPrompt(inboxRootHandle, "Inbox");
-
-          // Gibt es im Inbox-ROOT eine Datei gleichen Namens?
-          const h = await inboxRootHandle.getFileHandle(pickedFileHandle.name, { create: false });
-          // Wenn ja → als Inbox-Datei behandeln
-          isInInbox = true;
-          relPath = [pickedFileHandle.name];
-          inboxFileHandle = h;
-        }
-      } catch {
-        // nicht im Inbox-ROOT -> extern
-      }
-
-      if (isInInbox) {
-        // → sicher Inbox-Quelle
-        currentInboxFileHandle = inboxFileHandle;
-        currentInboxFileName   = pickedFileHandle.name;
-        currentInboxRelPath    = relPath; // ["Datei.pdf"]
-
-        await takeFile(pickedFile, { fromInbox: true });
-        setStatus(`Datei: ${pickedFile.name} – Quelle: Inbox ✓`);
-      } else {
-        // → extern; kein Verschieben/Löschen später
-        currentInboxFileHandle = null;
-        currentInboxFileName   = "";
-        currentInboxRelPath    = null;
-
-        await takeFile(pickedFile, { fromInbox: false });
-        setStatus(`Datei: ${pickedFile.name} – Quelle: extern (kein Verschieben)`);
-        toast("Datei liegt nicht im verbundenen <strong>Inbox</strong>-Ordner – es wird nicht verschoben.", 2800);
-      }
-    } catch {
-      /* abgebrochen */
+btnPick?.addEventListener("click", async () => {
+  try {
+    if (!window.showOpenFilePicker) {
+      // Fallback auf <input type="file">
+      input?.click();
+      return;
     }
-  });
+
+    // Inbox-Root: bevorzugt window.*, sonst alte Variable
+    const inboxRoot = window.inboxRootHandle || inboxRootHandle || null;
+
+    const picks = await window.showOpenFilePicker({
+      startIn: inboxRoot || "documents",
+      multiple: false,
+      types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }]
+    });
+    if (!picks?.length) return;
+
+    const pickedFileHandle = picks[0];
+    const pickedFile = await pickedFileHandle.getFile();
+
+    console.debug("[PICK] picked:", pickedFileHandle.name, pickedFile.size, "bytes");
+    console.debug("[PICK] have inboxRoot:", !!inboxRoot, "name:", inboxRoot?.name || "(?)");
+
+    // --- Nur Inbox-ROOT prüfen (kein Unterordner-Resolve) ---
+    let isInInbox = false;
+    let relPath = null;
+    let inboxFileHandle = null;
+
+    try {
+      if (inboxRoot) {
+        // Einmalig Schreibrecht anstoßen (innerhalb User-Gesture)
+        await ensureWritePermissionWithPrompt(inboxRoot, "Inbox");
+
+        // Gibt es im Inbox-ROOT eine Datei gleichen Namens?
+        const h = await inboxRoot.getFileHandle(pickedFileHandle.name, { create: false });
+        // Wenn ja → als Inbox-Datei behandeln
+        isInInbox = true;
+        relPath = [pickedFileHandle.name];
+        inboxFileHandle = h;
+      }
+    } catch (e) {
+      // nicht im Inbox-ROOT -> extern
+      console.debug("[PICK] not in inbox root or no permission", e);
+    }
+
+    if (isInInbox) {
+      // → sicher Inbox-Quelle
+      currentInboxFileHandle = inboxFileHandle;
+      currentInboxFileName   = pickedFileHandle.name;
+      currentInboxRelPath    = relPath; // ["Datei.pdf"]
+
+      await takeFile(pickedFile, { fromInbox: true });
+      setStatus(`Datei: ${pickedFile.name} – Quelle: Inbox ✓`);
+    } else {
+      // → extern; kein Verschieben/Löschen später
+      currentInboxFileHandle = null;
+      currentInboxFileName   = "";
+      currentInboxRelPath    = null;
+
+      await takeFile(pickedFile, { fromInbox: false });
+      setStatus(`Datei: ${pickedFile.name} – Quelle: extern (kein Verschieben)`);
+      toast("Datei liegt nicht im verbundenen <strong>Inbox</strong>-Ordner – es wird nicht verschoben.", 2800);
+    }
+  } catch {
+    /* abgebrochen */
+  }
+});
+
 
   // Fallback: klassischer <input type=file>  ⇐⇐⇐ ANGEPASST
   input?.addEventListener("change", async (e) => {
@@ -731,10 +871,6 @@ document.getElementById("downloadBtn")?.addEventListener("click", () => {
 // === Helper: STRIKTE Rechnungsnummer-Erkennung (robust & konservativ) ===
 function findInvoiceNumberStrict(rawText){
   if (!rawText) return "";
-  function numToEuro(n){
-  return (isFinite(n) ? Number(n) : 0).toFixed(2).replace(".", ",");
-}
-
 
   // 1) Normalisieren (PDF-Artefakte entfernen)
   const text = String(rawText)
@@ -1253,9 +1389,6 @@ if (reNummer) {
 
   async function listChildFolders(rootHandle, segments){ try{ if(!rootHandle || !segments?.length) return []; let dir = rootHandle; for (const s of segments){ if(!s) continue; dir = await dir.getDirectoryHandle(s, { create:false }); } const out = []; for await (const e of dir.values()){ if(e.kind === "directory") out.push(e.name); } return out; }catch{ return []; } }
 
-  /* ====== BLOCK 1: updateSubfolderOptions (ERSATZ, kompletter Funktions-Body) ====== */
-/* Änderung: zusätzlicher Parameter { silent=false } steuert, ob die UI sichtbar wird.
-   Wenn silent===true, werden Optionen geladen & Vorwahl gesetzt, aber subRow bleibt verborgen. */
 async function updateSubfolderOptions({ silent = false } = {}) {
   if (!subRow || !subSel) return;
 
@@ -1269,14 +1402,38 @@ async function updateSubfolderOptions({ silent = false } = {}) {
   // PRAGMATIK: Für PRV/ohne Code nichts anzeigen
   if (!code || code === "PRIVAT") return;
 
+  // ---- Sonderfall B75 (nur bei Rechnung, nur für Dateinamen) ----
+  if (code === "B75" && invoice) {
+    const prev = (subSel.value || "").trim();
+    const opts = [
+      { value: "",   label: "(kein Unterordner)" },
+      { value: "D1", label: "D1" },
+      { value: "D4", label: "D4" }
+    ];
+
+    subSel.innerHTML = opts
+      .map(o => `<option value="${o.value}">${o.label}</option>`)
+      .join("");
+
+    if (opts.some(o => o.value === prev)) {
+      subSel.value = prev;
+    } else {
+      subSel.value = "";
+    }
+
+    if (!silent) subRow.style.display = "grid";
+    return;
+  }
+
   // Sichtbarkeits-Flag statt mehrfacher DOM-Schalter
   let show = false;
 
-  // ---- Spezialfall FIDELIOR (nur bei Nicht-Rechnung) ----
+  // ---- Spezialfall FIDELIOR (nur bei Nicht-Rechnung, pCloud-Verwaltung) ----
   if (code === "FIDELIOR") {
-    if (!invoice && pcloudRootHandle) {
+    const root = window.pcloudRootHandle || pcloudRootHandle;
+    if (!invoice && root) {
       const base = ["FIDELIOR", "VERWALTUNG"];
-      const raw  = await listChildFolders(pcloudRootHandle, base);
+      const raw  = await listChildFolders(root, base);
 
       const options = [...new Set(raw)]
         .filter(Boolean)
@@ -1293,7 +1450,7 @@ async function updateSubfolderOptions({ silent = false } = {}) {
     return;
   }
 
-  // ---- Allgemeiner Zweig ----
+  // ---- Allgemeiner Zweig (alle anderen Objekte) ----
   const { scopeName, pcloudName } = getFolderNames(code);
   const scopeBase = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
 
@@ -1310,8 +1467,10 @@ async function updateSubfolderOptions({ silent = false } = {}) {
   known.add(invoice ? "Rechnungsbelege" : "Objektdokumente");
 
   const lists = [];
-  if (scopeRootHandle)                 lists.push(listChildFolders(scopeRootHandle,  scopeBase));
-  if (pcloudRootHandle && pclBase)     lists.push(listChildFolders(pcloudRootHandle,  pclBase));
+  const scopeRoot  = window.scopeRootHandle  || scopeRootHandle;
+  const pcloudRoot = window.pcloudRootHandle || pcloudRootHandle;
+  if (scopeRoot)             lists.push(listChildFolders(scopeRoot,  scopeBase));
+  if (pcloudRoot && pclBase) lists.push(listChildFolders(pcloudRoot, pclBase));
 
   const foundLists = (await Promise.all(lists).catch(() => [[]])).flat();
   for (const n of foundLists) if (n) known.add(n);
@@ -1336,6 +1495,64 @@ async function updateSubfolderOptions({ silent = false } = {}) {
   subRow.style.display = (!silent && show) ? "grid" : "none";
 }
 
+// ---- Zielordner-Übersicht (global) ----
+// Zeigt nur, was wirklich aktiv & auflösbar ist. Nutzt resolveTargets() als einzige Wahrheit.
+function renderTargetSummary(){
+  const el = (typeof targetPrev !== "undefined" && targetPrev) ? targetPrev : document.querySelector("#targetPreview");
+  if (!el) return;
+
+  // aktuelle Ziele auflösen (nutzt deine Objekt-/Pfadregeln)
+  const t = (typeof resolveTargets === "function") ? resolveTargets() : {};
+
+  const lines = [];
+
+  // Scopevisio → nur wenn Root existiert UND Segmente vorhanden
+  if (t?.scope?.root && Array.isArray(t.scope.seg) && t.scope.seg.length){
+    lines.push(`<strong>Scopevisio:</strong> ${t.scope.seg.join(" \\ ")}`);
+  }
+
+  // pCloud Zusatzablage (strukturierter Objektpfad)
+  if (t?.pcloud?.root && Array.isArray(t.pcloud.seg) && t.pcloud.seg.length){
+    lines.push(`<strong>pCloud (Zusatzablage):</strong> ${t.pcloud.seg.join(" \\ ")}`);
+  }
+
+  // pCloud Sammelordner / Backup
+  if (t?.pcloudBucket?.root && Array.isArray(t.pcloudBucket.seg) && t.pcloudBucket.seg.length){
+    lines.push(`<strong>pCloud (Sammelordner):</strong> ${t.pcloudBucket.seg.join(" \\ ")}`);
+  }
+
+  // Lokal
+  if (t?.local === true){
+    lines.push(`<strong>Lokal:</strong> (wird beim Speichern abgefragt)`);
+  }
+
+  // Wenn nichts anzeigbar ist → präzise Gründe (neue ODER alte Checkbox-IDs)
+  if (!lines.length){
+    const hints = [];
+    if (flag("chkScopevisio","chkScope") && !window.scopeRootHandle){
+      hints.push("Scopevisio (nicht verbunden)");
+    }
+    if (flag("chkPcloudExtra","chkPcloudExtras") && !window.pcloudRootHandle){
+      hints.push("pCloud Zusatzablage (nicht verbunden)");
+    }
+    if (!!document.getElementById("chkPcloudBackup")?.checked && !window.pcloudRootHandle){
+      hints.push("pCloud Sammelordner/Backup (nicht verbunden)");
+    }
+    if (flag("chkLocalSave","chkLocal")){
+      hints.push("Lokal: (wird beim Speichern abgefragt)");
+    }
+
+    el.innerHTML = hints.length
+      ? `Zielordner: <span class="muted">${hints.join(" · ")}</span>`
+      : `Zielordner: <span class="muted">Keine Ablageziele aktiviert</span>`;
+    return;
+  }
+
+  el.innerHTML = `Zielordner: ${lines.join("<br>")}`;
+}
+
+
+// ---- Vorschau der Zielordner & Dateiname aktualisieren ----
 function refreshPreview(){
   const hasDoc = !!pdfDoc;
 
@@ -1350,41 +1567,95 @@ function refreshPreview(){
     fileNamePrev.textContent = hasDoc ? computeFileNameAuto() : "-";
   }
 
-  if (!hasDoc){ targetPrev && (targetPrev.innerHTML = "—"); return; }
+  const el = (typeof targetPrev !== "undefined" && targetPrev) ? targetPrev : document.querySelector("#targetPrev");
+  if (!el) return;
 
+  if (!hasDoc){
+    el.innerHTML = "Zielordner: —";   // eindeutig: kein Dokument → keine Zielauflösung
+    return;
+  }
+
+  renderTargetSummary();               // nur bei vorhandenem Dokument
+}
+
+
+// Zielordner-Preview bei Ziel-/Objektwechsel live aktualisieren
+(function wireTargetPreviewLive(){
+  function schedule(){
+    try { refreshPreview(); }
+    catch(e){ console.warn("refreshPreview failed", e); }
+  }
+
+  const ids = [
+    "#chkScope", "#chkScopevisio",
+    "#chkPcloudExtras", "#chkPcloudExtra", "#chkPcloudBackup",
+    "#chkLocal", "#chkLocalSave",
+    "#objectSelect", "#genericSubfolder", "#docTypeSelect"
+  ];
+
+  function attach(){
+    ids.forEach(sel => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      el.addEventListener("change", schedule);
+      el.addEventListener("input",  schedule);
+    });
+  }
+
+  if (document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", attach, { once:true });
+  } else {
+    attach();
+  }
+})();
+
+// === TARGETS: Pfade für das Speichern bestimmen (neu, kompakt) ===
+function resolveTargets(){
   const code    = (objSel?.value || "").trim();
-  const year    = String(currentYear());
-  const invoice = isInvoice();
+  const invoice = (typeof isInvoice === "function") ? isInvoice() : true;
+  const year    = (typeof currentYear === "function") ? String(currentYear()) : String(new Date().getFullYear());
   const sub     = (subSel?.value || "").trim();
 
-  const wantScope      = $("#chkScope")?.checked === true;
-  const wantPcl        = $("#chkPcloud")?.checked === true;
-  const wantPclBucket  = isPcloudBucketChecked();
+  // NEUE Schalter
+  const useScope   = flag("chkScopevisio", "chkScope");
+  const useExtras  = flag("chkPcloudExtra", "chkPcloudExtras");
+  const wantLocal  = flag("chkLocalSave",  "chkLocal");
+  const wantBackup = !!document.getElementById("chkPcloudBackup")?.checked; // NEU
 
-  const { scopeName, pcloudName } = getFolderNames(code);
-  const lines = [];
+  // Root-Handles: bevorzugt window.*, Fallback alte lokalen Variablen
+  const scopeRoot  = window.scopeRootHandle  || scopeRootHandle  || null;
+  const pcloudRoot = window.pcloudRootHandle || pcloudRootHandle || null;
 
-  // Scopevisio (nur mit Objekt sinnvoll)
-  if (wantScope && code){
+  const out = {
+    scope:        { root:null, seg:[] },
+    pcloud:       { root:null, seg:[] },       // strukturierte pCloud (Extras)
+    pcloudBucket: { root:null, seg:[] },       // Sammelordner (Backup)
+    local:        wantLocal === true
+  };
+
+  // ---------- Scopevisio ----------
+  if (useScope && scopeRoot && code){
     let seg;
-    if (code === "FIDELIOR")      seg = ["FIDELIOR", (invoice ? "Eingangsrechnungen" : "Dokumente"), year];
-    else if (code === "PRIVAT")   seg = ["PRIVAT",   (invoice ? "Rechnungsbelege" : "Dokumente"), year];
-    else if (isArndtCie(code))    seg = ["ARNDT & CIE", (invoice ? "Eingangsrechnungen" : "Dokumente"), year];
-    else {
+    if (code === "FIDELIOR"){
+      seg = ["FIDELIOR", (invoice ? "Eingangsrechnungen" : "Dokumente"), year];
+    } else if (code === "PRIVAT"){
+      seg = ["PRIVAT", (invoice ? "Rechnungsbelege" : "Dokumente"), year];
+    } else if (typeof isArndtCie === "function" && isArndtCie(code)) {
+      seg = ["ARNDT & CIE", (invoice ? "Eingangsrechnungen" : "Dokumente"), year];
+    } else {
+      const scopeName = (typeof getFolderNames === "function" ? getFolderNames(code).scopeName : code);
       const base = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
-
-      // B75 + Rechnung => immer nur Jahresordner
       const leaf = (code === "B75" && invoice)
         ? [year]
         : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
-
       seg = base.concat(leaf);
     }
-    lines.push("Scopevisio: " + seg.join("\\"));
+    out.scope.root = scopeRoot;
+    out.scope.seg  = seg;
   }
 
-  // pCloud (Objektpfad)
-  if (wantPcl && code){
+  // ---------- pCloud: strukturierte Ablage (Extras) ----------
+  if (useExtras && pcloudRoot && code){
     let seg = null;
     if (code === "FIDELIOR"){
       seg = invoice
@@ -1392,113 +1663,93 @@ function refreshPreview(){
         : (sub ? ["FIDELIOR","VERWALTUNG", sub, year] : null);
     } else if (code === "PRIVAT"){
       seg = ["FIDELIOR","PRIVAT", (invoice ? "Rechnungsbelege" : "Dokumente"), year];
-    } else if (!isArndtCie(code)){
+    } else if (!(typeof isArndtCie === "function" && isArndtCie(code))){
+      // Spezieller Sonderfall A15: zusätzlicher "Buchhaltung"-Layer
       if (code === "A15" && invoice){
-        const base = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"];
         const leaf = (sub && sub !== "Rechnungsbelege") ? [sub, year] : [year];
-        seg = base.concat(leaf);
+        seg = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"].concat(leaf);
       } else {
-        if (!invoice && !sub){
-          seg = null;
-        } else {
+        const pcloudName = (typeof getFolderNames === "function" ? getFolderNames(code).pcloudName : code);
+        if (invoice || sub){
           const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
-
-          // B75 + Rechnung => immer nur Jahresordner
           const leaf = (code === "B75" && invoice)
             ? [year]
             : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
-
           seg = base.concat(leaf);
         }
       }
     }
-    lines.push("pCloud: " + (seg ? seg.join("\\") : "—"));
-  }
-
-  // pCloud Sammelordner (Konstante PCL_COLLECT_FOLDER nutzen)
-  if (wantPclBucket){
-    const seg = ["FIDELIOR", PCL_COLLECT_FOLDER];
-    lines.push("pCloud (Sammelordner): " + seg.join("\\"));
-  }
-
-  // Lokal
-  const wantLocal = $("#chkLocal")?.checked === true;
-  if (wantLocal) lines.push("Lokal: (Dateidialog)");
-
-  targetPrev && (targetPrev.innerHTML = lines.join("<br>"));
-}
-
-
-function resolveTargets(){
-  const code    = (objSel?.value || "").trim();
-  const year    = String(currentYear());
-  const invoice = isInvoice();
-  const sub     = (subSel?.value || "").trim();
-
-  const wantScope = $("#chkScope")?.checked === true;
-  const wantPcl   = $("#chkPcloud")?.checked === true;
-
-  const out = { scope: null, pcloud: null, pcloudBucket: null };
-
-  // Sammelordner
-  const wantPclBucket = isPcloudBucketChecked();
-  if (wantPclBucket && pcloudRootHandle){
-    out.pcloudBucket = { root: pcloudRootHandle, seg: ["FIDELIOR", PCL_COLLECT_FOLDER] };
-  }
-
-  const { scopeName, pcloudName } = getFolderNames(code);
-
-  // Scopevisio
-  if (wantScope && scopeRootHandle && code){
-    if (code === "FIDELIOR"){
-      out.scope = { root: scopeRootHandle, seg: ["FIDELIOR", (invoice ? "Eingangsrechnungen" : "Dokumente"), year] };
-    } else if (code === "PRIVAT"){
-      out.scope = { root: scopeRootHandle, seg: ["PRIVAT", (invoice ? "Rechnungsbelege" : "Dokumente"), year] };
-    } else if (isArndtCie(code)){
-      out.scope = { root: scopeRootHandle, seg: ["ARNDT & CIE", (invoice ? "Eingangsrechnungen" : "Dokumente"), year] };
-    } else {
-      const base = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
-
-      // B75 + Rechnung => immer nur Jahresordner
-      const leaf = (code === "B75" && invoice)
-        ? [year]
-        : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
-
-      out.scope = { root: scopeRootHandle, seg: base.concat(leaf) };
+    if (seg){
+      out.pcloud.root = pcloudRoot;
+      out.pcloud.seg  = seg;
     }
   }
 
-  // pCloud
-  if (wantPcl && pcloudRootHandle && code && !isArndtCie(code)){
-    if (code === "FIDELIOR"){
-      out.pcloud = invoice
-        ? { root: pcloudRootHandle, seg: ["FIDELIOR","VERWALTUNG","Finanzen - Buchhaltung","Eingangsrechnungen", year] }
-        : (sub ? { root: pcloudRootHandle, seg: ["FIDELIOR","VERWALTUNG", sub, year] } : null);
-    } else if (code === "PRIVAT"){
-      out.pcloud = { root: pcloudRootHandle, seg: ["FIDELIOR","PRIVAT", (invoice ? "Rechnungsbelege" : "Dokumente"), year] };
-    } else {
-      if (code === "A15" && invoice){
-        const base = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"];
-        const leaf = (sub && sub !== "Rechnungsbelege") ? [sub, year] : [year];
-        out.pcloud = { root: pcloudRootHandle, seg: base.concat(leaf) };
-      } else if (invoice || sub){
-        const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
-
-        // B75 + Rechnung => immer nur Jahresordner
-        const leaf = (code === "B75" && invoice)
-          ? [year]
-          : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
-
-        out.pcloud = { root: pcloudRootHandle, seg: base.concat(leaf) };
-      }
-    }
+  // ---------- pCloud: Sammelordner (Backup immer, wenn pCloud verbunden) ----------
+  if (pcloudRoot){
+    const seg = ["FIDELIOR", (typeof PCL_COLLECT_FOLDER === "string" ? PCL_COLLECT_FOLDER : "DMS BACKUP PCLOUD")];
+    out.pcloudBucket.root = pcloudRoot;
+    out.pcloudBucket.seg  = seg;
   }
 
   return out;
 }
 
-/* --------------------------- Date-Picker (native) ------------------------ */
-function attachNativeDatePicker(textInput){
+// --- Vorprüfung der Ziele und Rechte ---
+// Prüft NUR, was wirklich aktiv ist (neue ODER alte Checkbox-IDs).
+// pCloud-Root ist NUR nötig, wenn Backup oder Zusatzablage aktiv ist.
+// Config wird hier NICHT benötigt.
+async function preflightTargets(){
+  const t = resolveTargets();
+
+  // Flags: neu ODER alt
+  const wantScope  = flag("chkScopevisio","chkScope");
+  const wantExtras = flag("chkPcloudExtra","chkPcloudExtras");
+  const wantLocal  = flag("chkLocalSave","chkLocal");
+  const wantBackup = !!document.getElementById("chkPcloudBackup")?.checked;
+
+  // Mindestens ein Ziel?
+  const anyOn = wantScope || wantExtras || wantLocal || wantBackup;
+  if (!anyOn){
+    return { ok:false, reason: "Kein Speicherziel aktiv" };
+  }
+
+  // ===== pCloud: nur prüfen, wenn Backup oder Extras aktiv sind =====
+  if (wantBackup || wantExtras){
+    // irgendein pCloud-Root (aus resolveTargets bevorzugt)
+    const pRoot = t?.pcloudBucket?.root || t?.pcloud?.root || window.pcloudRootHandle || pcloudRootHandle;
+    if (!pRoot){
+      return { ok:false, reason: "pCloud-Root fehlt" };
+    }
+
+    // Backup-Sammelordner Rechte
+    if (wantBackup && t?.pcloudBucket?.root){
+      const okB = await ensureWritePermissionWithPrompt(t.pcloudBucket.root, "pCloud (Sammelordner)");
+      if (!okB) return { ok:false, reason: "pCloud (Sammelordner): Schreibrecht" };
+    }
+    // Zusatzablage Rechte
+    if (wantExtras && t?.pcloud?.root){
+      const okE = await ensureWritePermissionWithPrompt(t.pcloud.root, "pCloud (Zusatzablage)");
+      if (!okE) return { ok:false, reason: "pCloud (Zusatzablage): Schreibrecht" };
+    }
+  }
+
+  // ===== Scopevisio: nur prüfen, wenn aktiv =====
+  if (wantScope){
+    if (!t?.scope?.root){
+      return { ok:false, reason: "Scopevisio-Root fehlt" };
+    }
+    const okS = await ensureWritePermissionWithPrompt(t.scope.root, "Scopevisio");
+    if (!okS) return { ok:false, reason: "Scopevisio: Schreibrecht" };
+  }
+
+  // Lokal benötigt keine Rechteprüfung
+  return { ok:true, t };
+}
+
+
+  /* --------------------------- Date-Picker (native) ------------------------ */
+ function attachNativeDatePicker(textInput){
   if (!textInput || textInput._hasPicker) return;
   textInput._hasPicker = true;
 
@@ -1509,33 +1760,41 @@ function attachNativeDatePicker(textInput){
   hidden.style.pointerEvents = "none";
   hidden.style.width = "1px";
   hidden.style.height = "1px";
-  hidden.style.zIndex = "9999";
+  hidden.style.zIndex = "9999"; // sicherheitshalber oben
   textInput.insertAdjacentElement("afterend", hidden);
 
   const openPicker = () => {
+    // Feld möglichst sichtbar machen
     textInput.scrollIntoView({ block: "nearest", inline: "nearest" });
 
     const rect = textInput.getBoundingClientRect();
-    const margin = 8, calH = 320, calW = 320;
+    const margin = 8;        // kleiner Abstand
+    const calH   = 320;      // grobe Kalender-Höhe
+    const calW   = 320;      // grobe Kalender-Breite
 
+    // Links klemmen
     const left = Math.max(
       margin,
       Math.min(rect.left + margin, window.innerWidth - calW - margin)
     );
 
+    // Unten genug Platz? Sonst oberhalb anzeigen
     const needsUp = (rect.top + rect.height + calH + margin > window.innerHeight);
     const top = needsUp
-      ? Math.max(margin, rect.top - calH - margin)
-      : Math.max(margin, rect.top + rect.height + margin);
+      ? Math.max(margin, rect.top - calH - margin)          // oberhalb
+      : Math.max(margin, rect.top + rect.height + margin);  // unterhalb
 
     hidden.style.left = Math.floor(left) + "px";
     hidden.style.top  = Math.floor(top)  + "px";
 
-    const iso = dispToIso(textInput.value);
-    hidden.value = iso || new Date().toISOString().slice(0,10);
+  
+    // aktuellen Wert übernehmen – wenn keiner gesetzt: heute
+const iso = dispToIso(textInput.value);
+hidden.value = iso || new Date().toISOString().slice(0,10);
 
-    hidden.showPicker?.();
-    hidden.click();
+hidden.showPicker?.();
+hidden.click();
+
   };
 
   textInput.addEventListener("focus", openPicker);
@@ -1551,59 +1810,123 @@ function attachNativeDatePicker(textInput){
   });
 }
 
-attachNativeDatePicker(recvDateEl);
-attachNativeDatePicker(invDateEl);
-
+  attachNativeDatePicker(recvDateEl); attachNativeDatePicker(invDateEl);
 /* ----------------------- Verbindungen & Zähler --------------------------- */
-const chipScope=$("#chipScope"), chipPcloud=$("#chipPcloud"), chipConfig=$("#chipConfig"), chipInbox=$("#chipInbox"), chipBear=$("#chipBearbeitet");
-function setChip(el,on,label){ if(!el) return; el.textContent=`${label} ${on?"●":"○"}`; el.classList.toggle("chip--on",!!on); }
+// ==== BACKCOMPAT: alte Aufrufe von paintChips() weiterleiten ====
 function paintChips(){
-  setChip(chipScope,!!scopeRootHandle,"Scopevisio");
-  setChip(chipPcloud,!!pcloudRootHandle,"pCloud");
-  setChip(chipConfig,!!configDirHandle,"Config");
-  setChip(chipInbox,!!inboxRootHandle,"Inbox");
-  setChip(chipBear,!!processedRootHandle,"Bearbeitet");
-}
-
-async function requestDirWrite(dirHandle){
   try{
-    if(!dirHandle?.requestPermission) return true;
-    let p = await dirHandle.queryPermission?.({ mode: "readwrite" });
-    if (p !== "granted") p = await dirHandle.requestPermission({ mode: "readwrite" });
-    return p === "granted";
-  }catch{ return true; }
+    if (typeof paintConnectionsCompact === "function") {
+      paintConnectionsCompact();
+    }
+  }catch(e){
+    console.warn("paintChips shim failed:", e);
+  }
 }
 
-async function ensureDirWithPrompt(rootHandle, segments){
-  if(!rootHandle) throw new Error("Kein Root-Handle");
-  let dir = rootHandle;
-  for (const s of (segments||[])){
-    if(!s) continue;
-    try {
-      dir = await dir.getDirectoryHandle(s, { create:false });
-    } catch {
-      const yes = window.confirm(`Ordner fehlt: "${s}". Jetzt anlegen?`);
-      if (!yes) throw new Error(`Abgebrochen – fehlender Ordner: ${s}`);
-      dir = await dir.getDirectoryHandle(s, { create:true });
+/* ---------- Verbindungsanzeige (kompakt) ---------- */
+function paintConnectionsCompact(){
+  const sBtn  = document.getElementById("btnBindScopevisio");
+  const pBtn  = document.getElementById("btnBindPcloud");
+  const sLine = document.getElementById("connScopeLine");
+  const pLine = document.getElementById("connPcloudLine");
+
+  // WICHTIG: Status nur noch aus window.*, genau wie Verbindungs-Zentrale + Banner
+  const scopeOK   = !!window.scopeRootHandle;
+  const pcloudOK  = !!window.pcloudRootHandle;
+  const useScope  = document.getElementById("chkScope")?.checked ?? false;
+  const useExtras = document.getElementById("chkPcloudExtras")?.checked ?? false;
+
+  // —— Scopevisio (links Button/Pill, rechts Status) ——
+  if (sBtn){
+    sBtn.classList.add("conn-pill");
+    sBtn.classList.remove("btn-outline");
+    sBtn.classList.toggle("conn-pill--ok",  scopeOK);
+    sBtn.classList.toggle("conn-pill--off", !scopeOK);
+    sBtn.textContent = scopeOK ? "Scopevisio: Verbunden ✓" : "Scopevisio verbinden…";
+  }
+  if (sLine){
+    if (!scopeOK){
+      sLine.classList.remove("conn-right--ok");
+      sLine.textContent = "Nicht verbunden";
+    } else if (useScope){
+      sLine.classList.add("conn-right--ok");
+      sLine.textContent = "Root ✓ · Inbox ✓ · Bearbeitet ✓";
+    } else {
+      sLine.classList.remove("conn-right--ok");
+      sLine.textContent = "Ablageziele —";            // Ziele sind verbunden, aber deaktiviert
     }
   }
-  return dir;
+
+  // —— pCloud ——
+  if (pBtn){
+    pBtn.classList.add("conn-pill");
+    pBtn.classList.remove("btn-outline");
+    pBtn.classList.toggle("conn-pill--ok",  pcloudOK);
+    pBtn.classList.toggle("conn-pill--off", !pcloudOK);
+    pBtn.textContent = pcloudOK ? "pCloud: Verbunden ✓" : "pCloud verbinden…";
+  }
+  if (pLine){
+    if (!pcloudOK){
+      pLine.classList.remove("conn-right--ok");
+      pLine.textContent = "Nicht verbunden";
+    } else {
+      // Backup/Config sind dauerhaft aktiv, Zusatzablage per Checkbox
+      pLine.classList.add("conn-right--ok");
+      pLine.textContent = `Backup ✓ · Config ✓ · Zusatzablage ${useExtras ? "✓" : "—"}`;
+    }
+  }
 }
 
-// Schreiben ins Ziel (mit optionaler Einzigartigkeits-Logik)
+
+  async function requestDirWrite(dirHandle){ try{ if(!dirHandle?.requestPermission) return true; let p = await dirHandle.queryPermission?.({ mode: "readwrite" }); if (p !== "granted") p = await dirHandle.requestPermission({ mode: "readwrite" }); return p === "granted"; }catch{ return true; } }
+  async function ensureDirWithPrompt(rootHandle, segments){ if(!rootHandle) throw new Error("Kein Root-Handle"); let dir = rootHandle; for (const s of (segments||[])){ if(!s) continue; try { dir = await dir.getDirectoryHandle(s, { create:false }); } catch { const yes = window.confirm(`Ordner fehlt: "${s}". Jetzt anlegen?`); if (!yes) throw new Error(`Abgebrochen – fehlender Ordner: ${s}`); dir = await dir.getDirectoryHandle(s, { create:true }); } } return dir; }
+// Bildet einen kollisionssicheren Dateinamen:  name.pdf → name (2).pdf → name (3).pdf …
+async function uniqueName(dirHandle, fileName) {
+  if (!dirHandle) return fileName;
+
+  const dot = fileName.lastIndexOf(".");
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+  const ext  = dot > 0 ? fileName.slice(dot)    : "";
+
+  // Prüfer: existiert eine Datei mit diesem Namen schon?
+  async function exists(name) {
+    try {
+      await dirHandle.getFileHandle(name, { create: false });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  let n = 1;
+  let candidate = fileName;
+
+  while (await exists(candidate)) {
+    n += 1;
+    candidate = `${base} (${n})${ext}`;
+    if (n > 2000) break; // Schutz, sollte nie erreicht werden
+  }
+  return candidate;
+}
+// optional global machen:
+try { window.uniqueName = uniqueName; } catch {}
+
+// Schreiben ins Ziel (mit Prompt für Berechtigungen + Ordner-Anlage + Slash-Fallback)
 async function writeFileTo(rootHandle, segments, bytes, fileName, opts = {}) {
   if (!rootHandle) throw new Error("Root-Handle fehlt");
   if (!fileName)   throw new Error("Dateiname fehlt");
 
+  // Schreibrecht
   const ok = await requestDirWrite(rootHandle);
   if (!ok) throw new Error("Schreibberechtigung verweigert");
 
+  // Zielordnerkette (mit optionaler Anlage)
   const dir = await ensureDirWithPrompt(rootHandle, segments || []);
 
-  // Kollisionssicherer Name (… (2).pdf …)
+  // Kollisionssicheren Namen bilden, wenn gewünscht
   const finalName = opts.unique ? await uniqueName(dir, fileName) : fileName;
 
-  // robuster Schreib-Block + Slash-Fallback
+  // Robustes Schreiben + sauberes Abbrechen bei Fehler
   async function doWrite(targetName){
     const h  = await dir.getFileHandle(targetName, { create: true });
     const ws = await h.createWritable({ keepExistingData: false });
@@ -1611,170 +1934,225 @@ async function writeFileTo(rootHandle, segments, bytes, fileName, opts = {}) {
       await ws.write(new Blob([bytes], { type: "application/pdf" }));
       await ws.close();
     } catch (e) {
-      try { await ws?.abort(); } catch {}
-      try { toast(`Speichern fehlgeschlagen<br>${targetName}<br><small>${e?.message || e}</small>`, 8000); } catch {}
+      try { await ws.abort?.(); } catch {}
+      // hier KEIN safeName benutzen – nur targetName oder e.message
+      try { toast?.(`Speichern fehlgeschlagen<br>${targetName}<br><small>${e?.message || e}</small>`, 8000); } catch {}
       throw e;
     }
   }
 
+  // 1) Erst mit dem ursprünglichen Namen versuchen
   let attemptedName = finalName;
   try {
     await doWrite(attemptedName);
   } catch (e1) {
-    // Fallback: optische Slashes statt ASCII
+    // 2) Fallback: optische Slashes (U+2215/FF0F) durch "-" ersetzen
     let fallbackName = attemptedName.replace(/\u2215/g, "-").replace(/\uFF0F/g, "-");
     if (fallbackName !== attemptedName) {
       if (opts.unique) fallbackName = await uniqueName(dir, fallbackName);
-      try {
-        await doWrite(fallbackName);
-        attemptedName = fallbackName;
-        if (typeof toast === "function") {
-          toast("Hinweis: „/“ im Dateinamen wurde für das Ziel ersetzt.", 5200);
-        }
-      } catch (e2) {
-        throw e2;
-      }
+      await doWrite(fallbackName);
+      attemptedName = fallbackName;
+      toast?.("Hinweis: „/“ im Dateinamen wurde für das Ziel ersetzt.", 5200);
     } else {
       throw e1;
     }
   }
 
-  // Chrome .crswap-Reste säubern
-  await tryRemoveCrSwap(dir, attemptedName);
+  // Chrome .crswap-Reste säubern (best effort)
+  try { await tryRemoveCrSwap(dir, attemptedName); } catch {}
 
   return attemptedName;
 }
 
-/* ---------------------- Verbindungen: Root-Ordner binden ---------------------- */
-$("#btnBindScopevisio")?.addEventListener("click", async () => {
+// Bearbeitet darf nicht innerhalb der Inbox liegen (Crashschutz, heuristisch ok)
+async function assertProcessedNotInsideInbox(inboxDir, processedDir){
+  if (!inboxDir || !processedDir) return true;
+  if (inboxDir === processedDir) throw new Error("Inbox und Bearbeitet sind identisch");
+  // Mehr geht mit FS-API nicht sicher – Heuristiken würden hier wenig helfen.
+  return true;
+}
+
+// Kopiert die aktuelle Inbox-Datei nach "Bearbeitet" und löscht das Original.
+// Nutzt currentInboxRelPath (['sub','sub','Datei.pdf']) oder fällt zurück auf currentInboxFileName.
+async function moveInboxToProcessed(){
+  // Root-Handles: bevorzugt window.*, Fallback alte lokale Variablen
+  const inboxRoot     = window.inboxRootHandle      || inboxRootHandle;
+  const processedRoot = window.bearbeitetRootHandle || processedRootHandle;
+
+  // Guards
+  if (!inboxRoot)           throw new Error("Inbox-Root fehlt");
+  if (!processedRoot)       throw new Error("Bearbeitet-Root fehlt");
+  if (!currentInboxFileHandle && !currentInboxFileName) {
+    throw new Error("Keine Inbox-Datei im Kontext");
+  }
+
+  // Sicherheit: Bearbeitet darf nicht innerhalb der Inbox liegen
   try {
-    scopeRootHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-    paintChips();
-    await saveBoundHandles();
-    toast("<strong>Scopevisio verbunden</strong>", 1500);
-  } catch {}
-});
+    await assertProcessedNotInsideInbox?.(inboxRoot, processedRoot);
+  } catch (e) {
+    throw new Error("Bearbeitet liegt innerhalb der Inbox");
+  }
 
-$("#btnBindPcloud")?.addEventListener("click", async () => {
+  // Berechtigungen
+  const okIn  = await requestDirWrite(inboxRoot);
+  const okOut = await requestDirWrite(processedRoot);
+  if (!okIn)  throw new Error("Inbox: Schreibrecht verweigert");
+  if (!okOut) throw new Error("Bearbeitet: Schreibrecht verweigert");
+
+  // Pfad der Inbox-Datei bestimmen
+  const rel = Array.isArray(currentInboxRelPath) && currentInboxRelPath.length
+    ? currentInboxRelPath.slice()
+    : [currentInboxFileName];
+
+  const name = rel[rel.length - 1];
+  const sub  = rel.slice(0, -1); // Unterordner relativ zur Inbox (meist leer)
+
+  // Quelle laden (Dateiobjekt)
+  let fileObj;
   try {
-    pcloudRootHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-    paintChips();
-    await saveBoundHandles();
-    toast("<strong>pCloud verbunden</strong>", 1500);
-  } catch {}
-});
-
-$("#btnBindConfig")?.addEventListener("click", async () => {
-  try {
-    configDirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-    paintChips();
-    await saveBoundHandles();
-    toast("<strong>Config verbunden</strong>", 1500);
-
-    try { emailsCfg   = await loadJson("emails.json"); } catch {}
-    try { objectsCfg  = await loadJson("objects.json"); await loadObjects(); } catch {}
-    try { docTypesCfg = await loadJson("document_types.json"); await loadDocTypes(); } catch {}
-    populateMailSelect(); prefillMail();
-  } catch {}
-});
-
-$("#btnBindInbox")?.addEventListener("click", async () => {
-  try {
-    inboxRootHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-    paintChips();
-    await saveBoundHandles();
-    toast("<strong>Inbox verbunden</strong>", 1500);
-    await refreshInbox();
-  } catch {}
-});
-
-// Ziel „Bearbeitet“ binden (früher „Quelle“)
-$("#btnBindQuelle")?.addEventListener("click", async () => {
-  try {
-    processedRootHandle = await window.showDirectoryPicker({ mode: "readwrite" });
-
-    // Guard: „Bearbeitet“ darf NICHT innerhalb der Inbox liegen
-    try { await assertProcessedNotInsideInbox(inboxRootHandle, processedRootHandle); }
-    catch (e) {
-      processedRootHandle = null;
-      paintChips();
-      toast(`❌ ${e.message}`, 4500);
-      return;
+    if (currentInboxFileHandle?.getFile) {
+      // Wenn wir ein Handle haben, das direkt benutzen (stabiler)
+      fileObj = await currentInboxFileHandle.getFile();
+    } else {
+      // Sonst via Pfad aus Inbox-Root ermitteln
+      let dir = inboxRoot;
+      for (const s of sub) {
+        dir = await dir.getDirectoryHandle(s, { create:false });
+      }
+      const fh = await dir.getFileHandle(name, { create:false });
+      fileObj = await fh.getFile();
     }
+  } catch (e) {
+    throw new Error("Quelle nicht lesbar: " + (e?.message || e));
+  }
 
-    paintChips();
-    await saveBoundHandles();
-    toast("<strong>Bearbeitet verbunden</strong>", 1500);
-  } catch {}
-});
+  if (!fileObj || !fileObj.size) {
+    throw new Error("Quelle leer oder nicht vorhanden");
+  }
 
-/* ----------------------------- Inbox-Aktualisierung ---------------------------- */
+  // Zielordner (Bearbeitet) aufbauen: gleiche Substruktur wie in Inbox
+  let outDir = processedRoot;
+  for (const s of sub) {
+    outDir = await outDir.getDirectoryHandle(s, { create:true });
+  }
+
+  // Schreiben (überschreibt existierende Datei gleichen Namens NICHT)
+  const finalName = await uniqueName(outDir, name);
+  const outHandle = await outDir.getFileHandle(finalName, { create:true });
+  const ws = await outHandle.createWritable();
+  await ws.write(fileObj);
+  await ws.close();
+
+  // Quelle in der Inbox löschen (best effort)
+  try {
+    let srcDir = inboxRoot;
+    for (const s of sub) {
+      srcDir = await srcDir.getDirectoryHandle(s, { create:false });
+    }
+    await srcDir.removeEntry(name);
+  } catch (e) {
+    console.warn("Inbox-Quelle konnte nicht gelöscht werden:", e);
+  }
+
+  // Kontext zurücksetzen
+  currentInboxFileHandle = null;
+  currentInboxFileName   = "";
+  currentInboxRelPath    = null;
+
+  // Inbox-Liste aktualisieren (Zähler & Liste unten)
+  try {
+    if (typeof refreshInbox === "function") {
+      await refreshInbox();
+    }
+  } catch (e) {
+    console.warn("refreshInbox nach moveInboxToProcessed fehlgeschlagen:", e);
+  }
+
+  return true;
+}
+
+
+/* ---------------------- Verbindungen: Root-Ordner binden ---------------------- */
+
+document.getElementById("btnBindScopevisio")
+  ?.addEventListener("click", async () => { await bindScopeInteractive(); });
+
+document.getElementById("btnBindPcloud")
+  ?.addEventListener("click", async () => { await bindPcloudInteractive(); });
+
+
+/* ----------------------------- Inbox-Aktualisierung ----------------------------
+
+   Fix: 0-Byte-Stubs (Cloud-Platzhalter) werden herausgefiltert.
+   – Wir holen file.size, bevor wir den Eintrag anzeigen.
+   – Beim Klick prüfen wir _nochmals_ die Größe (Race-Condition-Sicherheit).
+--------------------------------------------------------------------------------*/
+
 async function refreshInbox(){
-  const list = $("#inboxList"), counters = $("#counters");
+  const list     = $("#inboxList");
+  const counters = $("#counters");
+
   if (list) list.innerHTML = "";
+
+  // Einfacher Debug: was sieht die Funktion?
+  const inboxRoot = window.inboxRootHandle || inboxRootHandle || null;
+  console.debug("[refreshInbox] inboxRoot:", !!inboxRoot, inboxRoot?.name || "(none)");
+
   let offen = 0;
 
-  if (inboxRootHandle){
-    try{
-      for await (const e of inboxRootHandle.values()){
-        if (e.kind !== "file") continue;
-        if (!e.name.toLowerCase().endsWith(".pdf")) continue;
-
-        // Größe prüfen (0-Byte ausblenden)
-        let f;
-        try {
-          const h = await inboxRootHandle.getFileHandle(e.name, { create:false });
-          f = await h.getFile();
-        } catch { continue; }
-        if (!f || f.size === 0) continue;
+  if (inboxRoot){
+    try {
+      for await (const entry of inboxRoot.values()){
+        if (entry.kind !== "file") continue;
+        if (!entry.name.toLowerCase().endsWith(".pdf")) continue;
 
         offen++;
-        const li = document.createElement("li");
-        li.innerHTML = `<button class="linklike" data-file="${e.name}">${e.name}</button><span class="badge">Inbox</span>`;
-        list?.appendChild(li);
 
-        li.querySelector("button").addEventListener("click", async () => {
-          try {
-            const h = await inboxRootHandle.getFileHandle(e.name, { create:false });
-            const fileNow = await h.getFile();
-            if (!fileNow.size) {
-              toast(`„${e.name}“ ist 0 Byte – bitte zuerst lokal synchronisieren.`, 4000);
-              return;
+        if (list){
+          const li = document.createElement("li");
+          li.innerHTML = `<button class="linklike" data-file="${entry.name}">${entry.name}</button><span class="badge">Inbox</span>`;
+          list.appendChild(li);
+
+          li.querySelector("button")?.addEventListener("click", async () => {
+            try {
+              const h = await inboxRoot.getFileHandle(entry.name, { create:false });
+              const f = await h.getFile();
+
+              currentInboxFileHandle = h;
+              currentInboxFileName   = entry.name;
+              currentInboxRelPath    = [entry.name];
+
+              if (typeof window.__fdl_takeFile === "function"){
+                await window.__fdl_takeFile(f, { fromInbox:true });
+              }
+              toast(`Inbox-Datei ausgewählt: <code>${entry.name}</code>`, 1400);
+            } catch (err) {
+              console.warn("[refreshInbox] Klick-Fehler:", err);
+              toast("Konnte Datei nicht öffnen.", 2500);
             }
-            currentInboxFileHandle = h;
-            currentInboxFileName   = e.name;
-            currentInboxRelPath    = [e.name];
-
-            toast(`Inbox-Datei ausgewählt: <code>${e.name}</code>`, 1400);
-
-            if (typeof window.__fdl_takeFile === "function"){
-              await window.__fdl_takeFile(fileNow, { fromInbox:true });
-            } else {
-              console.warn("takeFile nicht verfügbar – attachUpload() muss geladen sein.");
-            }
-          } catch (err) {
-            console.warn("Inbox-Auswahl fehlgeschlagen:", err);
-            toast("Konnte Datei nicht öffnen.", 2500);
-          }
-        });
+          });
+        }
       }
-    } catch (err){
-      console.warn("refreshInbox", err);
+    } catch (err) {
+      console.warn("[refreshInbox] Fehler beim Lesen der Inbox:", err);
     }
   }
 
+  // WICHTIG: Text immer setzen, auch wenn inboxRoot fehlt oder offen=0
   if (counters){
     counters.textContent = `Offen: ${offen} · In Arbeit: 0 · Fertig: 0 · Session: 0`;
   }
 }
 
-/* --------------------------- Config: load/save --------------------------- */
+
+  /* --------------------------- Config: load/save --------------------------- */
+// NUR diese Funktion ersetzen
 async function loadJson(rel){
-  const baseName = rel.split("/").pop();
-  const stem     = baseName.replace(/\.json$/i, "");
+  const baseName = rel.split("/").pop();            // z.B. "assignments.json"
+  const stem     = baseName.replace(/\.json$/i, ""); // "assignments"
   const withExt  = stem + ".json";
 
-  // 1) Verbundener Config-Ordner → jüngste Datei
+  // 1) Im verbundenen Config-Ordner suchen (beide Varianten) und die JÜNGSTE nehmen
   try {
     if (configDirHandle) {
       const candidates = [];
@@ -1788,13 +2166,14 @@ async function loadJson(rel){
         }
       }
       if (candidates.length) {
+        // jüngste Datei gewinnen lassen (endet .json oder endungslos – egal)
         candidates.sort((a,b)=>b.mtime - a.mtime);
         return JSON.parse(await candidates[0].file.text());
       }
     }
-  } catch {}
+  } catch { /* ignore, wir versuchen Fetch */ }
 
-  // 2) Fallback: Projekt
+  // 2) Fallback: vom Projekt laden (beide Varianten probieren)
   const tries = [
     rel, "./"+rel,
     "config/"+withExt, "./config/"+withExt,
@@ -1806,20 +2185,26 @@ async function loadJson(rel){
       if (r.ok) return await r.json();
     } catch {}
   }
+
   throw new Error("Konfiguration nicht gefunden: " + rel);
 }
 
+// JSON im verbundenen Config-Ordner speichern
 async function saveJson(rel, data){
+  // rel kann "config/assignments.json", "assignments.json" oder "assignments" sein
   const raw0 = String(rel || "").replace(/^\.\//, "");
   let segs = raw0.split("/").filter(Boolean);
 
+  // Schutz: wenn der gebundene Ordner bereits "config" heißt, führendes "config/" ignorieren
   const rootIsConfig = (configDirHandle?.name || "").toLowerCase() === "config";
   if (rootIsConfig && segs[0]?.toLowerCase() === "config") segs = segs.slice(1);
 
+  // Dateiname + optionaler Unterordner
   let fileName = (segs.pop() || "config.json");
   fileName = fileName.replace(/\.json$/i, "") + ".json";
-  const subdirs = segs;
+  const subdirs = segs; // z.B. ["config"] oder []
 
+  // Ordner verbunden?
   if (!configDirHandle) {
     try {
       configDirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
@@ -1831,64 +2216,74 @@ async function saveJson(rel, data){
     }
   }
 
+  // Schreibrecht (innerhalb User-Gesture aufgerufen → Prompt sichtbar)
   const ok = await (typeof ensureWritePermissionWithPrompt === "function"
     ? ensureWritePermissionWithPrompt(configDirHandle, "Config")
     : true);
   if (ok === false) throw new Error("Schreibberechtigung für Config verweigert.");
 
+  // ggf. Unterordner anlegen (falls rel "config/…" war)
   let dir = configDirHandle;
   for (const s of subdirs) {
     dir = await dir.getDirectoryHandle(s, { create: true });
   }
 
+  // schreiben
   const fh = await dir.getFileHandle(fileName, { create: true });
   const ws = await fh.createWritable({ keepExistingData: false });
   await ws.write(new Blob([JSON.stringify(data, null, 2) + "\n"], { type: "application/json" }));
   await ws.close();
+
   return true;
 }
 
+
 try {
   window.FDLDBG = window.FDLDBG || {};
-  FDLDBG.saveJson    = saveJson;
+  FDLDBG.saveJson    = saveJson;     // <— hinzufügen
   FDLDBG.loadJson    = loadJson;
   FDLDBG.loadObjects = loadObjects;
   FDLDBG.loadDocTypes= loadDocTypes;
 } catch {}
 
-/* --------------------------- Dialoge (vollständig) ----------------------- */
-function wireDialogClose(dlg){
-  if(!dlg) return;
-  dlg.addEventListener("keydown", (e)=>{ if(e.key==="Escape"){ e.preventDefault(); dlg.close?.(); }});
-  dlg.querySelectorAll("[data-close], .btn-cancel, .dlg-close, .dialog-close").forEach(btn=>{
-    btn.addEventListener("click",(e)=>{ e.preventDefault(); dlg.close?.(); });
-  });
-  dlg.addEventListener("click",(e)=>{
-    const r=dlg.getBoundingClientRect();
-    const inside = e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom;
-    if(!inside && e.target===dlg) dlg.close?.();
-  });
-}
+
+
+
+  /* --------------------------- Dialoge (vollständig) ----------------------- */
+  function wireDialogClose(dlg){ if(!dlg) return; dlg.addEventListener("keydown", (e)=>{ if(e.key==="Escape"){ e.preventDefault(); dlg.close?.(); }}); dlg.querySelectorAll("[data-close], .btn-cancel, .dlg-close, .dialog-close").forEach(btn=>{ btn.addEventListener("click",(e)=>{ e.preventDefault(); dlg.close?.(); }); }); dlg.addEventListener("click",(e)=>{ const r=dlg.getBoundingClientRect(); const inside = e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom; if(!inside && e.target===dlg) dlg.close?.(); }); }
 
 async function ensureConfigConnectedOrAsk(){
-  if (!configDirHandle){
-    try{
-      configDirHandle = await window.showDirectoryPicker({mode:"readwrite"});
-      paintChips();
-      toast("<strong>Config verbunden</strong>",1500);
-    }catch{
-      toast("Config nicht verbunden.",2000);
-    }
+  // Erst versuchen, aus vorhandenen Quellen zu synchronisieren
+  if (syncConfigHandle()) {
+    // Schon verbunden → nichts tun
+    return;
+  }
+
+  // Noch nichts da → Picker öffnen
+  try {
+    const dir = await window.showDirectoryPicker({ mode: "readwrite" });
+    if (!dir) throw new Error("abgebrochen");
+
+    syncConfigHandle(dir);
+
+    paintChips?.();
+    try { await saveBoundHandles?.(); } catch {}
+    try { await saveAllHandles?.(); } catch {}
+
+    toast("<strong>Config verbunden</strong>", 1500);
+    window.fdlRefreshConnectionsUI?.();
+  } catch {
+    toast("Config nicht verbunden.", 2000);
   }
 }
 
-/* ---------------------------- Versand verwalten --------------------------- */
-async function openEmailsDialog(){
+
+  async function openEmailsDialog(){
   await ensureConfigConnectedOrAsk();
   const dlg = $("#manageEmailsDialog");
   if (!dlg) { toast("E-Mail-Dialog fehlt im HTML.", 2500); return; }
 
-  // Laden / Defaults
+  // ---- Laden / Defaults (ohne Markdown-Link!) ----
   let json;
   try {
     json = await loadJson("emails.json");
@@ -1910,130 +2305,133 @@ async function openEmailsDialog(){
     };
   }
 
-  // Adressbuch (inline edit)
+  // ===== Adressbuch mit Stift/Löschen (inline edit) =====
   const tbody = $("#emailsTbody");
   tbody.innerHTML = "";
+// Ersetze deinen gesamten addRow-Block durch DIESEN:
+const addRow = (rec = { label:"", email:"", id:"", tags:[] }) => {
+  const tr = document.createElement("tr");
 
-  const addRow = (rec = { label:"", email:"", id:"", tags:[] }) => {
-    const tr = document.createElement("tr");
+  // Anzeigezellen
+  const tdLabel = document.createElement("td");
+  tdLabel.className = "ab-label";
+  tdLabel.textContent = rec.label || rec.name || "";
 
-    const tdLabel = document.createElement("td");
-    tdLabel.className = "ab-label";
-    tdLabel.textContent = rec.label || rec.name || "";
+  const tdEmail = document.createElement("td");
+  tdEmail.className = "ab-email";
+  tdEmail.textContent = rec.email || "";
 
-    const tdEmail = document.createElement("td");
-    tdEmail.className = "ab-email";
-    tdEmail.textContent = rec.email || "";
+  const tdId = document.createElement("td");
+  tdId.className = "ab-id";
+  tdId.textContent = rec.id || "";
 
-    const tdId = document.createElement("td");
-    tdId.className = "ab-id";
-    tdId.textContent = rec.id || "";
+  const tdTags = document.createElement("td");
+  tdTags.className = "ab-tags";
+  tdTags.textContent = Array.isArray(rec.tags) ? rec.tags.join(", ") : (rec.tags || "");
 
-    const tdTags = document.createElement("td");
-    tdTags.className = "ab-tags";
-    tdTags.textContent = Array.isArray(rec.tags) ? rec.tags.join(", ") : (rec.tags || "");
+  const tdActions = document.createElement("td");
+  tdActions.className = "right";
+  tdActions.style.whiteSpace = "nowrap"; // verhindert Umbrechen/Abschneiden
+  tdActions.style.minWidth = "120px";
 
-    const tdActions = document.createElement("td");
-    tdActions.className = "right";
-    tdActions.style.whiteSpace = "nowrap";
-    tdActions.style.minWidth = "120px";
+  const btnEdit = document.createElement("button");
+  btnEdit.type = "button";
+  btnEdit.className = "icon-btn ab-edit";
+  btnEdit.title = "Bearbeiten";
+  btnEdit.textContent = "🖉";
+btnEdit.setAttribute("aria-label", "Bearbeiten");
 
-    const btnEdit = document.createElement("button");
-    btnEdit.type = "button";
-    btnEdit.className = "icon-btn ab-edit";
-    btnEdit.title = "Bearbeiten";
-    btnEdit.textContent = "🖉";
-    btnEdit.setAttribute("aria-label", "Bearbeiten");
+  const btnDel = document.createElement("button");
+  btnDel.type = "button";
+  btnDel.className = "icon-btn ab-del";
+  btnDel.title = "Löschen";
+  btnDel.style.marginLeft = ".4rem";
+  btnDel.textContent = "🗑️";
+btnDel.setAttribute("aria-label", "Löschen");
 
-    const btnDel = document.createElement("button");
-    btnDel.type = "button";
-    btnDel.className = "icon-btn ab-del";
-    btnDel.title = "Löschen";
-    btnDel.style.marginLeft = ".4rem";
-    btnDel.textContent = "🗑️";
-    btnDel.setAttribute("aria-label", "Löschen");
+  tdActions.appendChild(btnEdit);
+  tdActions.appendChild(btnDel);
 
-    tdActions.appendChild(btnEdit);
-    tdActions.appendChild(btnDel);
+  tr.appendChild(tdLabel);
+  tr.appendChild(tdEmail);
+  tr.appendChild(tdId);
+  tr.appendChild(tdTags);
+  tr.appendChild(tdActions);
 
-    tr.appendChild(tdLabel);
-    tr.appendChild(tdEmail);
-    tr.appendChild(tdId);
-    tr.appendChild(tdTags);
-    tr.appendChild(tdActions);
+  // Edit-Modus
+  const toInputs = () => {
+    tr.innerHTML = "";
 
-    const toInputs = () => {
-      tr.innerHTML = "";
-
-      const mkInputCell = (cls, val, ph) => {
-        const td = document.createElement("td");
-        const inp = document.createElement("input");
-        inp.className = "input slim " + cls;
-        inp.value = val || "";
-        inp.placeholder = ph || "";
-        td.appendChild(inp);
-        return { td, inp };
-      };
-
-      const iLabel = mkInputCell("em-label", rec.label || rec.name || "", "Name/Label");
-      const iEmail = mkInputCell("em-email", rec.email || "", "name@firma.de");
-      const iId    = mkInputCell("em-id",    rec.id || "",    "id (optional)");
-      const iTags  = mkInputCell("em-tags",  Array.isArray(rec.tags) ? rec.tags.join(", ") : (rec.tags || ""), "Tags");
-
-      const tdAct = document.createElement("td");
-      tdAct.className = "right";
-      tdAct.style.whiteSpace = "nowrap";
-      tdAct.style.minWidth = "120px";
-
-      const ok = document.createElement("button");
-      ok.type = "button";
-      ok.className = "btn-outline btn-small em-ok";
-      ok.textContent = "OK";
-
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.className = "btn-outline btn-small em-cancel";
-      cancel.style.marginLeft = ".4rem";
-      cancel.textContent = "Abbrechen";
-
-      tdAct.appendChild(ok);
-      tdAct.appendChild(cancel);
-
-      tr.appendChild(iLabel.td);
-      tr.appendChild(iEmail.td);
-      tr.appendChild(iId.td);
-      tr.appendChild(iTags.td);
-      tr.appendChild(tdAct);
-
-      ok.onclick = () => {
-        const next = {
-          label: (iLabel.inp.value || "").trim(),
-          name:  (iLabel.inp.value || "").trim(),
-          email: (iEmail.inp.value || "").trim(),
-          id:    (iId.inp.value || "").trim() || undefined,
-          tags:  (iTags.inp.value || "").split(",").map(s => s.trim()).filter(Boolean)
-        };
-        if (!EMAIL_RE.test(next.email)) { toast("Ungültige E-Mail.", 1800); return; }
-        const fresh = addRow(next);
-        tr.replaceWith(fresh);
-      };
-
-      cancel.onclick = () => {
-        const fresh = addRow(rec);
-        tr.replaceWith(fresh);
-      };
+    const mkInputCell = (cls, val, ph) => {
+      const td = document.createElement("td");
+      const inp = document.createElement("input");
+      inp.className = "input slim " + cls;
+      inp.value = val || "";
+      inp.placeholder = ph || "";
+      td.appendChild(inp);
+      return { td, inp };
     };
 
-    btnEdit.onclick = toInputs;
-    btnDel.onclick  = () => tr.remove();
+    const iLabel = mkInputCell("em-label", rec.label || rec.name || "", "Name/Label");
+    const iEmail = mkInputCell("em-email", rec.email || "", "name@firma.de");
+    const iId    = mkInputCell("em-id",    rec.id || "",    "id (optional)");
+    const iTags  = mkInputCell("em-tags",  Array.isArray(rec.tags) ? rec.tags.join(", ") : (rec.tags || ""), "Tags");
 
-    return tr;
+    const tdAct = document.createElement("td");
+    tdAct.className = "right";
+    tdAct.style.whiteSpace = "nowrap";
+    tdAct.style.minWidth = "120px";
+
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = "btn-outline btn-small em-ok";
+    ok.textContent = "OK";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "btn-outline btn-small em-cancel";
+    cancel.style.marginLeft = ".4rem";
+    cancel.textContent = "Abbrechen";
+
+    tdAct.appendChild(ok);
+    tdAct.appendChild(cancel);
+
+    tr.appendChild(iLabel.td);
+    tr.appendChild(iEmail.td);
+    tr.appendChild(iId.td);
+    tr.appendChild(iTags.td);
+    tr.appendChild(tdAct);
+
+    ok.onclick = () => {
+      const next = {
+        label: (iLabel.inp.value || "").trim(),
+        name:  (iLabel.inp.value || "").trim(),
+        email: (iEmail.inp.value || "").trim(),
+        id:    (iId.inp.value || "").trim() || undefined,
+        tags:  (iTags.inp.value || "").split(",").map(s => s.trim()).filter(Boolean)
+      };
+      if (!EMAIL_RE.test(next.email)) { toast("Ungültige E-Mail.", 1800); return; }
+      const fresh = addRow(next);
+      tr.replaceWith(fresh);
+    };
+
+    cancel.onclick = () => {
+      const fresh = addRow(rec);
+      tr.replaceWith(fresh);
+    };
   };
+
+  btnEdit.onclick = toInputs;
+  btnDel.onclick  = () => tr.remove();
+
+  return tr;
+};
+
 
   (json.addressBook || json.emails || []).forEach(r => tbody.appendChild(addRow(r)));
   $("#emailsAdd")?.addEventListener("click", () => tbody.appendChild(addRow({})));
 
-  // Pro Liegenschaft
+  // ===== Pro Liegenschaft: Vorlagen (edit/löschen) =====
   const poObjSel = $("#poObject"),
         poRec    = $("#poRecipients"),
         poSubj   = $("#poSubject"),
@@ -2059,7 +2457,7 @@ async function openEmailsDialog(){
     codes.forEach(code => {
       const inv = (poRules[code] && poRules[code].invoice) ? poRules[code].invoice : {};
 
-      // Hauptvorlage
+      // Hauptvorlage "bei Rechnung"
       if ((inv.to && inv.to.length) || (inv.emails && inv.emails.length) || inv.subject || inv.replyTo) {
         const mails = (inv.to || inv.emails || []).join(", ");
         const li = document.createElement("li");
@@ -2087,7 +2485,7 @@ async function openEmailsDialog(){
         poList.appendChild(li);
       }
 
-      // Zusätzliche Templates
+      // Zusätzliche Templates (optional)
       (poRules[code].templates || []).forEach(t => {
         const mails = (t.recipients || t.to || []).join(", ");
         const li = document.createElement("li");
@@ -2119,6 +2517,7 @@ async function openEmailsDialog(){
     });
   };
 
+  // Simple HTML escaping for safety in template strings
   function escapeHtml(s){
     return String(s || "")
       .replace(/&/g, "&amp;")
@@ -2147,6 +2546,7 @@ async function openEmailsDialog(){
     renderPoList();
   });
 
+  // ===== Speichern =====
   $("#emailsSave")?.addEventListener("click", async () => {
     const addressBook = Array.from($("#emailsTbody")?.querySelectorAll("tr") || []).map(tr => {
       const label = (tr.querySelector(".ab-label")?.textContent || tr.querySelector(".em-label")?.value || "").trim();
@@ -2166,8 +2566,8 @@ async function openEmailsDialog(){
 
     try {
       await saveJson("emails.json", result);
-      emailsCfg = result;
-      populateMailSelect();
+      emailsCfg = result;               // direkt im laufenden State aktualisieren
+      populateMailSelect();             // Datalist/Select neu füllen
       toast("E-Mail-Vorlagen gespeichert.", 2500);
       if (typeof dlg.close === "function") dlg.close(); else dlg.removeAttribute("open");
     } catch (e) {
@@ -2177,122 +2577,45 @@ async function openEmailsDialog(){
   });
 
   if (typeof dlg.showModal === "function") dlg.showModal();
-  wireDialogClose(dlg);
+  wireDialogClose?.(dlg);
 }
 
-async function openObjectsDialog(){
-  await ensureConfigConnectedOrAsk();
-  const dlg=$("#manageObjectsDialog");
-  if(!dlg){ toast("Objekte-Dialog fehlt.",2000); return; }
-  let j; try{ j = await loadJson("objects.json"); }catch{ j={objects:[]}; }
-  const list = j.objects || [];
-  const ul = $("#objectsList");
-  ul.innerHTML="";
+  async function openObjectsDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageObjectsDialog"); if(!dlg){ toast("Objekte-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("objects.json"); }catch{ j={objects:[]}; } const list = j.objects || []; const ul = $("#objectsList"); ul.innerHTML="";
+    const addRow=(o={displayName:"", code:"", scopevisioName:"", pcloudName:""})=>{ const li=document.createElement("li"); li.innerHTML = `
+        <div class="row tight">
+          <input class="input slim ob-name"  placeholder="Anzeigename" value="${o.displayName||""}">
+          <input class="input slim ob-code"  placeholder="Code"        value="${o.code||""}">
+          <input class="input slim ob-scope" placeholder="Scopevisio"  value="${o.scopevisioName||""}">
+          <input class="input slim ob-pcl"   placeholder="pCloud"      value="${o.pcloudName||""}">
+          <button class="icon-btn ob-del" title="Löschen">🗑️</button>
+        </div>`; li.querySelector(".ob-del").addEventListener("click",()=>li.remove()); ul.appendChild(li); };
+    list.forEach(addRow); $("#objectsAddRow")?.addEventListener("click",()=>addRow({}));
+    $("#objectsSaveShared")?.addEventListener("click", async()=>{ try{ const rows=[...ul.querySelectorAll("li")].map(li=>{ const displayName=li.querySelector(".ob-name")?.value.trim(); const code=li.querySelector(".ob-code")?.value.trim(); const scope=li.querySelector(".ob-scope")?.value.trim(); const pcl=li.querySelector(".ob-pcl")?.value.trim(); if(!displayName||!code) return null; return {displayName, code, scopevisioName:scope||code, pcloudName:pcl||code}; }).filter(Boolean); const next={objects:rows}; await saveJson("objects.json", next); objectsCfg=next; await loadObjects(); toast("<strong>Liegenschaften gespeichert</strong>",1800); dlg.close?.(); }catch(e){ toast("Fehler beim Speichern der Liegenschaften.",2500); } });
+    if (typeof dlg.showModal==="function") dlg.showModal(); else dlg.setAttribute("open","open"); wireDialogClose(dlg);
+  }
 
-  const addRow=(o={displayName:"", code:"", scopevisioName:"", pcloudName:""})=>{
-    const li=document.createElement("li");
-    li.innerHTML = `
-      <div class="row tight">
-        <input class="input slim ob-name"  placeholder="Anzeigename" value="${o.displayName||""}">
-        <input class="input slim ob-code"  placeholder="Code"        value="${o.code||""}">
-        <input class="input slim ob-scope" placeholder="Scopevisio"  value="${o.scopevisioName||""}">
-        <input class="input slim ob-pcl"   placeholder="pCloud"      value="${o.pcloudName||""}">
-        <button class="icon-btn ob-del" title="Löschen">🗑️</button>
-      </div>`;
-    li.querySelector(".ob-del").addEventListener("click",()=>li.remove());
-    ul.appendChild(li);
-  };
+  async function openTypesDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageTypesDialog"); if(!dlg){ toast("Dokumentarten-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("document_types.json"); }catch{ j={types:[], defaultTypeKey:""}; } const list=j.types||[]; const ul=$("#typesList"); ul.innerHTML=""; const defaultKey=j.defaultTypeKey||"";
+    const addRow=(t={label:"", key:"", isInvoice:false})=>{ const li=document.createElement("li"); li.innerHTML = `
+        <div class="row tight">
+          <input class="input slim ty-label" placeholder="Label" value="${t.label||""}">
+          <input class="input slim ty-key"   placeholder="Key"   value="${t.key||""}">
+          <label class="chk" style="margin-left:.5rem"><input type="checkbox" class="ty-inv" ${t.isInvoice?"checked":""}> Rechnung</label>
+          <label class="chk" style="margin-left:1rem"><input type="radio" name="ty-default" class="ty-def" ${t.key===defaultKey?"checked":""}> Default</label>
+          <button class="icon-btn ty-del" title="Löschen">🗑️</button>
+        </div>`; li.querySelector(".ty-del").addEventListener("click",()=>li.remove()); ul.appendChild(li); };
+    list.forEach(addRow); $("#typesAddRow")?.addEventListener("click",()=>addRow({}));
+    $("#typesSaveShared")?.addEventListener("click", async()=>{ try{ const rows=[...ul.querySelectorAll("li")].map(li=>{ const label=li.querySelector(".ty-label")?.value.trim(); let key=li.querySelector(".ty-key")?.value.trim(); const isInv=li.querySelector(".ty-inv")?.checked||false; const isDef=li.querySelector(".ty-def")?.checked||false; if(!label) return null; if(!key) key=label.toLowerCase().replace(/\s+/g,"-").replace(/[^a-z0-9\-]/g,""); return {label, key, isInvoice:isInv, isDefault:isDef}; }).filter(Boolean); const def = rows.find(r=>r.isDefault)?.key || ""; const types = rows.map(({isDefault, ...t})=>t); const next={types, defaultTypeKey:def}; await saveJson("document_types.json", next); docTypesCfg=next; await loadDocTypes(); toast("<strong>Dokumentarten gespeichert</strong>",1800); dlg.close?.(); }catch(e){ toast("Fehler beim Speichern der Dokumentarten.",2500); } });
+    if (typeof dlg.showModal==="function") dlg.showModal(); else dlg.setAttribute("open","open"); wireDialogClose(dlg);
+  }
 
-  list.forEach(addRow);
-  $("#objectsAddRow")?.addEventListener("click",()=>addRow({}));
-
-  $("#objectsSaveShared")?.addEventListener("click", async()=>{
-    try{
-      const rows=[...ul.querySelectorAll("li")].map(li=>{
-        const displayName=li.querySelector(".ob-name")?.value.trim();
-        const code=li.querySelector(".ob-code")?.value.trim();
-        const scope=li.querySelector(".ob-scope")?.value.trim();
-        const pcl=li.querySelector(".ob-pcl")?.value.trim();
-        if(!displayName||!code) return null;
-        return {displayName, code, scopevisioName:scope||code, pcloudName:pcl||code};
-      }).filter(Boolean);
-      const next={objects:rows};
-      await saveJson("objects.json", next);
-      objectsCfg=next;
-      await loadObjects();
-      toast("<strong>Liegenschaften gespeichert</strong>",1800);
-      dlg.close?.();
-    }catch(e){
-      toast("Fehler beim Speichern der Liegenschaften.",2500);
-    }
-  });
-
-  if (typeof dlg.showModal==="function") dlg.showModal(); else dlg.setAttribute("open","open");
-  wireDialogClose(dlg);
-}
-
-async function openTypesDialog(){
-  await ensureConfigConnectedOrAsk();
-  const dlg=$("#manageTypesDialog");
-  if(!dlg){ toast("Dokumentarten-Dialog fehlt.",2000); return; }
-  let j; try{ j = await loadJson("document_types.json"); }catch{ j={types:[], defaultTypeKey:""}; }
-  const list=j.types||[];
-  const ul=$("#typesList");
-  ul.innerHTML="";
-  const defaultKey=j.defaultTypeKey||"";
-
-  const addRow=(t={label:"", key:"", isInvoice:false})=>{
-    const li=document.createElement("li");
-    li.innerHTML = `
-      <div class="row tight">
-        <input class="input slim ty-label" placeholder="Label" value="${t.label||""}">
-        <input class="input slim ty-key"   placeholder="Key"   value="${t.key||""}">
-        <label class="chk" style="margin-left:.5rem"><input type="checkbox" class="ty-inv" ${t.isInvoice?"checked":""}> Rechnung</label>
-        <label class="chk" style="margin-left:1rem"><input type="radio" name="ty-default" class="ty-def" ${t.key===defaultKey?"checked":""}> Default</label>
-        <button class="icon-btn ty-del" title="Löschen">🗑️</button>
-      </div>`;
-    li.querySelector(".ty-del").addEventListener("click",()=>li.remove());
-    ul.appendChild(li);
-  };
-
-  list.forEach(addRow);
-  $("#typesAddRow")?.addEventListener("click",()=>addRow({}));
-
-  $("#typesSaveShared")?.addEventListener("click", async()=>{
-    try{
-      const rows=[...ul.querySelectorAll("li")].map(li=>{
-        const label=li.querySelector(".ty-label")?.value.trim();
-        let key=li.querySelector(".ty-key")?.value.trim();
-        const isInv=li.querySelector(".ty-inv")?.checked||false;
-        const isDef=li.querySelector(".ty-def")?.checked||false;
-        if(!label) return null;
-        if(!key) key=label.toLowerCase().replace(/\s+/g,"-").replace(/[^a-z0-9\-]/g,"");
-        return {label, key, isInvoice:isInv, isDefault:isDef};
-      }).filter(Boolean);
-      const def = rows.find(r=>r.isDefault)?.key || "";
-      const types = rows.map(({isDefault, ...t})=>t);
-      const next={types, defaultTypeKey:def};
-      await saveJson("document_types.json", next);
-      docTypesCfg=next;
-      await loadDocTypes();
-      toast("<strong>Dokumentarten gespeichert</strong>",1800);
-      dlg.close?.();
-    }catch(e){
-      toast("Fehler beim Speichern der Dokumentarten.",2500);
-    }
-  });
-
-  if (typeof dlg.showModal==="function") dlg.showModal(); else dlg.setAttribute("open","open");
-  wireDialogClose(dlg);
-}
-
-/* ------------------------------ Assignments ------------------------------ */
+// ====== ERSATZ (komplett): openAssignmentsDialog ======
 async function openAssignmentsDialog() {
   await ensureConfigConnectedOrAsk();
 
   const dlg = $("#manageAssignmentsDialog");
   if (!dlg) { toast("Zuordnungs-Dialog fehlt.", 2000); return; }
 
+  // Bestehende Regeln laden
   let j;
   try { j = await loadJson("assignments.json"); }
   catch { j = { patterns: [] }; }
@@ -2300,6 +2623,7 @@ async function openAssignmentsDialog() {
   const tbody = $("#assignTbody");
   tbody.innerHTML = "";
 
+  // Tabellenzeile (leichtgewichtig)
   const addRow = (row = { pattern: "", object: "", subfolder: "", note: "" }) => {
     const esc = s => String(s || "").replace(/"/g, "&quot;");
     const tr = document.createElement("tr");
@@ -2315,9 +2639,10 @@ async function openAssignmentsDialog() {
     return tr;
   };
 
+  // Vorhandene Regeln in die Tabelle
   (j.patterns || []).forEach(addRow);
 
-  // Objektliste für Einfach-Eingabe
+  // --- NEU: Objektliste für die Einfach-Eingabe (#saObject) füllen ---
   try {
     const o = await loadJson("objects.json");
     const sel = $("#saObject");
@@ -2342,96 +2667,105 @@ async function openAssignmentsDialog() {
     }
   }
 
-  // Unterordner-Datalist (robust, ohne Duplikate)
-  (function setupSaSubDatalist(){
-    try {
-      if (window.__fdl_saSubSetupDone) return;
-      window.__fdl_saSubSetupDone = true;
 
-      const input = document.querySelector("#saSub");
-      if (!input) return;
+// --- Unterordner-Vorschläge für #saSub (robust & ohne Duplikate) ---
+(function setupSaSubDatalist(){
+  try {
+    // nur einmal pro Seite initialisieren
+    if (window.__fdl_saSubSetupDone) return;
+    window.__fdl_saSubSetupDone = true;
 
-      document.querySelectorAll('[id="saSubList"]').forEach((n,i)=>{ if(i>0) n.remove(); });
+    const input = document.querySelector("#saSub");
+    if (!input) return;
 
-      let dl = document.getElementById("saSubList");
-      if (!dl) {
-        dl = document.createElement("datalist");
-        dl.id = "saSubList";
-        input.setAttribute("list", "saSubList");
-        (input.parentElement || document.body).appendChild(dl);
-      }
+    // evtl. doppelte Datalists mit gleicher ID entfernen
+    document.querySelectorAll('[id="saSubList"]').forEach((n,i)=>{ if(i>0) n.remove(); });
 
-      async function gatherSubfolders(code){
-        const uniq = new Set();
-
-        (getKnownSubfolders(code) || []).forEach(s => { if (s) uniq.add(String(s).trim()); });
-
-        const { scopeName, pcloudName } = getFolderNames(code);
-
-        const jobs = [];
-        if (scopeRootHandle) {
-          jobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Rechnungsbelege"]));
-          jobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Objektdokumente"]));
-        }
-        if (pcloudRootHandle && !isArndtCie(code)) {
-          jobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Rechnungsbelege"]));
-          jobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Objektdokumente"]));
-        }
-
-        const lists = (await Promise.all(jobs).catch(()=>[[]])).flat();
-        lists.forEach(n => { if (n) uniq.add(String(n).trim()); });
-
-        const priority = ["Allgemein","D1","D4"];
-        return Array.from(uniq)
-          .filter(Boolean)
-          .sort((a,b)=>{
-            const ia = priority.indexOf(a), ib = priority.indexOf(b);
-            if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-            const ya = /^\d{4}$/.test(a) ? -parseInt(a,10) : 0;
-            const yb = /^\d{4}$/.test(b) ? -parseInt(b,10) : 0;
-            if (ya !== yb) return ya - yb;
-            return a.localeCompare(b, "de");
-          });
-      }
-
-      async function refill(){
-        document.querySelectorAll('[id="saSubList"]').forEach((n,i)=>{ if(i>0) n.remove(); });
-        dl.textContent = "";
-
-        const code = (document.querySelector("#saObject")?.value || "").trim();
-        if (!code) return;
-
-        const items = await gatherSubfolders(code);
-        const seen = new Set();
-        for (const v of items) {
-          const val = String(v||"").trim();
-          const key = val.toLowerCase();
-          if (!val || seen.has(key)) continue;
-          seen.add(key);
-          const opt = document.createElement("option");
-          opt.value = val;
-          dl.appendChild(opt);
-        }
-      }
-
-      document.querySelector("#saObject")?.addEventListener("change", refill);
-      refill();
-
-      input.setAttribute("autocomplete", "off");
-      const showAll = () => {
-        const prev = input.value;
-        input.value = " ";
-        input.dispatchEvent(new Event("input", { bubbles:true }));
-        setTimeout(() => { input.value = prev; }, 0);
-      };
-      input.addEventListener("focus", showAll);
-      input.addEventListener("click", showAll);
-      input.addEventListener("keydown", (e)=>{ if (e.key === "ArrowDown") showAll(); });
-    } catch(e) {
-      console.warn("setupSaSubDatalist failed:", e);
+    // datalist erzeugen/holen
+    let dl = document.getElementById("saSubList");
+    if (!dl) {
+      dl = document.createElement("datalist");
+      dl.id = "saSubList";
+      input.setAttribute("list", "saSubList");
+      (input.parentElement || document.body).appendChild(dl);
     }
-  })();
 
+    async function gatherSubfolders(code){
+      const uniq = new Set();
+
+      (getKnownSubfolders(code) || []).forEach(s => { if (s) uniq.add(String(s).trim()); });
+
+      const { scopeName, pcloudName } = getFolderNames(code);
+
+      const jobs = [];
+      if (scopeRootHandle) {
+        jobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Rechnungsbelege"]));
+        jobs.push(listChildFolders(scopeRootHandle, ["OBJEKTE", scopeName, "Objektdokumente"]));
+      }
+      if (pcloudRootHandle && !isArndtCie(code)) {
+        jobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Rechnungsbelege"]));
+        jobs.push(listChildFolders(pcloudRootHandle, ["FIDELIOR","OBJEKTE", pcloudName, "Objektdokumente"]));
+      }
+
+      const lists = (await Promise.all(jobs).catch(()=>[[]])).flat();
+      lists.forEach(n => { if (n) uniq.add(String(n).trim()); });
+
+      const priority = ["Allgemein","D1","D4"];
+      return Array.from(uniq)
+        .filter(Boolean)
+        .sort((a,b)=>{
+          const ia = priority.indexOf(a), ib = priority.indexOf(b);
+          if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+          const ya = /^\d{4}$/.test(a) ? -parseInt(a,10) : 0;
+          const yb = /^\d{4}$/.test(b) ? -parseInt(b,10) : 0;
+          if (ya !== yb) return ya - yb; // Jahre absteigend
+          return a.localeCompare(b, "de");
+        });
+    }
+
+    async function refill(){
+      // Sicherheit: nur erste Datalist behalten
+      document.querySelectorAll('[id="saSubList"]').forEach((n,i)=>{ if(i>0) n.remove(); });
+      dl.textContent = "";
+
+      const code = (document.querySelector("#saObject")?.value || "").trim();
+      if (!code) return;
+
+      const items = await gatherSubfolders(code);
+      const seen = new Set();
+      for (const v of items) {
+        const val = String(v||"").trim();
+        const key = val.toLowerCase();
+        if (!val || seen.has(key)) continue;
+        seen.add(key);
+        const opt = document.createElement("option");
+        opt.value = val;
+        dl.appendChild(opt);
+      }
+    }
+
+    document.querySelector("#saObject")?.addEventListener("change", refill);
+    refill(); // initial füllen
+
+    // Datalist beim Fokus/Klick zeigen
+    input.setAttribute("autocomplete", "off");
+    const showAll = () => {
+      const prev = input.value;
+      input.value = " ";
+      input.dispatchEvent(new Event("input", { bubbles:true }));
+      setTimeout(() => { input.value = prev; }, 0);
+    };
+    input.addEventListener("focus", showAll);
+    input.addEventListener("click", showAll);
+    input.addEventListener("keydown", (e)=>{ if (e.key === "ArrowDown") showAll(); });
+  } catch(e) {
+    console.warn("setupSaSubDatalist failed:", e);
+  }
+})();
+
+
+
+  // --- Pattern-Builder (wie gehabt) ---
   const escRx = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const loosenId = (id) => {
     const raw = String(id || "").trim();
@@ -2439,7 +2773,8 @@ async function openAssignmentsDialog() {
     const chunks = raw.replace(/\s+/g, "").match(/[A-Za-z]+|\d+/g) || [raw];
     const expandDigits = (d) => (d.length >= 7 ? [d.slice(0, 3), d.slice(3)] : (d.match(/\d{1,2}/g) || [d]));
     const parts = chunks.flatMap(ch => /\d/.test(ch) ? expandDigits(ch) : [ch]);
-    return parts.map(p => escRx(p)).join("[\\s./\\-–—−]*");
+   return parts.map(p => escRx(p)).join("[\\s./\\-–—−]*");
+
   };
   const buildPattern = (vendor, ident) => {
     const la = [];
@@ -2448,6 +2783,8 @@ async function openAssignmentsDialog() {
     return la.join("");
   };
 
+
+  // → Regel erstellen (Einfach-Modus)
   $("#saAddBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     const vendor = ($("#saVendor")?.value || "").trim();
@@ -2483,8 +2820,10 @@ async function openAssignmentsDialog() {
     toast("Regel hinzugefügt (bearbeitbar).", 1600);
   });
 
+  // +Neu: leere manuelle Zeile
   $("#assignAdd")?.addEventListener("click", () => addRow({}));
 
+  // Speichern (RegEx-Validierung; Unterordner optional)
   $("#assignSave")?.addEventListener("click", async () => {
     try {
       const rows = [...tbody.querySelectorAll("tr")].map(tr => {
@@ -2495,12 +2834,13 @@ async function openAssignmentsDialog() {
 
         if (!pattern || !object) return null;
 
-        const okMain = (() => {
-          const pat = String(pattern).trim();
-          if (!pat) return false;
-          try { new RegExp(pat, "i"); return true; }
-          catch { return false; }
-        })();
+       const okMain = (() => {
+  const pat = String(pattern).trim();
+  if (!pat) return false;        // nichts leeres speichern
+  try { new RegExp(pat, "i");    // einmal komplett validieren
+       return true;
+  } catch { return false; }
+})();
 
         if (!okMain) throw new Error(`Ungültiges Pattern: ${pattern}`);
 
@@ -2527,10 +2867,15 @@ async function openAssignmentsDialog() {
   wireDialogClose(dlg);
 }
 
-/* ------------------------------ Mail-Dialog ------------------------------ */
+
+  $("#mailManageBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openEmailsDialog(); });
+  $("#manageObjectsBtn") ?.addEventListener("click", (e)=>{ e.preventDefault(); openObjectsDialog(); });
+  $("#manageDocTypesBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openTypesDialog(); });
+  $("#manageAssignmentsBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openAssignmentsDialog(); });
+
 function arrayBufferToBase64(ab) {
   const bytes = new Uint8Array(ab);
-  const chunk = 0x8000;
+  const chunk = 0x8000; // 32k
   let binary = "";
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
@@ -2538,11 +2883,16 @@ function arrayBufferToBase64(ab) {
   return btoa(binary);
 }
 
+// ===============================================================
+// E-MAIL-PROMPT (Dialog) – wird dynamisch ins DOM gebaut
+// Zeigt eine klare Entscheidung: "Nur speichern" vs. "Speichern & E-Mail senden"
+// ===============================================================
 function shouldAskForEmail() {
   try {
     const code = (objSel?.value || "").trim().toUpperCase();
     if (code !== "FIDELIOR" && code !== "EGYO") return false;
 
+    // Rechnungserkennung – bei Unklarheit lieber JA (Dialog zeigen)
     let inv = true;
     if (typeof isInvoice === "function") {
       inv = !!isInvoice();
@@ -2551,13 +2901,13 @@ function shouldAskForEmail() {
     }
     return inv !== false;
   } catch {
-    return true;
+    return true; // Sicherheitsnetz: lieber zeigen
   }
 }
 
-function buildEmailPromptDialog() {
+function buildEmailPromptDialog(defaults = {}) {
   let dlg = document.getElementById("fdlEmailPrompt");
-  if (dlg) { try { dlg.close(); } catch {} dlg.remove(); }
+  if (dlg) return dlg;
 
   dlg = document.createElement("dialog");
   dlg.id = "fdlEmailPrompt";
@@ -2576,7 +2926,7 @@ function buildEmailPromptDialog() {
         <div id="fdlEmailSection" style="display:none;gap:10px">
           <label class="row" style="display:grid;gap:6px">
             <span>Empfänger (Komma/Enter):</span>
-            <input id="fdlMailTo" class="input slim" placeholder="name@firma.de">
+            <input id="fdlMailTo" class="input slim" list="mailBook" placeholder="name@firma.de">
             <small style="color:#55637A">Tipp: Vorschläge aus dem Adressbuch per Autovervollständigen wählen.</small>
           </label>
 
@@ -2632,178 +2982,86 @@ function buildEmailPromptDialog() {
   const btnSend = dlg.querySelector("#fdlBtnSaveAndSend");
   const btnOnly = dlg.querySelector("#fdlBtnSaveOnly");
 
-  // Datalist hart abschalten
-  try { to?.removeAttribute("list"); subj?.removeAttribute("list"); } catch {}
+  /* PATCH C1: Empfänger-Vorschläge (sanft, tippbar) */
+(function enableMailToSuggestions(){
+  const input = dlg.querySelector("#fdlMailTo");
+  if (!input || input.__suggestInit) return;
+  input.__suggestInit = true;
+  input.setAttribute("autocomplete","off");
 
-  // Recipient-Picker
-  (function setupRecipientPicker(){
-    const input = to;
-    if (!input || input.__pickerInit) return;
-    input.__pickerInit = true;
-    input.setAttribute("autocomplete","off");
+  function showAllOnce(){
+    const prev = input.value;
+    input.value = prev + " ";
+    input.dispatchEvent(new Event("input", { bubbles:true }));
+    setTimeout(() => { input.value = prev; }, 0);
+  }
 
-    const menu = document.createElement("div");
-    menu.className = "fdl-pick";
-    menu.style.position = "fixed";
-    menu.style.zIndex = "2147483647";
-    menu.style.display = "none";
-    menu.style.maxHeight="240px"; menu.style.overflow="auto";
-    menu.style.border="1px solid var(--line,#E2E8F0)"; menu.style.background="#fff";
-    menu.style.boxShadow="0 6px 24px rgba(0,0,0,.08)"; menu.style.borderRadius="8px"; menu.style.padding="6px";
-    (dlg || document.body).appendChild(menu);
+  input.addEventListener("focus", showAllOnce);
+  input.addEventListener("click", showAllOnce);
+  input.addEventListener("keydown", (e) => { if (e.key === "ArrowDown") showAllOnce(); });
+})();
 
-    // nach buildEmailPromptDialog(...)
-window.buildEmailPromptDialog = buildEmailPromptDialog;
+/* PATCH C2: Betreff-Vorlagen (sanft, kein Blur/Reset) */
+(function setupSubjectDatalist(){
+  if (!subj || subj.__subjectInit) return;
+  subj.__subjectInit = true;
+  subj.setAttribute("autocomplete","off");
 
-    function allRecipients(){
-      const set = new Set();
-      (emailsCfg?.addressBook || emailsCfg?.emails || []).forEach(r => r?.email && set.add(r.email));
-      const code = (objSel?.value || "").trim();
-      const inv  = emailsCfg?.perObject?.[code]?.invoice || {};
-      (inv.to || inv.emails || []).forEach(e => set.add(e));
-      (emailsCfg?.perObject?.[code]?.templates || []).forEach(t => (t.recipients || t.to || []).forEach(e => set.add(e)));
-      return [...set];
-    }
-    const currentFilter = () => {
-      const v = input.value;
-      const m = v.match(/.*[;,]\s*([^;,]*)$/);
-      return (m ? m[1] : v).trim().toLowerCase();
+  // Datalist einmalig
+  let dl = document.getElementById("subjectBook");
+  if (!dl) {
+    dl = document.createElement("datalist");
+    dl.id = "subjectBook";
+    document.body.appendChild(dl);
+  }
+  subj.setAttribute("list","subjectBook");
+
+  // Kandidaten sammeln
+  const items = new Set();
+  const code  = (objSel?.value || "").trim().toUpperCase();
+  const isInv = (typeof isInvoice === "function") ? !!isInvoice() : true;
+
+  if (code === "FIDELIOR" && isInv) {
+    const sbs = (((emailsCfg?.defaults || {}).invoice || {}).Fidelior || {}).subjectByStatus || {
+      open:   "NEUE RECHNUNG – ZAHLUNG OFFEN",
+      review: "RECHNUNGSPRÜFUNG ERFORDERLICH"
     };
-    function fill(filter){
-      menu.innerHTML="";
-      const list = allRecipients().filter(v => !filter || v.toLowerCase().includes(filter));
-      if (!list.length){
-        const d=document.createElement("div"); d.style.color="#667085"; d.textContent="Keine Adressen"; menu.appendChild(d); return;
-      }
-      list.forEach((v,i)=>{
-        const o=document.createElement("div");
-        o.textContent=v; o.style.padding="8px 10px"; o.style.borderRadius="6px"; o.style.cursor="pointer";
-        if (i===0) o.style.background="#f5f7fb";
-        o.addEventListener("mouseenter",()=>o.style.background="#f5f7fb");
-        o.addEventListener("mouseleave",()=>o.style.background="");
-        o.addEventListener("mousedown",(e)=>{
-          e.preventDefault();
-          const raw = input.value;
-          const m = raw.match(/^(.*?[;,]\s*|)([^;,]*)$/);
-          const prefix = m ? m[1] : "";
-          input.value = prefix + v + ", ";
-          setTimeout(()=>input.focus(),0);
-          input.dispatchEvent(new Event("input",{bubbles:true}));
-        });
-        menu.appendChild(o);
-      });
-    }
-    function show(){
-      fill(currentFilter());
-      const r=input.getBoundingClientRect();
-      menu.style.minWidth = Math.max(360, r.width)+"px";
-      menu.style.left = r.left+"px";
-      menu.style.top  = (r.bottom+4)+"px";
-      menu.style.display="block";
-    }
-    function hide(){ menu.style.display="none"; }
+    items.add(sbs.open); items.add(sbs.review);
+  }
+  try {
+    const inv = (emailsCfg?.perObject?.[code]?.invoice) || {};
+    if (inv.subject) items.add(inv.subject);
+  } catch {}
 
-    input.addEventListener("focus", show);
-    input.addEventListener("click", show);
-    input.addEventListener("keydown", (e)=>{ if(e.key==="ArrowDown"){ show(); } });
-    input.addEventListener("input", ()=>{ if(menu.style.display!=="block") show(); else fill(currentFilter()); });
-    input.addEventListener("keydown",(e)=>{
-      if(e.key==="Escape"){ hide(); return; }
-      if(e.key==="Enter"){
-        const first = menu.querySelector("div");
-        if(first){
-          e.preventDefault();
-          first.dispatchEvent(new MouseEvent("mousedown"));
-          hide();
-        }
-      }
-    });
-    input.addEventListener("blur", ()=> setTimeout(hide,120));
-    window.addEventListener("scroll", ()=>{ if(menu.style.display==="block") show(); }, true);
-    window.addEventListener("resize", ()=>{ if(menu.style.display==="block") show(); });
-  })();
+  // Datalist füllen (ohne Duplikate)
+  dl.textContent = "";
+  [...items].filter(Boolean).forEach(v => {
+    const o = document.createElement("option");
+    o.value = v;
+    dl.appendChild(o);
+  });
 
-  // Betreff-Picker
-  (function setupSubjectPicker(){
-    if (!subj || subj.__pickerInit) return;
-    subj.__pickerInit = true;
-    subj.setAttribute("autocomplete","off");
-
-    const menu = document.createElement("div");
-    menu.className = "fdl-pick";
-    menu.style.position = "fixed";
-    menu.style.zIndex = "2147483647";
-    menu.style.display = "none";
-    menu.style.maxHeight="240px"; menu.style.overflow="auto";
-    menu.style.border="1px solid var(--line,#E2E8F0)"; menu.style.background="#fff";
-    menu.style.boxShadow="0 6px 24px rgba(0,0,0,.08)"; menu.style.borderRadius="8px"; menu.style.padding="6px";
-    (dlg || document.body).appendChild(menu);
-
-    function candidates(){
-      const set=new Set();
-      const code=(objSel?.value||"").trim().toUpperCase();
-      const isInv = (typeof isInvoice==="function") ? !!isInvoice() : true;
-      const inv = emailsCfg?.perObject?.[code]?.invoice || {};
-      if (inv.subject) set.add(inv.subject);
-      (emailsCfg?.perObject?.[code]?.templates || []).forEach(t=>{
-        if (t.subject && (!t.invoiceOnly || isInv)) set.add(t.subject);
-      });
-      if (isInv){
-        const s = emailsCfg?.defaults?.invoice?.Fidelior?.subjectByStatus || {};
-        if (s.open) set.add(s.open);
-        if (s.review) set.add(s.review);
-      }
-      return [...set];
-    }
-    function fill(filter){
-      menu.innerHTML="";
-      const f=(filter||"").toLowerCase();
-      const list=candidates().filter(v=>!f||v.toLowerCase().includes(f));
-      if(!list.length){
-        const d=document.createElement("div"); d.style.color="#667085"; d.textContent="Keine Vorschläge"; menu.appendChild(d); return;
-      }
-      list.forEach((v,i)=>{
-        const o=document.createElement("div");
-        o.textContent=v; o.style.padding="8px 10px"; o.style.borderRadius="6px"; o.style.cursor="pointer";
-        if (i===0) o.style.background="#f5f7fb";
-        o.addEventListener("mouseenter",()=>o.style.background="#f5f7fb");
-        o.addEventListener("mouseleave",()=>o.style.background="");
-        o.addEventListener("mousedown",(e)=>{ e.preventDefault(); subj.value=v; subj.dispatchEvent(new Event("input",{bubbles:true})); });
-        menu.appendChild(o);
-      });
-    }
-    function show(){
-      fill(subj.value);
-      const r=subj.getBoundingClientRect();
-      menu.style.minWidth = Math.max(320, r.width) + "px";
-      menu.style.left = r.left + "px";
-      menu.style.top  = (r.bottom + 4) + "px";
-      menu.style.display = "block";
-    }
-    function hide(){ menu.style.display="none"; }
-
-    subj.addEventListener("focus", show);
-    subj.addEventListener("click", show);
-    subj.addEventListener("input", ()=>{ if(menu.style.display!=="block") show(); else fill(subj.value); });
-    subj.addEventListener("keydown",(e)=>{
-      if(e.key==="Escape"){ hide(); }
-      if(e.key==="Enter"){
-        const first = menu.querySelector("div");
-        if(first){ e.preventDefault(); first.dispatchEvent(new MouseEvent("mousedown")); hide(); }
-      }
-    });
-    subj.addEventListener("blur", ()=> setTimeout(hide,120));
-    window.addEventListener("scroll", ()=>{ if(menu.style.display==="block") show(); }, true);
-    window.addEventListener("resize", ()=>{ if(menu.style.display==="block") show(); });
-  })();
+  // Liste anzeigen – ohne blur/empty, damit Tippen nicht blockiert
+  function peekList(){
+    const prev = subj.value;
+    subj.value = prev + " ";
+    subj.dispatchEvent(new Event("input", { bubbles:true }));
+    setTimeout(() => { subj.value = prev; }, 0);
+  }
+  subj.addEventListener("focus", peekList);
+  subj.addEventListener("click", peekList);
+  subj.addEventListener("keydown", (e) => { if (e.key === "ArrowDown") peekList(); });
+})();
 
   btnSend.disabled = false;
   btnSend.removeAttribute("disabled");
   btnSend.style.pointerEvents = "auto";
   btnSend.setAttribute("aria-disabled", "false");
 
+  // „Nur speichern“ schließt sicher
   btnOnly.addEventListener("click", (e) => { e.preventDefault(); dlg.close?.(); });
 
+  // Prefill + Validierung
   dlg.__fdlPrefill = (p = {}) => {
     att.textContent = p.attachmentName || "dokument.pdf";
     to.value = ""; cc.value = ""; bcc.value = "";
@@ -2829,36 +3087,19 @@ window.buildEmailPromptDialog = buildEmailPromptDialog;
     btnOnly.focus();
   };
 
-  // erster Klick öffnet nur die Felder
+  // *** WICHTIG: erster Klick öffnet nur die Felder – KEIN Versand, KEIN close ***
   btnSend.addEventListener("click", (e) => {
     if (sec.style.display === "none") {
       e.preventDefault();
-      e.stopImmediatePropagation();
+      e.stopImmediatePropagation(); // blockt nachfolgende Listener im selben Tick
       sec.style.display = "grid";
       to?.focus();
     }
   });
 
-  if (!document.getElementById("fdl-picker-css")) {
-    const css = document.createElement("style");
-    css.id = "fdl-picker-css";
-    css.textContent = `
-      .fdl-pick{
-        position:fixed;
-        z-index:2147483647 !important;
-        max-height:240px; overflow:auto;
-        border:1px solid var(--line,#E2E8F0);
-        background:#fff; box-shadow:0 6px 24px rgba(0,0,0,.08);
-        border-radius:8px; padding:6px;
-      }
-      .fdl-pick > div{ padding:8px 10px; border-radius:6px; cursor:pointer; }
-      .fdl-pick > div:hover{ background:#f5f7fb; }
-    `;
-    document.head.appendChild(css);
-  }
-
   return dlg;
 }
+
 
 // Öffnet den Dialog und gibt eine Entscheidung zurück
 function promptForEmailOnce({ attachmentName, subject, replyTo }) {
@@ -2867,7 +3108,8 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
     dlg.__fdlPrefill({ attachmentName, subject, replyTo });
 
     const btnSend = dlg.querySelector("#fdlBtnSaveAndSend");
-    let done = false;
+
+    let done = false; // verhindert Doppel-Resolve
 
     const cleanup = () => {
       dlg?.removeEventListener("close", onClose);
@@ -2883,16 +3125,17 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
 
     const onClickSend = (e) => {
       const sec = dlg.querySelector("#fdlEmailSection");
+      // 1. Klick: Felder wurden (in buildEmailPromptDialog) geöffnet → hier NICHT schließen
       if (sec && sec.style.display === "none") return;
 
       e.preventDefault();
       if (done) return;
 
-      const toVal   = dlg.querySelector("#fdlMailTo")?.value || "";
-      const ccVal   = dlg.querySelector("#fdlMailCc")?.value || "";
-      const bccVal  = dlg.querySelector("#fdlMailBcc")?.value || "";
-      const subjVal = dlg.querySelector("#fdlMailSubj")?.value || "";
-      const repVal  = dlg.querySelector("#fdlMailReply")?.value || "";
+      const to   = dlg.querySelector("#fdlMailTo")?.value || "";
+      const cc   = dlg.querySelector("#fdlMailCc")?.value || "";
+      const bcc  = dlg.querySelector("#fdlMailBcc")?.value || "";
+      const subj = dlg.querySelector("#fdlMailSubj")?.value || "";
+      const rep  = dlg.querySelector("#fdlMailReply")?.value || "";
 
       const split = s => s.split(/[;, ]+/).map(x => x.trim()).filter(Boolean);
 
@@ -2902,11 +3145,11 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
 
       resolve({
         mode: "save_and_send",
-        to: split(toVal),
-        cc: split(ccVal),
-        bcc: split(bccVal),
-        subject: subjVal.trim(),
-        replyTo: repVal.trim()
+        to: split(to),
+        cc: split(cc),
+        bcc: split(bcc),
+        subject: subj.trim(),
+        replyTo: rep.trim()
       });
     };
 
@@ -2918,194 +3161,17 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
   });
 }
 
-// nach promptForEmailOnce(...)
-window.promptForEmailOnce = promptForEmailOnce;
-/* ------------------------------ Email: Senden ---------------------------- */
-async function sendMail({to=[], cc=[], bcc=[], subject="", text="", replyTo="", attachmentBytes, attachmentName}){
-  const rc=(to?.length||0)+(cc?.length||0)+(bcc?.length||0);
-  if(!rc) return { ok:true, skipped:true };
-  const b64 = arrayBufferToBase64(attachmentBytes);
-  const res = await fetch("/.netlify/functions/send-email", {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body:JSON.stringify({
-      to, cc, bcc, subject, text, replyTo,
-      attachments: [{ filename: attachmentName, contentBase64: b64, contentType:"application/pdf" }]
-    })
-  });
-  const json = await res.json().catch(()=>({}));
-  if(!res.ok || json.ok!==true) throw new Error(json.error||("HTTP "+res.status));
-  return json;
-}
-
-/* ---------------------- Inbox → Bearbeitet (robust) ----------------------- */
-async function moveInboxToProcessed() {
-  console.log("moveInboxToProcessed:start", {
-    hasHandle: !!currentInboxFileHandle,
-    fileName: currentInboxFileName
-  });
-
-  try {
-    if (!currentInboxFileHandle || !inboxRootHandle) {
-      toast("Kein Inbox-Kontext zum Verschieben.", 2500);
-      return false;
-    }
-
-    const srcFile = await currentInboxFileHandle.getFile();
-    const fileName = currentInboxFileName || srcFile.name;
-    if (!srcFile.size) {
-      toast("Quelle ist 0 Byte – möglicherweise Cloud-Platzhalter. Verschieben abgebrochen.", 4000);
-      return false;
-    }
-
-    const okIn = await ensureWritePermissionWithPrompt(inboxRootHandle, "Inbox");
-
-    let dstRoot = null, dstSeg = [];
-    if (processedRootHandle) {
-      const okOut = await ensureWritePermissionWithPrompt(processedRootHandle, "Bearbeitet");
-      if (!okOut) { toast("Ziel „Bearbeitet“ ist nicht freigegeben.", 3500); return false; }
-      dstRoot = processedRootHandle;
-    } else {
-      const okOut = await ensureWritePermissionWithPrompt(inboxRootHandle, "Inbox/Bearbeitet");
-      if (!okOut) return false;
-      dstRoot = inboxRootHandle;
-      dstSeg = ["Bearbeitet"];
-    }
-
-    // resolve-Pfad
-    let rel = currentInboxRelPath;
-    if (!rel) {
-      if (inboxRootHandle?.resolve && currentInboxFileHandle) {
-        try {
-          const r = await inboxRootHandle.resolve(currentInboxFileHandle);
-          rel = (Array.isArray(r) && r.length) ? r : [fileName];
-        } catch { rel = [fileName]; }
-      } else {
-        rel = [fileName];
-      }
-    }
-    const canDelete = Array.isArray(rel) && rel.length > 0;
-
-    const dstDir = await (async () => {
-      if (!dstSeg.length) return dstRoot;
-      let d = dstRoot;
-      for (const s of dstSeg) d = await d.getDirectoryHandle(s, { create: true });
-      return d;
-    })();
-
-    const finalName = await uniqueName(dstDir, fileName);
-
-    // Kopieren
-    const bytes = await srcFile.arrayBuffer();
-    const dstFileHandle = await dstDir.getFileHandle(finalName, { create: true });
-    let ws;
-    try {
-      ws = await dstFileHandle.createWritable({ keepExistingData: false });
-      await ws.write(new Blob([bytes], { type: "application/pdf" }));
-      await ws.close(); ws = undefined;
-    } catch (e) {
-      try { await ws?.abort(); } catch {}
-      throw e;
-    }
-
-    // Löschen in Inbox
-    let deleted = false;
-    if (okIn && canDelete) {
-      try {
-        let parent = inboxRootHandle;
-        const segs = rel.slice();
-        const baseName = segs.pop();
-        for (const s of segs) {
-          parent = await parent.getDirectoryHandle(s, { create:false });
-        }
-        await parent.removeEntry(baseName);
-        deleted = true;
-      } catch (e) {
-        console.warn("removeEntry failed (will keep source):", e);
-      }
-    }
-
-    // Feedback
-    if (deleted) {
-      toast(`Verschoben nach „Bearbeitet“: <code>${finalName}</code>`, 2500);
-    } else {
-      toast(`Kopiert nach „Bearbeitet“ (Quelle blieb erhalten): <code>${finalName}</code>`, 2800);
-    }
-
-    // Aufräumen
-    currentInboxRelPath = null;
-    currentInboxFileHandle = null;
-    currentInboxFileName = "";
-
-    // UI-Refresh ohne F5
-    try {
-      const esc = s => String(s).replace(/(["'\\])/g, "\\$1");
-      const sel = `button.linklike[data-file="${esc(fileName)}"]`;
-      document.querySelector(sel)?.closest("li")?.remove();
-
-      const list = document.querySelector("#inboxList");
-      const counters = document.querySelector("#counters");
-      if (list && inboxRootHandle) {
-        list.innerHTML = "";
-        let offen = 0;
-
-        for await (const e of inboxRootHandle.values()){
-          if (e.kind !== "file") continue;
-          if (!e.name.toLowerCase().endsWith(".pdf")) continue;
-
-          let f;
-          try {
-            const h = await inboxRootHandle.getFileHandle(e.name, { create:false });
-            f = await h.getFile();
-          } catch { continue; }
-          if (!f || f.size === 0) continue;
-
-          offen++;
-          const li = document.createElement("li");
-          li.innerHTML = `<button class="linklike" data-file="${e.name}">${e.name}</button><span class="badge">Inbox</span>`;
-          list.appendChild(li);
-
-          li.querySelector("button").addEventListener("click", async () => {
-            try {
-              const h = await inboxRootHandle.getFileHandle(e.name, { create:false });
-              const fileNow = await h.getFile();
-              if (!fileNow.size) { toast(`„${e.name}“ ist 0 Byte – bitte zuerst lokal synchronisieren.`, 4000); return; }
-              currentInboxFileHandle = h;
-              currentInboxFileName   = e.name;
-              currentInboxRelPath    = [e.name];
-              toast(`Inbox-Datei ausgewählt: <code>${e.name}</code>`, 1400);
-              if (typeof window.__fdl_takeFile === "function"){
-                await window.__fdl_takeFile(fileNow, { fromInbox:true });
-              }
-            } catch (err) {
-              console.warn("Inbox-Auswahl fehlgeschlagen:", err);
-              toast("Konnte Datei nicht öffnen.", 2500);
-            }
-          });
-        }
-
-        if (counters){
-          counters.textContent = `Offen: ${offen} · In Arbeit: 0 · Fertig: 0 · Session: 0`;
-        }
-      }
-
-      window.dispatchEvent(new CustomEvent("fdl:file-moved", {
-        detail: { from: "Inbox", to: "Bearbeitet", srcName: fileName, dstName: finalName }
-      }));
-    } catch(e){
-      console.warn("post-move UI refresh failed:", e);
-    }
-
-    return true;
-
-  } catch (e) {
-    console.error("moveInboxToProcessed failed:", e);
-    toast(`Verschieben fehlgeschlagen: ${e?.message || e}`, 4000);
-    return false;
+  /* ------------------------------ Email: Senden ---------------------------- */
+  async function sendMail({to=[], cc=[], bcc=[], subject="", text="", replyTo="", attachmentBytes, attachmentName}){
+    const rc=(to?.length||0)+(cc?.length||0)+(bcc?.length||0); if(!rc) return { ok:true, skipped:true };
+    const b64 = arrayBufferToBase64(attachmentBytes);
+    const res = await fetch("/.netlify/functions/send-email", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ to, cc, bcc, subject, text, replyTo, attachments: [{ filename: attachmentName, contentBase64: b64, contentType:"application/pdf" }] }) });
+    const json = await res.json().catch(()=>({})); if(!res.ok || json.ok!==true) throw new Error(json.error||("HTTP "+res.status)); return json;
   }
-}
+
 
 /* -------------------------------- Speichern ------------------------------ */
+/** Stempelt links vertikal: Datum – EINGEGANGEN – Kürzel (einzeilig, rotiert). */
 async function stampPdf(buf){
   if (!window.PDFLib) return buf;
   const { PDFDocument, StandardFonts, rgb, degrees } = PDFLib;
@@ -3117,10 +3183,12 @@ async function stampPdf(buf){
 
     const font = await doc.embedFont(StandardFonts.HelveticaBold);
 
+    // Text in gewünschter Reihenfolge
     const dateStr = (recvDateEl?.value || (typeof today === "function" ? today() : new Date().toLocaleDateString("de-DE")));
     const objStr  = (objSel?.value || "—");
     const text    = `${dateStr} – EINGEGANGEN – ${objStr}`;
 
+    // Größe/Farbe wie bisher, Position links oben, vertikal nach unten
     const size = Math.max(10, Math.round(page.getWidth() * 0.018));
     page.drawText(text, {
       x: 16,
@@ -3132,16 +3200,20 @@ async function stampPdf(buf){
     });
 
     const out = await doc.save({ useObjectStreams: true });
-    return out.buffer || out;
+    return out.buffer || out; // kompatibel bleiben
   } catch (e) {
     console.error("[stampPdf] Fehler:", e);
-    return buf;
+    return buf; // niemals blockieren
   }
 }
 
-// SPEICHERN: Klick-Handler (Hybrid)
-$("#saveBtn")?.addEventListener("click", async (ev) => {
+
+// === SPEICHERN: Klick-Handler (Hybrid: Dialog NUR bei FIDELIOR/EGYO-Rechnung) ===
+  $("#saveBtn")?.addEventListener("click", async (ev) => {
   ev.preventDefault();
+  // if (!(await ensureTargetsReady())) return;  // ALT: raus
+
+
 
   try {
     if (!pdfDoc || !saveArrayBuffer) {
@@ -3149,6 +3221,7 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
       return;
     }
 
+    // ---- 0) Vorab: Dateiname (für Dialoganzeige) + Defaults für Betreff/ReplyTo
     const previewName = (typeof effectiveFileName === "function")
       ? effectiveFileName()
       : (lastFile?.name || "dokument.pdf");
@@ -3160,46 +3233,61 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
       preReply   = meta?.replyTo || "";
     } catch {}
 
+    // ---- 1) Stempeln & Bytes vorbereiten
     const fileName = previewName;
     const safeName = (typeof fileSafe === "function") ? fileSafe(fileName) : fileName;
 
     let stampedBytes = saveArrayBuffer;
     try { stampedBytes = await stampPdf(saveArrayBuffer); } catch {}
+// vor dem Block "Ziele auflösen & schreiben"
+const scopeOn  = $("#chkScope")?.checked === true;
+const extrasOn = $("#chkPcloudExtras")?.checked === true;
+const localOn  = $("#chkLocal")?.checked === true;
 
-    const t = (typeof resolveTargets === "function") ? resolveTargets() : {};
-    let okScope=false, okPcl=false, okPclBucket=false, okLocal=false;
-    const errs = {};
+if (!(await ensureWritePermissionWithPrompt(window.pcloudRootHandle, "pCloud"))) return;
+if (scopeOn && !(await ensureWritePermissionWithPrompt(window.scopeRootHandle, "Scopevisio"))) return;
+if (localOn && window.processedRootHandle) {
+  if (!(await ensureWritePermissionWithPrompt(window.processedRootHandle, "Lokaler Bearbeitet-Ordner"))) return;
+}
 
-    if (t?.scope?.root && t.scope.seg?.length) {
-      try {
-        await writeFileTo(t.scope.root, t.scope.seg, stampedBytes, safeName, { unique:true });
-        okScope = true;
-      } catch (e) {
-        errs.scope = e?.message || String(e);
-        toast("Scopevisio: Speichern fehlgeschlagen.", 6000);
-      }
-    }
+  // ---- 2) Ziele auflösen, Rechte prüfen
+const pf = await preflightTargets();
+if (!pf.ok) { 
+  toast("Speichern abgebrochen: " + (pf.reason || "Zielprüfung fehlgeschlagen"), 5000); 
+  return; 
+}
+const t = pf.t;  // <— dieses t verwenden
 
-    if (t?.pcloud?.root && t.pcloud.seg?.length) {
-      try {
-        await writeFileTo(t.pcloud.root, t.pcloud.seg, stampedBytes, safeName, { unique:true });
-        okPcl = true;
-      } catch (e) {
-        errs.pcloud = e?.message || String(e);
-        toast("pCloud: Speichern fehlgeschlagen.", 6000);
-      }
-    }
+let okScope=false, okPcl=false, okPclBucket=false, okLocal=false;
+const errs = {};
 
-    if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
-      try {
-        await writeFileTo(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, safeName, { unique:true });
-        okPclBucket = true;
-      } catch (e) {
-        errs.bucket = e?.message || String(e);
-        toast("pCloud (Sammelordner): Speichern fehlgeschlagen.", 6000);
-      }
-    }
+// (optional aber empfehlenswert) Stelle sicher, dass writeFileTo den Pfad anlegt
+async function writeSafe(root, seg, bytes, name){
+  // falls du eine ensureDirPath(root, seg) hast, hier aufrufen:
+  // await ensureDirPath(root, seg);
+  await writeFileTo(root, seg, bytes, name, { unique:true });
+}
 
+// Scope
+if (t?.scope?.root && t.scope.seg?.length) {
+  try { await writeSafe(t.scope.root, t.scope.seg, stampedBytes, safeName); okScope = true; }
+  catch(e){ errs.scope = e?.message || String(e); }
+}
+
+// pCloud Objektpfad
+if (t?.pcloud?.root && t.pcloud.seg?.length) {
+  try { await writeSafe(t.pcloud.root, t.pcloud.seg, stampedBytes, safeName); okPcl = true; }
+  catch(e){ errs.pcloud = e?.message || String(e); }
+}
+
+// pCloud Sammelordner
+if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
+  try { await writeSafe(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, safeName); okPclBucket = true; }
+  catch(e){ errs.bucket = e?.message || String(e); }
+}
+
+
+    // Lokal (optional)
     const wantLocal = $("#chkLocal")?.checked === true;
     if (wantLocal && window.showSaveFilePicker) {
       try {
@@ -3219,6 +3307,7 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
       }
     }
 
+    // Erfolgsauswertung
     const successTargets = [
       okScope ? "Scopevisio" : null,
       okPcl ? "pCloud" : null,
@@ -3237,7 +3326,9 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
       return;
     }
 
-    // E-Mail Hybrid
+
+    // ---- 3) E-Mail: Hybrid-Logik
+    // Fall A: Rechnung + (FIDELIOR|EGYO) → Dialog (neue UI)
     if (typeof shouldAskForEmail === "function" && shouldAskForEmail()) {
       const decision = await promptForEmailOnce({
         attachmentName: safeName,
@@ -3271,18 +3362,20 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
           }
         }
       }
-    } else {
+    }
+    // Fall B: alle anderen Fälle → legacy Verhalten (nur wenn Mail-Chips befüllt sind)
+    else {
       const to  = [...Mail.to];
       const cc  = [...Mail.cc];
       const bcc = [...Mail.bcc];
       const rc  = to.length + cc.length + bcc.length;
 
       if (rc) {
-        const meta = (typeof computeSubjectAndReply === "function")
+        const { subject, replyTo } = (typeof computeSubjectAndReply === "function")
           ? computeSubjectAndReply()
           : { subject:"", replyTo:"" };
 
-        const subj = (meta.subject && meta.subject.trim()) || "(ohne Betreff)";
+        const subj = (subject && subject.trim()) || "(ohne Betreff)";
         const confirmText = [
           "E-Mail jetzt senden?",
           "",
@@ -3290,7 +3383,7 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
           cc.length  ? `CC:       ${cc.join(", ")}`  : "",
           bcc.length ? `BCC:      ${bcc.join(", ")}` : "",
           `Betreff:  ${subj}`,
-          `Reply-To: ${meta.replyTo || "—"}`,
+          `Reply-To: ${replyTo || "—"}`,
           `Anhang:   ${safeName}`
         ].filter(Boolean).join("\n");
 
@@ -3298,9 +3391,9 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
           try {
             await sendMail({
               to, cc, bcc,
-              subject: meta.subject || "",
+              subject: subject || "",
               text: (typeof computeMailBody === "function" ? computeMailBody() : ""),
-              replyTo: meta.replyTo || undefined,
+              replyTo: replyTo || undefined,
               attachmentBytes: stampedBytes,
               attachmentName: safeName
             });
@@ -3314,7 +3407,7 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
       }
     }
 
-    // Inbox → Bearbeitet
+    // ---- 4) Inbox → Bearbeitet
     if (currentInboxFileHandle && (okScope || okPcl || okPclBucket || okLocal)) {
       try {
         const moved = await moveInboxToProcessed();
@@ -3325,6 +3418,7 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
       }
     }
 
+    // ---- 5) Feedback & Reset
     const okTargets = [
       okScope     ? "Scopevisio"            : null,
       okPcl       ? "pCloud"                : null,
@@ -3341,12 +3435,10 @@ $("#saveBtn")?.addEventListener("click", async (ev) => {
   }
 });
 
-// Cancel
-$("#cancelBtn")?.addEventListener("click",(e)=>{
-  e.preventDefault();
-  hardReset();
-  toast("Vorgang abgebrochen.",1500);
-});
+
+// Cancel: full reset
+$("#cancelBtn")?.addEventListener("click",(e)=>{ e.preventDefault(); hardReset(); toast("Vorgang abgebrochen.",1500); });
+
 
 function hardReset(){
   // PDF/Preview state
@@ -3355,12 +3447,12 @@ function hardReset(){
   lastFile = null;
   saveArrayBuffer = null;
   previewArrayBuffer = null;
-  setStatus("");
+  setStatus("");        // Statuszeile leeren
 
-  // Inbox-Kontext
+  // Inbox-Kontext vollständig leeren
   currentInboxFileHandle = null;
   currentInboxFileName = "";
-  currentInboxRelPath = null;
+  currentInboxRelPath = null; // ← wichtig: Relativpfad zurücksetzen
 
   // UI cleanup
   const v = $("#pdfViewer");
@@ -3422,37 +3514,21 @@ function hardReset(){
 }
 
 /* ------------------------------ Loaders ---------------------------------- */
-async function loadDocTypes(){
-  try{
-    const j = await loadJson("document_types.json");
-    docTypesCfg = j;
-    const list=(j?.types||[]);
-    const def=j?.defaultTypeKey||"";
-    typeSel.innerHTML = "";
-    const ph = new Option("(Dokumenttyp wählen)","");
-    ph.disabled = true;
-    typeSel.appendChild(ph);
-    list.forEach(t=>{
-      const o = new Option(t.label || t.key || "", t.key || t.label);
-      if (t.isInvoice) o.dataset.isInvoice = "true";
-      if (t.key === def) o.selected = true;
-      typeSel.appendChild(o);
-    });
-  }catch{
-    typeSel.innerHTML = `
-      <option value="" disabled>(Dokumenttyp wählen)</option>
-      <option value="rechnung" data-isinvoice="true">Rechnung</option>
-      <option value="sonstiges">Sonstiges</option>`;
-  }
-}
+async function loadDocTypes(){ try{ const j = await loadJson("document_types.json"); docTypesCfg = j; const list=(j?.types||[]); const def=j?.defaultTypeKey||""; typeSel.innerHTML = ""; const ph = new Option("(Dokumenttyp wählen)",""); ph.disabled = true; typeSel.appendChild(ph); list.forEach(t=>{ const o = new Option(t.label || t.key || "", t.key || t.label); if (t.isInvoice) o.dataset.isInvoice = "true"; if (t.key === def) o.selected = true; typeSel.appendChild(o); }); }catch{ typeSel.innerHTML = `
+        <option value="" disabled>(Dokumenttyp wählen)</option>
+        <option value="rechnung" data-isinvoice="true">Rechnung</option>
+        <option value="sonstiges">Sonstiges</option>`; } }
 
 async function loadObjects(){
   try{
+    // 1) Datei laden
     const j = await loadJson("objects.json");
     objectsCfg = j;
 
+    // 2) Liste holen (nichts filtern!)
     const list = Array.isArray(j?.objects) ? j.objects : [];
 
+    // 3) Dropdown neu aufbauen
     objSel.innerHTML = "";
     objSel.appendChild(new Option("(Liegenschaft wählen)", ""));
 
@@ -3464,8 +3540,10 @@ async function loadObjects(){
       objSel.appendChild(opt);
     });
 
+    // 4) Platzhalter aktiv lassen (kein Auto-Select)
     objSel.value = "";
   } catch (e){
+    // Fallback, falls die Datei nicht gelesen werden konnte
     objSel.innerHTML = `
       <option value="">(Liegenschaft wählen)</option>
       <option value="PRIVAT">PRIVAT</option>
@@ -3474,26 +3552,34 @@ async function loadObjects(){
   }
 }
 
-// objSel Change
+// ====== ERSATZ: objSel Change-Handler (Block 4) ======
 objSel?.addEventListener("change", async () => {
-  Mail.to.clear(); Mail.cc.clear(); Mail.bcc.clear();
-  Mail.customSubject = ""; Mail.baseTo = new Set();
-  Mail.recipientsTouched = false;
+  // Mail-State leeren
+  Mail.to.clear();
+  Mail.cc.clear();
+  Mail.bcc.clear();
+  Mail.customSubject = "";
+  Mail.baseTo = new Set();
+  Mail.recipientsTouched = false; // ← Vorbelegung wieder erlauben
 
   applyPerObjectMailRules();
   prefillMail();
   updateStatusPillsVisibility();
   repaintMailMeta();
 
+  // Unterordner-Optionen normal laden (kein Zwang, UI nur wenn sinnvoll)
   await updateSubfolderOptions({ silent: false });
 
+  // Toast-Feedback: optionales Unterordner-Feld
   const count = subSel ? subSel.options.length : 0;
   const visible = subRow && subRow.style.display !== "none";
 
   if (visible && count > 0) {
+    // Zeig an, dass Unterordner verfügbar sind – aber optional
     const def = subSel?.value ? ` (Standard: <code>${subSel.value}</code>)` : "";
     toast(`Unterordner verfügbar – <strong>optional</strong>: ${count} Einträge${def}`, 2600);
   } else {
+    // Kein Unterordner nötig/bekannt → Feld bleibt zu
     toast("Keine Unterordner erforderlich/bekannt – Feld bleibt ausgeblendet (optional).", 2200);
   }
 
@@ -3501,15 +3587,20 @@ objSel?.addEventListener("change", async () => {
 });
 
 typeSel?.addEventListener("change", async () => {
-  Mail.to.clear(); Mail.cc.clear(); Mail.bcc.clear();
-  Mail.customSubject = ""; Mail.baseTo = new Set();
-  Mail.recipientsTouched = false;
+  // Mail-State leeren
+  Mail.to.clear();
+  Mail.cc.clear();
+  Mail.bcc.clear();
+  Mail.customSubject = "";
+  Mail.baseTo = new Set();
+  Mail.recipientsTouched = false; // ← wichtig: Vorbelegung wieder erlauben
 
   applyPerObjectMailRules();
   prefillMail();
   updateStatusPillsVisibility();
   repaintMailMeta();
 
+  // Betrag-UI zurücksetzen, wenn kein Rechnungstyp
   if (!isInvoice() && amountEl) {
     amountEl.dataset.raw = "";
     amountEl.value = "";
@@ -3521,6 +3612,7 @@ typeSel?.addEventListener("change", async () => {
 });
 
 subSel?.addEventListener("change", () => {
+  // Dateiname nur automatisch überschreiben, wenn NICHT manuell editiert
   if (fileNameInput && fileNameInput.dataset.mode !== "manual") {
     fileNameInput.value = computeFileNameAuto();
   }
@@ -3529,37 +3621,51 @@ subSel?.addEventListener("change", () => {
 
 /* ------------------------------- Boot ------------------------------------ */
 async function boot() {
+  // PDF.js Worker
   if (window.pdfjsLib?.GlobalWorkerOptions && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   }
 
+  // 1) Zuerst gespeicherte Directory-Handles wiederherstellen
   await restoreBoundHandles();
 
+  // 2) Konfigurationen laden (Emails/Assignments optional)
   try { emailsCfg      = await loadJson("emails.json"); }       catch { emailsCfg = null; }
-  try { assignmentsCfg = await loadJson("assignments.json"); } catch { assignmentsCfg = null; }
+  try { assignmentsCfg = await loadJson("assignments.json"); }  catch { assignmentsCfg = null; }
 
-  paintChips();
+  // 3) UI – neue kompakte Verbindungsanzeige (statt alter paintChips)
+  paintConnectionsCompact();
+
+  // 4) Stammdaten
   await loadObjects();
   await loadDocTypes();
   await updateSubfolderOptions();
 
+  // 5) Mail-UI & Upload/Zoom
   populateMailSelect();
   attachMailUI();
   attachUpload();
   attachZoom();
 
-  $("#chkScope") ?.addEventListener("change", refreshPreview);
-  $("#chkPcloud")?.addEventListener("change", refreshPreview);
-  $("#chkPcloudBucket") ?.addEventListener("change", refreshPreview);
-  $("#chkPcloudCollect")?.addEventListener("change", refreshPreview);
-  $("#chkLocal") ?.addEventListener("change", refreshPreview);
+  // 6) Checkbox-Events → Status/Preview neu
+  $("#chkScope")?.addEventListener("change", () => { 
+    paintConnectionsCompact(); 
+    refreshPreview(); 
+  });
+  $("#chkPcloudExtras")?.addEventListener("change", () => { 
+    paintConnectionsCompact(); 
+    refreshPreview(); 
+  });
+  $("#chkLocal")?.addEventListener("change", refreshPreview);
 
+  // 7) Eingangsdatum default: heute
   if (recvDateEl && !recvDateEl.value) {
     recvDateEl.value = today();
     recvDateEl.classList.add("auto");
   }
 
+  // 8) Nutzer-Präferenzen (nur noch: scope, extras, local)
   function loadTargetPrefs(){
     try { return JSON.parse(localStorage.getItem("fdlTargets")||"{}"); }
     catch { return {}; }
@@ -3569,47 +3675,72 @@ async function boot() {
   }
   function applyPrefs(p){
     const s  = $("#chkScope");
-    const pc = $("#chkPcloud");
-    const pb = $("#chkPcloudBucket") || $("#chkPcloudCollect");
+    const ex = $("#chkPcloudExtras");
     const lo = $("#chkLocal");
     if (s)  s.checked  = !!p.scope;
-    if (pc) pc.checked = !!p.pcloud;
-    if (pb) pb.checked = !!p.bucket;
+    if (ex) ex.checked = !!p.extras;
     if (lo) lo.checked = !!p.local;
   }
 
   let prefs = loadTargetPrefs();
-  if (!("scope" in prefs) && !("bucket" in prefs) && !("pcloud" in prefs) && !("local" in prefs)) {
-    prefs = { scope:true, bucket:true, pcloud:false, local:false };
+  // Erststart-Defaults: Scope an, Extras aus, Lokal aus
+  if (!("scope" in prefs) && !("extras" in prefs) && !("local" in prefs)) {
+    prefs = { scope:true, extras:false, local:false };
     saveTargetPrefs(prefs);
   }
   applyPrefs(prefs);
+  renderTargetSummary();
 
-  ["#chkScope","#chkPcloud","#chkPcloudBucket","#chkPcloudCollect","#chkLocal"].forEach(sel=>{
-    const el = $(sel);
-    el?.addEventListener("change", ()=>{
+  // Änderungen speichern (localStorage), damit die Wahl erhalten bleibt
+  [
+    "#chkScope", "#chkScopevisio",
+    "#chkPcloudCollect",
+    "#chkPcloudConfig",
+    "#chkPcloudExtras", "#chkPcloudExtra",
+    "#chkLocal", "#chkLocalSave"
+  ].forEach(sel => {
+    $(sel)?.addEventListener("change", () => {
       const next = {
-        scope:  $("#chkScope")?.checked || false,
-        pcloud: $("#chkPcloud")?.checked || false,
-        bucket: ($("#chkPcloudBucket")?.checked || $("#chkPcloudCollect")?.checked) || false,
-        local:  $("#chkLocal")?.checked || false
+        scope:   flag("chkScopevisio", "chkScope"),
+        collect: $("#chkPcloudCollect")?.checked || false,
+        config:  $("#chkPcloudConfig")?.checked || false,
+        extras:  flag("chkPcloudExtra", "chkPcloudExtras"),
+        local:   flag("chkLocalSave",  "chkLocal"),
       };
       saveTargetPrefs(next);
       refreshPreview();
     });
   });
 
+  // Direkt nach dem Anwenden rendern
+  paintConnectionsCompact();
+
+  // 9) Erste Preview rechnen
   refreshPreview();
+
+  // 10) Inbox-Zähler beim Start aktualisieren
+  try {
+    if (typeof refreshInbox === "function" && (window.inboxRootHandle || inboxRootHandle)) {
+      await refreshInbox();
+    }
+  } catch (e) {
+    console.warn("[boot] refreshInbox beim Start fehlgeschlagen:", e);
+  }
 }
 
-if (!window.__FDL_BOOT_BOUND__){
+// Boot binden (einmalig)
+if (!window.__FDL_BOOT_BOUND__) {
   window.__FDL_BOOT_BOUND__ = true;
   const start = () => { boot().catch(err => console.error("Boot failed:", err)); };
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
-  else queueMicrotask(start);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    queueMicrotask(start);
+  }
 }
 
-// DEBUG-Export
+
+// --- DEBUG-Export für Konsole ---
 try {
   window.FDLDBG = {
     getState() {
@@ -3628,19 +3759,89 @@ try {
   console.warn("FDLDBG-Export fehlgeschlagen:", e);
 }
 
-// Repaint bei Verschiebe-Events
+try {
+  window.FDLDBG = window.FDLDBG || {};
+  FDLDBG.loadJson    = loadJson;
+  FDLDBG.loadObjects = loadObjects;
+  FDLDBG.loadDocTypes= loadDocTypes;
+} catch {}
+
+// Reagiere global auf Verschiebe-Events (zusätzliche Sicherheit)
 window.addEventListener("fdl:file-moved", () => {
   try { repaintInboxList(); } catch {}
 });
 
-// Mail-Dialog einmal erzeugen (Picker initialisieren)
-try { buildEmailPromptDialog(); } catch {}
 
-/* ------------------------- Naming/Utilities (Tail) ----------------------- */
+// ===== DEBUG-HELPER: __FDL_DEBUG() =====
+window.__FDL_DEBUG = async function(){
+  try{
+    console.debug("[DBG] inboxRootHandle present:", !!inboxRootHandle, "name:", inboxRootHandle?.name || "(?)");
+    if (inboxRootHandle?.queryPermission) {
+      const perm = await inboxRootHandle.queryPermission({ mode: "readwrite" });
+      console.debug("[DBG] inbox permission:", perm);
+    } else {
+      console.debug("[DBG] inbox permission: (API not available)");
+    }
+
+    const rootFiles = [];
+    if (inboxRootHandle) {
+      for await (const e of inboxRootHandle.values()){
+        if (e.kind === "file") rootFiles.push(e.name);
+      }
+    }
+    console.debug("[DBG] Inbox-ROOT files:", rootFiles);
+
+    console.debug("[DBG] Current Inbox context:", {
+      currentInboxFileName,
+      currentInboxRelPath,
+      hasInboxHandle: !!currentInboxFileHandle
+    });
+  } catch(e){
+    console.warn("[DBG] failed:", e);
+  }
+};
+
+// --- UI-Helfer: Inbox-Chip direkt entfernen + Repaint triggern ---
+function cssEscape_(s=""){ return String(s).replace(/("|'|\\)/g,"\\$1"); }
+
+function removeInboxChipUIByName(name){
+  if(!name) return;
+  // versuche über data-Attribute; passe ggf. an dein Markup an
+  const sel = [
+    `.file-chip[data-name="${cssEscape_(name)}"]`,
+    `.file-chip[data-path$="/${cssEscape_(name)}"]`
+  ].join(", ");
+  const el = document.querySelector(sel);
+  if(el) el.remove();
+}
+
+// === EINZIGE zentrale Repaint-Funktion ===
+function repaintInboxList(){
+  // Neue zentrale Anzeige (Buttons/Status) statt alter Chips
+  if (typeof paintConnectionsCompact === "function") {
+    try { 
+      paintConnectionsCompact();
+    } catch (e) {
+      console.warn("paintConnectionsCompact() failed:", e);
+    }
+  }
+  // Zähler nachziehen
+  if (typeof updateCounters === "function") {
+    try { updateCounters(); } catch {}
+  }
+}
+
+
+})();
+
+
 (function () {
   "use strict";
+
+  // Falls bereits ein Namespace existiert, nutzen – sonst neu anlegen
   const Naming = (window.Naming = window.Naming || {});
 
+  // Hilfen (neutral, kollisionsarm)
   function _normAmount(input) {
     const raw = String(input || "").trim();
     if (!raw) return { display: "", value: null };
@@ -3667,16 +3868,17 @@ try { buildEmailPromptDialog(); } catch {}
     }
     return "";
   }
+function fileSafe(s=""){
+  // Alternative fileSafe: ersetze "/" durch U+2215 statt "-"
+const map = { '/':'\u2215', '\\':'-', ':':'-', '*':'x', '?':'-', '"':'-', '<':'-', '>':'-', '|':'-' };
 
-  function fileSafe(s=""){
-    const map = { '/':'\u2215', '\\':'-', ':':'-', '*':'x', '?':'-', '"':'-', '<':'-', '>':'-', '|':'-' };
-    return String(s || "")
-      .split("")
-      .map(ch => Object.prototype.hasOwnProperty.call(map, ch) ? map[ch] : ch)
-      .join("");
-  }
-  try { window.fileSafe = fileSafe; Naming.fileSafe = fileSafe; } catch {}
-
+  return String(s || "")
+    .split("")
+    .map(ch => Object.prototype.hasOwnProperty.call(map, ch) ? map[ch] : ch)
+    .join("");
+}
+// unter fileSafe(...)
+try { window.fileSafe = fileSafe; Naming.fileSafe = fileSafe; } catch {}
   function _safeChunk(s) {
     return String(s || "")
       .trim()
@@ -3684,17 +3886,25 @@ try { buildEmailPromptDialog(); } catch {}
       .replace(/[^\wÄÖÜäöüß ,\-]/g, "")
       .replace(/_/g, " ");
   }
+function safeInvoiceId(s){
+  const raw = String(s || "").trim();
+  if (!raw) return "";
+  // Whitespace normalisieren
+  let t = raw.replace(/\s+/g, " ");
 
-  function safeInvoiceId(s){
-    const raw = String(s || "").trim();
-    if (!raw) return "";
-    let t = raw.replace(/\s+/g, " ");
-    t = t.replace(/\//g, "∕").replace(/\\/g, "⧵");
-    t = t.replace(/[\u0000-\u001F]/g, "");
-    return t;
-  }
-  try { window.safeInvoiceId = safeInvoiceId; Naming.safeInvoiceId = safeInvoiceId; } catch {}
+  // Zuerst ASCII-Slashes in optische Varianten umwandeln
+  //  U+2215  ∕  (fraction slash)
+  //  U+FF0F  ／ (fullwidth solidus) – Zweitoption
+  t = t.replace(/\//g, "∕").replace(/\\/g, "⧵");
 
+  // Steuerzeichen ausschließen (Cloud-/WebDAV-Clients mögen die nicht)
+  t = t.replace(/[\u0000-\u001F]/g, "");
+
+  return t;
+}
+
+// unter safeInvoiceId(...)
+try { window.safeInvoiceId = safeInvoiceId; Naming.safeInvoiceId = safeInvoiceId; } catch {}
   function _deriveObjectCode(desc) {
     const raw = String(desc || "").trim();
     if (!raw) return "";
@@ -3703,6 +3913,18 @@ try { buildEmailPromptDialog(); } catch {}
     return (candidate || "").toUpperCase();
   }
 
+  /**
+   * buildNameV2 – zentrale neue Regel
+   * @param {Object} p
+   * @param {boolean} p.isInvoice
+   * @param {string}  p.amount   – Rohtext (z.B. "45,22")
+   * @param {string}  p.sender   – Aussteller
+   * @param {string}  p.invoiceNo
+   * @param {string}  p.targetCode   – optional (EGYO). Wenn leer, wird aus targetDesc abgeleitet.
+   * @param {string}  p.targetDesc   – Beschreibung (für Ableitung)
+   * @param {string}  p.date         – beliebiges Datumsformat (TT.MM.JJJJ / JJJJ-MM-TT)
+   * @returns {string} Dateiname (mit .pdf), leer wenn nicht baubar
+   */
   Naming.buildNameV2 = function buildNameV2(p = {}) {
     const { isInvoice, amount, sender, invoiceNo, targetCode, targetDesc, date } = p;
 
@@ -3722,65 +3944,686 @@ try { buildEmailPromptDialog(); } catch {}
       if (objCode)    parts.push(_safeChunk(objCode));
       if (ymd)        parts.push(_safeChunk(ymd));
     }
-    const base = parts.filter(Boolean).join("_");
-    const safeBase = (typeof fileSafe === "function")
-      ? fileSafe(base)
-      : base.replace(/[\/\\:*?"<>|\u2215]/g, "-");
-    return safeBase ? `${safeBase}.pdf` : "";
+   const base = parts.filter(Boolean).join("_");
+const safeBase = (typeof fileSafe === "function")
+  ? fileSafe(base)
+  : base.replace(/[\/\\:*?"<>|\u2215]/g, "-"); // Fallback, falls fileSafe nicht geladen ist
+return safeBase ? `${safeBase}.pdf` : "";
   };
 })();
 
-/* ---------------------------- Menü-Hooks etc. ---------------------------- */
-$("#mailManageBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openEmailsDialog(); });
-$("#manageObjectsBtn") ?.addEventListener("click", (e)=>{ e.preventDefault(); openObjectsDialog(); });
-$("#manageDocTypesBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openTypesDialog(); });
-$("#manageAssignmentsBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openAssignmentsDialog(); });
+/* ==================================================================================
+   NEUAUFBAU — TEIL 1 (ADD-ON): Verbindungs‑Zentrale + Verbinden‑Button
+   Ziel:
+   • Sauberer Dialog zum Verbinden der Ordner: pCloud‑Root, pCloud‑Config, Scope‑Root,
+     Inbox, Bearbeitet. (Backup zählt NUR pCloud‑Root; Config = Verwaltung)
+   • Kleiner Button mit Stecker‑Icon neben dem Speichern‑Button („Verbindungen“)
+   • Keine Bannermeldungen, keine Änderungen am Speichervorgang (kommen in Teil 2/3)
+   • Additiv: Kann ans Dateiende deiner stabilen Backup‑app.js angefügt werden.
+   ---------------------------------------------------------------------------------- */
+(() => {
+  // ---------- Mini‑Helfer
+  const $  = (s, el=document) => el.querySelector(s);
+  const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
+  const canPickDir = !!window.showDirectoryPicker;
 
-/* ------------------------------ Repaint-Helfer --------------------------- */
-function cssEscape_(s=""){ return String(s).replace(/("|'|\\)/g,"\\$1"); }
-function removeInboxChipUIByName(name){
-  if(!name) return;
-  const sel = [
-    `.file-chip[data-name="${cssEscape_(name)}"]`,
-    `.file-chip[data-path$="/${cssEscape_(name)}"]`
-  ].join(", ");
-  const el = document.querySelector(sel);
-  if(el) el.remove();
-}
-function repaintInboxList(){
-  if (typeof paintChips === "function") {
-    try { paintChips(); return; } catch (e) { console.warn("paintChips() failed:", e); }
-  }
-  if (typeof updateCounters === "function") {
-    try { updateCounters(); } catch {}
-  }
-}
+  // ---------- Ziele (nur Handles, KEINE Checkbox‑Logik hier)
+  const TARGETS = [
+    { key: 'pcloudRoot',     label: 'pCloud – Root',            varName: 'pcloudRootHandle',  hint: 'Backup & Zusatzablagen (pCloud) hängen am Root.' },
+    { key: 'pcloudConfig',   label: 'pCloud – Config‑Ordner',   varName: 'pcloudConfigDir',   hint: 'Verwaltung (E‑Mails, Liegenschaften, Zuordnungen, Typen).' },
+    { key: 'scopeRoot',      label: 'Scopevisio – Root',        varName: 'scopeRootHandle',   hint: 'Hauptziel für Ablage in Scopevisio.' },
+    { key: 'inboxRoot',      label: 'Inbox – Quellordner',      varName: 'inboxRootHandle',   hint: 'Quelle (Dateien aus der Eingangsliste).'},
+    { key: 'bearbeitetRoot', label: 'Bearbeitet – Zielordner',  varName: 'bearbeitetRootHandle', hint: 'Nach erfolgreichem Speichern hierhin verschieben.' },
+  ];
 
-// Debug Helper
-window.__FDL_DEBUG = async function(){
-  try{
-    console.debug("[DBG] inboxRootHandle present:", !!inboxRootHandle, "name:", inboxRootHandle?.name || "(?)");
-    if (inboxRootHandle?.queryPermission) {
-      const perm = await inboxRootHandle.queryPermission({ mode: "readwrite" });
-      console.debug("[DBG] inbox permission:", perm);
-    } else {
-      console.debug("[DBG] inbox permission: (API not available)");
+ // ---------- Verbinden (generisch)
+async function pickDirectory(target){
+  if (!canPickDir){
+    alert('Dieser Browser unterstützt den Ordner-Picker nicht. Bitte Chrome/Edge verwenden.');
+    return false;
+  }
+  try {
+    const dir = await window.showDirectoryPicker({ mode: "readwrite" });
+    if (!dir) return false;
+
+    try { await dir.requestPermission?.({ mode: "readwrite" }); } catch {}
+
+    // Standard: in globale Variable schreiben (z. B. window.scopeRootHandle)
+    window[target.varName] = dir;
+
+    // SPEZIAL: Config → alles synchronisieren
+    if (target.key === "pcloudConfig") {
+      syncConfigHandle(dir);
+      try { await saveBoundHandles?.(); } catch {}
+      try { await saveAllHandles?.(); } catch {}
     }
-    const rootFiles = [];
-    if (inboxRootHandle) {
-      for await (const e of inboxRootHandle.values()){
-        if (e.kind === "file") rootFiles.push(e.name);
+
+    window.fdlRefreshConnectionsUI?.();
+    refreshConnectionsUI();
+    return true;
+  } catch {
+    // Abbruch still
+  }
+  return false;
+}
+
+  // ---------- Dialog erzeugen
+  function ensureConnDialog(){
+    let dlg = $('#fdlConnDlg');
+    if (dlg) return dlg;
+
+    dlg = document.createElement('div');
+    dlg.id = 'fdlConnDlg';
+    dlg.setAttribute('role','dialog');
+    dlg.setAttribute('aria-modal','true');
+    dlg.style.cssText = 'position:fixed; inset:0; z-index:2000; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.35); padding:20px;';
+
+    dlg.innerHTML = `
+      <div style="background:#fff; border-radius:14px; min-width:min(720px,96vw); max-width:96vw; box-shadow:0 18px 40px rgba(0,0,0,.25); overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #eee">
+          <div style="font-weight:700;font-size:16px">Verbindungs‑Zentrale</div>
+          <button id="fdlConnClose" style="border:none;background:transparent;font-size:18px;cursor:pointer" aria-label="Schließen">✕</button>
+        </div>
+        <div style="padding:10px 16px; color:#3d47a3; background:#f6f8ff; border-bottom:1px solid #e6eaff;">Hier verbindest du alle Ordner. <b>Backup & Zusatzablagen</b> hängen am <b>pCloud‑Root</b>. Die <b>Config</b> ist nur für Verwaltung.</div>
+        <div id="fdlConnBody" style="padding:10px 16px; max-height:70vh; overflow:auto"></div>
+        <div style="display:flex; gap:8px; justify-content:flex-end; padding:12px 16px; border-top:1px solid #eee">
+          <button id="fdlConnClose2" class="btn-outline" style="padding:8px 12px; border-radius:10px; border:1px solid #ddd; background:#f7f7f7; cursor:pointer">Schließen</button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(dlg);
+    $('#fdlConnClose', dlg)?.addEventListener('click', hideConnectionsCenter);
+    $('#fdlConnClose2', dlg)?.addEventListener('click', hideConnectionsCenter);
+    return dlg;
+  }
+
+  function statusRows(){
+    const rows = TARGETS.map(t => {
+      const handle = window[t.varName];
+      const ok = !!handle;
+      const name = ok ? (handle.name || '(verbunden)') : 'Nicht verbunden';
+      const icon = ok ? '✅' : '⚪';
+      const btnLabel = ok ? 'Neu wählen…' : 'Verbinden…';
+      return `<div style="display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px dashed #eee">
+        <div>${icon}</div>
+        <div>
+          <div style="font-weight:600">${t.label}</div>
+          <div style="font-size:12px;color:#666">${ok?`Verbunden: <em>${escapeHtml(name)}</em>`:'Nicht verbunden'}<span style="color:#999">${t.hint?` — ${escapeHtml(t.hint)}`:''}</span></div>
+        </div>
+        <div><button data-key="${t.key}" class="fdlConnPick" style="padding:6px 10px;border-radius:10px;border:1px solid #ccc;background:#fafafa;cursor:pointer">${btnLabel}</button></div>
+      </div>`;
+    });
+
+    // kompakte Zusammenfassung unten: was zählt für Backup/Zusatz?
+    const rootOk = !!window.pcloudRootHandle;
+    const info = `<div style="margin-top:8px;font-size:12px;color:${rootOk?'#2c6a00':'#8a6d00'}">
+      pCloud‑Backup & zusätzliche Ablageziele: ${rootOk?'<b>bereit (Root verbunden)</b>':'<b>aus (Root fehlt)</b>'}
+    </div>`;
+
+    return rows.join('') + info;
+  }
+
+  function renderConnBody(){
+    const body = $('#fdlConnBody', ensureConnDialog());
+    if (!body) return;
+    body.innerHTML = statusRows();
+    $$('.fdlConnPick', body).forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const key = btn.getAttribute('data-key');
+        const target = TARGETS.find(t => t.key === key);
+        if (!target) return;
+        const ok = await pickDirectory(target);
+        if (ok) renderConnBody();
+      });
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+  }
+
+  // ---------- Öffnen/Schließen + Public Hooks
+  function openConnectionsCenter(){ const dlg = ensureConnDialog(); renderConnBody(); dlg.style.display = 'flex'; }
+  function hideConnectionsCenter(){
+  const dlg = ensureConnDialog();
+  dlg.style.display = 'none';
+  window.fdlRefreshConnectionsUI?.(); // auch beim Schließen aktualisieren
+}
+
+
+  window.openConnectionsCenter = openConnectionsCenter;
+  function refreshConnectionsUI(){ // für externe Aufrufer (Teil 2/3)
+    // Nur Dialog aktualisieren, falls offen
+    const dlg = $('#fdlConnDlg');
+    if (dlg && dlg.style.display !== 'none') renderConnBody();
+    // Falls es woanders Statuszeilen gibt, können spätere Teile hier andocken
+  }
+  window.fdlRefreshConnectionsUI = refreshConnectionsUI;
+
+  // ---------- Verbinden‑Button neben „Speichern“
+  function ensureLauncherBtn(){
+    if ($('#fdlConnBtn')) return;
+    const saveBtn = $('#saveBtn');
+    const host = saveBtn?.parentElement || document.body;
+
+    const btn = document.createElement('button');
+    btn.id = 'fdlConnBtn';
+    btn.type = 'button';
+    btn.title = 'Verbindungen';
+    btn.style.cssText = 'display:inline-flex;align-items:center;gap:8px;margin-left:8px;padding:8px 12px;border-radius:10px;border:1px solid #d9d9d9;background:#ffffff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06)';
+    btn.innerHTML = '<span aria-hidden="true">🔌</span><span>Verbindungen</span>';
+    btn.addEventListener('click', openConnectionsCenter);
+
+    if (saveBtn && host){ host.insertBefore(btn, saveBtn.nextSibling); }
+    else { btn.style.position='fixed'; btn.style.right='16px'; btn.style.bottom='16px'; document.body.appendChild(btn); }
+  }
+
+  // ---------- Boot
+  function bootConn(){ ensureLauncherBtn(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootConn, { once:true });
+  else bootConn();
+})();
+
+/* ================= PERSISTENZ für Handles: Speichern & Wiederherstellen ================= */
+(() => {
+  const MAP = [
+    { varName: 'pcloudRootHandle',     key: 'pcloudRoot'     },
+    { varName: 'pcloudConfigDir',      key: 'pcloudConfig'   },
+    { varName: 'scopeRootHandle',      key: 'scopeRoot'      },
+    { varName: 'inboxRootHandle',      key: 'inboxRoot'      },
+    { varName: 'bearbeitetRootHandle', key: 'bearbeitetRoot' },
+  ];
+
+  // ---- IndexedDB Mini-Helper ----
+  function openDB(){
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('fdl-handles-db', 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('handles')) db.createObjectStore('handles');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbGet(key){
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('handles', 'readonly');
+      const st = tx.objectStore('handles');
+      const req = st.get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbSet(key, val){
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('handles', 'readwrite');
+      const st = tx.objectStore('handles');
+      const req = st.put(val, key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  // ---- Persistieren aller aktuell gesetzten Handles
+  async function saveAllHandles(){
+    try {
+      for (const m of MAP) {
+        const h = window[m.varName];
+        if (h) { await idbSet(m.key, h); }
+      }
+    } catch (e) { console.warn('[FDL] saveAllHandles:', e); }
+  }
+
+  // ---- Wiederherstellen beim Start
+  async function restoreAllHandles(){
+    try {
+      for (const m of MAP) {
+        if (!window[m.varName]) {
+          const h = await idbGet(m.key);
+          if (h) window[m.varName] = h;
+        }
+      }
+    } catch (e) { console.warn('[FDL] restoreAllHandles:', e); }
+  }
+
+  // ---- Rechte prüfen/anfordern (ohne Picker neu zu wählen)
+  async function ensurePermission(dirHandle){
+    if (!dirHandle?.queryPermission || !dirHandle?.requestPermission) return true;
+    try {
+      const q = await dirHandle.queryPermission({ mode: 'readwrite' });
+      if (q === 'granted') return true;
+      if (q === 'denied') return false;
+      const r = await dirHandle.requestPermission({ mode: 'readwrite' });
+      return r === 'granted';
+    } catch { return false; }
+  }
+
+  async function regrantIfNeeded(){
+    let changed = false;
+    for (const m of MAP) {
+      const h = window[m.varName];
+      if (!h) continue;
+      const ok = await ensurePermission(h);
+      if (!ok) {
+        // bleibt gesetzt, aber ohne Rechte – UI zeigt es über Banner; hier kein Picker
+        changed = true;
+      } else {
+        changed = true;
       }
     }
-    console.debug("[DBG] Inbox-ROOT files:", rootFiles);
-    console.debug("[DBG] Current Inbox context:", {
-      currentInboxFileName,
-      currentInboxRelPath,
-      hasInboxHandle: !!currentInboxFileHandle
-    });
-  } catch(e){
-    console.warn("[DBG] failed:", e);
+    if (changed) window.fdlRefreshConnectionsUI?.();
   }
-};
 
-})(); // schließt das IIFE, das in Zeile 18 geöffnet wurde
+  // ---- Speicher als „dauerhaft“ anfragen
+  async function tryPersist(){
+    try {
+      if (navigator.storage?.persist) {
+        const persisted = await navigator.storage.persisted?.();
+        if (!persisted) await navigator.storage.persist();
+      }
+    } catch {}
+  }
+
+  // ---- Hooks einbauen: nach JEDER erfolgreichen Wahl speichern
+  const _oldPick = window.openConnectionsCenter; // nur um sicherzugehen, dass Teil 1 geladen ist
+  // Wir hängen uns an die Stelle, wo in Teil 1 nach dem Picker bereits fdlRefreshConnectionsUI() aufgerufen wird.
+  // Zusätzlich speichern wir sofort.
+  const prevRefresh = window.fdlRefreshConnectionsUI;
+  window.fdlRefreshConnectionsUI = function(){
+    try { prevRefresh?.(); } catch {}
+    saveAllHandles(); // Status dauerhaft ablegen
+  };
+
+  // ---- Boot: wiederherstellen, Rechte prüfen, Banner/Status aktualisieren
+  async function bootPersist(){
+    await restoreAllHandles();
+    await tryPersist();
+    await regrantIfNeeded();
+    window.fdlRefreshConnectionsUI?.(); // UI + Banner aktualisieren
+    // leichte Nachläufe, falls Browser Handles minimal verzögert klont
+    setTimeout(() => window.fdlRefreshConnectionsUI?.(), 200);
+    setTimeout(() => window.fdlRefreshConnectionsUI?.(), 800);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootPersist, { once:true });
+  } else {
+    bootPersist();
+  }
+})();
+
+
+/* ==================================================================================
+   NEUAUFBAU — TEIL 2 (NEU): Präziser Ein‑Banner
+   • Ersetzt die alte Teil‑2‑Version vollständig.
+   • Zeigt NUR das, was tatsächlich fehlt.
+   • Backup hängt NUR am pCloud‑Root (Config = Verwaltung, unabhängig).
+   • Aktualisiert sich beim Laden, nach jedem Verbinden und beim Fokuswechsel zum Tab.
+   • Additiv: Unter Teil 1 ans Ende deiner app.js einfügen. Die alte Teil‑2‑Datei vorher entfernen.
+   ================================================================================== */
+(() => {
+  const $ = (s, el=document) => el.querySelector(s);
+
+  /* ---------------- Banner: genau & einzig ---------------- */
+  function ensureOneBanner(){
+    // alte Banner (frühere IDs) entfernen, damit es wirklich nur einen gibt
+    $('#fdlConnWarn')?.remove();
+    $('#fdlDualWarn')?.remove();
+    $('#fdlOneWarn')?.remove();
+
+    let bar = $('#fdlWarnOne');
+    if (bar) return bar;
+    bar = document.createElement('div');
+    bar.id = 'fdlWarnOne';
+    bar.style.cssText = `
+      position: sticky; top: 0; z-index: 9999; display: none;
+      background: #fff7cc; color: #5c4d00; border: 1px solid #f0e2a0;
+      padding: 10px 12px; margin: 0 0 10px 0; border-radius: 8px; font-size: 14px;
+    `;
+    document.body.prepend(bar);
+    return bar;
+  }
+
+  function isSet(h){
+    // robust: akzeptiert auch spezielle Handle‑Objekte
+    return !!(h && typeof h === 'object');
+  }
+
+  function computeMissing(){
+    const pcRootOk = isSet(window.pcloudRootHandle);     // entscheidet über Backup
+    const pcCfgOk  = isSet(window.configDirHandle || window.pcloudConfigDir);
+    const scopeOk  = isSet(window.scopeRootHandle);      // Pflichtziel
+    const inboxOk  = isSet(window.inboxRootHandle);      // Quelle
+    const bearbOk  = isSet(window.bearbeitetRootHandle); // Ziel
+
+    const msgs = [];
+    if (!pcRootOk) msgs.push('Backup‑Ziel (pCloud‑Root) nicht verbunden – Datei wird ohne Backup gespeichert.');
+    if (!pcCfgOk)  msgs.push('Verwaltungsdaten (pCloud‑Config) nicht verbunden – Verwalten/Empfänger/Liegenschaften/Dokumenttypen sind deaktiviert.');
+    if (!scopeOk)  msgs.push('Scopevisio‑Root nicht verbunden – Speichern nach Scopevisio nicht möglich.');
+    if (!inboxOk)  msgs.push('Inbox‑Ordner nicht verbunden – Quelle fehlt.');
+    if (!bearbOk)  msgs.push('Bearbeitet‑Zielordner nicht verbunden – Verschieben nach Bearbeitet deaktiviert.');
+
+    return { msgs, pcRootOk };
+  }
+
+  function updateBanner(){
+    const bar = ensureOneBanner();
+    const { msgs } = computeMissing();
+
+    if (!msgs.length){
+      bar.style.display = 'none';
+      bar.innerHTML = '';
+      return;
+    }
+
+    bar.innerHTML = `
+      <b>⚠️ ${msgs.join(' ')}</b>
+      <button id="fdlWarnConnect" style="margin-left:8px;padding:4px 8px;border-radius:8px;border:1px solid #d5c77a;background:#fff2a8;cursor:pointer">Verbinden…</button>
+    `;
+    $('#fdlWarnConnect')?.addEventListener('click', () => window.openConnectionsCenter?.());
+    bar.style.display = 'block';
+  }
+
+  /* --------------- Öffentliche Hooks --------------- */
+  // Von Teil 1 nach Verbindungsänderung aufrufbar
+  const prevRefresh = window.fdlRefreshConnectionsUI;
+  window.fdlRefreshConnectionsUI = function(){
+    try { prevRefresh?.(); } catch {}
+    try { updateBanner(); } catch {}
+  };
+
+  // Für andere Stellen verfügbar
+  window.fdlUpdateConnBanner = updateBanner;
+
+  /* --------------- Initialisierung --------------- */
+  function boot(){
+    updateBanner();
+    // falls die Handles kurz nach DOMLoad gesetzt werden: leichte Nachinitialisierung
+    setTimeout(updateBanner, 200);
+    setTimeout(updateBanner, 800);
+  }
+
+  // Bei Fokuswechsel (z. B. nach Picker) erneut prüfen
+  window.addEventListener('focus', () => { try { updateBanner(); } catch {} });
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', boot, { once:true });
+  } else {
+    boot();
+  }
+})();
+
+/* ================= TEIL 3: "Speichern in" – klare Checkboxen + richtiger Backup-Status ================ */
+(() => {
+  const $  = (s, el=document) => el.querySelector(s);
+  const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
+
+  // 1) Bereich finden / anlegen
+  function getSaveHost(){
+    return $('#saveTargets') || $('#saveBox') || $('#accConnections');
+  }
+
+  // 2) Alte runde Tabs "Scopevisio / Lokal" konsequent entfernen (auch falls später eingefügt)
+  function killRoundTabs(){
+    const host = getSaveHost();
+    if (!host) return;
+    const removeNow = () => {
+      $$('button', host).forEach(btn => {
+        const t = (btn.textContent || '').trim().toLowerCase();
+        if (t === 'scopevisio' || t === 'lokal') { try{ btn.remove(); }catch{} }
+      });
+    };
+    removeNow();
+    const mo = new MutationObserver(removeNow);
+    mo.observe(host, { childList: true, subtree: true });
+  }
+
+  // 3) Checkboxen sicherstellen (Scopevisio, pCloud Backup, pCloud Zusatz (pCloud), Lokal)
+  function ensureSaveCheckboxes(){
+    const host = getSaveHost();
+    if (!host) return;
+
+    // Stelle sicher: <fieldset id="saveBox">
+    let box = $('#saveBox', host);
+    if (!box) {
+      box = document.createElement('fieldset');
+      box.id = 'saveBox';
+      box.className = 'save-box';
+      box.style.marginTop = '.8rem';
+      box.innerHTML = '<legend>Speichern in</legend>';
+      host.appendChild(box);
+    }
+
+    const addCheck = (id, label, title, defChecked=false, afterEl=null) => {
+      let wrap = $('#'+id, box)?.closest('label');
+      if (!wrap) {
+        wrap = document.createElement('label');
+        wrap.className = 'chk';
+        wrap.title = title || '';
+        wrap.innerHTML = `<input type="checkbox" id="${id}"><span>${label}</span>`;
+        if (afterEl) afterEl.insertAdjacentElement('afterend', wrap);
+        else box.appendChild(wrap);
+      }
+      const chk = $('#'+id, wrap);
+      if (typeof chk.checked === 'boolean') chk.checked = defChecked;
+      return {wrap, chk};
+    };
+
+    // Scopevisio (Default AN)
+    const sc = addCheck('chkScopevisio', 'Scopevisio',
+      'Schaltet die Ablage in Scopevisio ein/aus (Verbindung bleibt erhalten).', true);
+
+    // pCloud (Backup) (Default AN) + Statusanhang
+    const pc = addCheck(
+      'chkPcloudBackup',
+      'pCloud (Backup)',
+      'Sichert zusätzlich in pCloud. Abhängig vom pCloud-Root.',
+      true
+    );
+    if (!$('#pcBackupStatus', pc.wrap)) {
+      const info = document.createElement('span');
+      info.id = 'pcBackupStatus';
+      info.style.marginLeft = '6px';
+      info.style.fontSize   = '12px';
+      info.style.color      = '#666';
+      pc.wrap.appendChild(info);
+    }
+
+    // pCloud – zusätzliche Ablageziele (pCloud) (Default AUS)
+    addCheck('chkPcloudExtra',
+      'pCloud – zusätzliche Ablageziele (pCloud)',
+      'Speichert zusätzlich in weitere pCloud-Ordner (z. B. OBJEKTE/VERWALTUNG/…)',
+      false
+    );
+
+    // Lokal (Default AUS)
+    addCheck('chkLocalSave', 'Lokal', 'Speichert zusätzlich lokal auf diesem Gerät', false);
+  }
+
+  // 4) Backup-Status neben der Checkbox aktualisieren (nur Root entscheidet!)
+  function updateBackupInfoText(){
+    const info = $('#pcBackupStatus');
+    if (!info) return;
+    const rootOk = !!window.pcloudRootHandle;
+    info.textContent = rootOk ? 'Backup aktiv' : 'Backup aus (pCloud-Root nicht verbunden)';
+    info.style.color = rootOk ? '#2c6a00' : '#9b7700';
+  }
+  window.fdlUpdateBackupInfoText = updateBackupInfoText; // falls anderswo gebraucht
+
+  // 5) Alles zusammen booten
+  function bootSaveSection(){
+    killRoundTabs();
+    ensureSaveCheckboxes();
+    updateBackupInfoText();
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', bootSaveSection, { once:true });
+  } else {
+    bootSaveSection();
+  }
+
+  // 6) Wenn sich Verbindungen ändern (nach Picker/Schließen), Status sofort nachziehen
+  const prevRefresh = window.fdlRefreshConnectionsUI;
+  window.fdlRefreshConnectionsUI = function(){
+    try { prevRefresh?.(); } catch {}
+    try { updateBackupInfoText(); } catch {}
+  };
+})();
+/* ===== HARD CLEANUP: alte Pills/Checkboxen entfernen, nur neue 4 Schalter lassen ===== */
+(() => {
+  const $  = (s, el=document) => el.querySelector(s);
+  const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
+
+  // IDs der ALTEN Checkboxen (die weg sollen)
+  const OLD_IDS = ['chkScope', 'chkPcloudExtras', 'chkLocal'];
+
+  function removeNode(n){ if (n && n.parentNode) try{ n.parentNode.removeChild(n); }catch{} }
+
+  function killLegacyOnce(){
+    const host = $('#accConnections') || document;
+
+    // 1) Grüne Status-Pills und alte Verbinden-Zeilen weg
+    $$('#accConnections .chips, #accConnections .conn-compact').forEach(removeNode);
+
+    // 2) Alte Checkboxen (über IDs) samt Labels entfernen
+    OLD_IDS.forEach(id => {
+      const oldInput = document.getElementById(id);
+      if (oldInput){
+        // komplettes Label entfernen (runde Pill)
+        const wrap = oldInput.closest('label');
+        removeNode(wrap || oldInput);
+      }
+    });
+
+    // 3) Eventuelle runde Doppel-Buttons „Scopevisio“ / „Lokal“ entfernen
+    //    (falls als Buttons oder Labels ohne ID gerendert)
+    $$('button, label.chk', host).forEach(el => {
+      const t = (el.textContent || '').trim().toLowerCase();
+      const hasNewScope = !!document.getElementById('chkScopevisio');
+      const hasNewLocal = !!document.getElementById('chkLocalSave');
+      if (
+        (t === 'scopevisio'  && hasNewScope  && !el.querySelector('#chkScopevisio')) ||
+        (t === 'lokal'       && hasNewLocal  && !el.querySelector('#chkLocalSave'))
+      ){
+        removeNode(el);
+      }
+    });
+
+    // 4) Doppelte „pCloud – zusätzliche Ablageziele“ entfernen, alte gegen neue abgleichen
+    $$('label.chk', host).forEach(el => {
+      const t = (el.textContent || '').toLowerCase();
+      if (t.includes('zusätzliche ablageziele') && !el.querySelector('#chkPcloudExtra')){
+        // Wenn es nicht unser neuer #chkPcloudExtra ist, löschen
+        removeNode(el);
+      }
+    });
+  }
+
+  function bootCleanup(){
+    // einmal sofort
+    killLegacyOnce();
+
+    // und falls die UI später noch Elemente nachlädt: weiter sauber halten
+    const acc = $('#accConnections') || document.body;
+    const mo = new MutationObserver(() => killLegacyOnce());
+    mo.observe(acc, { childList: true, subtree: true });
+
+    // zur Sicherheit nach kleinem Delay nochmal
+    setTimeout(killLegacyOnce, 150);
+    setTimeout(killLegacyOnce, 600);
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', bootCleanup, { once:true });
+  } else {
+    bootCleanup();
+  }
+})();
+
+
+/* ===== Vorschau aus der echten Ziel-Logik (resolveTargets) aufbauen ===== */
+(() => {
+  const $ = (s, el=document) => el.querySelector(s);
+
+  // Lies neue Flags (mit Fallback über flag())
+  function getFlags(){
+    return {
+      scope  : flag("chkScopevisio","chkScope"),
+      extra  : flag("chkPcloudExtra","chkPcloudExtras"),
+      local  : flag("chkLocalSave","chkLocal"),
+      backup : !!document.getElementById("chkPcloudBackup")?.checked
+    };
+  }
+
+  // Baue die Textzeile aus resolveTargets()-Ergebnis
+  function buildPreviewText(){
+    if (typeof window.resolveTargets !== "function") return "";
+    // Viele deiner Implementationen lesen DOM-Flags selbst; wir rufen einfach so auf:
+    const targets = window.resolveTargets();
+    if (!Array.isArray(targets) || !targets.length) return "—";
+
+    // Jeder Eintrag hat typischerweise display/label/path – wir nehmen, was da ist:
+    const pickLabel = t => t?.display || t?.label || t?.path || "";
+    return targets.map(pickLabel).filter(Boolean).join("  +  ");
+  }
+
+ function writePreview(){
+  const el = document.getElementById("targetPreview");
+  if (!el) return;
+  const s = buildPreviewText();
+  if (s) el.textContent = s;
+}
+
+// ---- Drosselung: nur 1× pro Frame neu berechnen ----
+let _previewScheduled = false;
+function schedulePreview(){
+  if (_previewScheduled) return;
+  _previewScheduled = true;
+  requestAnimationFrame(() => {
+    _previewScheduled = false;
+    writePreview();
+  });
+}
+
+// Sofortige Aktualisierung bei allen relevanten Änderungen
+function wire(){
+  [
+    "#chkScopevisio","#chkPcloudBackup","#chkPcloudExtra","#chkLocalSave",
+    "#objectSelect","#genericSubfolder","#docTypeSelect",
+    "#invoiceDate","#receivedDate"
+  ].forEach(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return;
+    el.addEventListener("change", schedulePreview);
+    el.addEventListener("input",  schedulePreview);
+  });
+
+  // Wenn Verbindungen gesetzt/entfernt werden → neu rechnen
+  const prev = window.fdlRefreshConnectionsUI;
+  window.fdlRefreshConnectionsUI = function(){
+    try { prev?.(); } catch {}
+    schedulePreview();
+  };
+
+  // ❌ Keine MutationObserver mehr (verursachte Endlosschleifen)
+}
+
+function boot(){
+  wire();
+  schedulePreview();              // initial
+  setTimeout(schedulePreview, 120);
+  setTimeout(schedulePreview, 400);
+}
+
+if (document.readyState === "loading"){
+  document.addEventListener("DOMContentLoaded", boot, { once:true });
+} else {
+  boot();
+}
+
+})();
+

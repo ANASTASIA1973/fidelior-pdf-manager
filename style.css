@@ -789,3 +789,57 @@ a:focus-visible{ outline:0; box-shadow: var(--focus-ring); border-radius:6px; }
 #accConnections .save-box{
   overflow:visible !important;
 }
+
+/* Alte Chip-Anzeige ausblenden */
+.chips{ display:none !important; }
+
+/* Kompakte Verbindungsanzeige: Buttons als farbige Pills */
+.conn-pill{
+  border:1px solid var(--line);
+  padding:8px 12px;
+  border-radius:12px;
+  font-weight:600;
+  background:#f8f9fb;
+  color:var(--text);
+}
+.conn-pill--ok{
+  background:#e7f8ee;       /* hellgrün */
+  border-color:#b7e3c7;
+  color:#0f5132;
+}
+.conn-pill--off{
+  background:#f8f9fb;
+  color:#6b7280;             /* grau */
+}
+
+/* Rechte Statuszeile farblich mitziehen */
+.conn-right{ font-size:.92rem; color:var(--muted); }
+.conn-right--ok{ color:#2f6f3e; }
+.conn-right--warn{ color:#9a3412; }
+
+/* Alte Chip-Leiste (falls noch vorhanden) ausblenden */
+.chips{ display:none !important; }
+
+/* Neue Pill-Buttons */
+.conn-pill{
+  border:1px solid var(--line);
+  padding:8px 12px;
+  border-radius:12px;
+  font-weight:600;
+  background:#f8f9fb;
+  color:var(--text);
+  text-decoration:none;                 /* lila Unterstreichung verhindern */
+}
+.conn-pill--ok{
+  background:#e7f8ee;                   /* hellgrün */
+  border-color:#b7e3c7;
+  color:#0f5132;
+}
+.conn-pill--off{
+  background:#f8f9fb;
+  color:#6b7280;
+}
+
+/* Rechte Statuszeile */
+.conn-right{ font-size:.92rem; color:var(--muted); }
+.conn-right--ok{ color:#2f6f3e; }       /* grünlich */
