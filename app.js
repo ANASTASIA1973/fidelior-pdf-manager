@@ -1337,34 +1337,36 @@ function computeFileNameAuto() {
   // Betrag nur bei Rechnung verwenden und nur wenn sinnvoll
   const includeAmount = isInvoice() && betragRaw && !/^0+(?:[.,]00)?$/.test(betragRaw);
 
-  // RE-Teil: Präfix nicht doppeln (RE/RG/RN/INV/INVOICE)
-// RE-Teil: Nur numerische IDs bekommen "RE" davor; alphanumerische bleiben unverändert.
-let rePart = "";
-if (reNummer) {
-  const id = reNummer.trim().toUpperCase();
-  if (/^\d+$/.test(id)) {
-    rePart = "RE " + id;          // z.B. "1244" -> "RE 1244"
-  } else {
-    rePart = id;                  // z.B. "RE1244", "RG-2025-0317", "W7-55321"
+  // RE-Teil: Nur numerische IDs bekommen "RE" davor; alphanumerische bleiben unverändert.
+  let rePart = "";
+  if (reNummer) {
+    const id = reNummer.trim().toUpperCase();
+    if (/^\d+$/.test(id)) {
+      rePart = "RE " + id;          // z.B. "1244" -> "RE 1244"
+    } else {
+      rePart = id;                  // z.B. "RE1244", "RG-2025-0317", "W7-55321"
+    }
   }
-}
-
 
   // =======================
-  // Rechnung:      [Betrag]_[Absender]_[RE …]_[Liegenschaft]_[JJJJ.MM.TT].pdf
-  // Nicht-Rechnung: [Absender]_[Liegenschaft]_[JJJJ.MM.TT].pdf
+  // Rechnung:
+  //   [Betrag]_[Liegenschaft]_[Absender]_[RE-Teil]_[JJJJ.MM.TT].pdf
+  //
+  // Nicht-Rechnung:
+  //   [Liegenschaft]_[Absender]_[JJJJ.MM.TT].pdf
   // =======================
   const parts = [];
+
   if (isInvoice()) {
-    if (includeAmount) parts.push(betragRaw);
-    if (absender)      parts.push(absender);
-    if (rePart)        parts.push(rePart);
-    if (liegenschaft)  parts.push(liegenschaft);
-    parts.push(datum);
+    if (includeAmount) parts.push(betragRaw);     // 1) Betrag
+    if (liegenschaft)  parts.push(liegenschaft);  // 2) Liegenschaft
+    if (absender)      parts.push(absender);      // 3) Absender
+    if (rePart)        parts.push(rePart);        // 4) RE-Teil
+    parts.push(datum);                            // 5) Datum (immer)
   } else {
-    if (absender)      parts.push(absender);
-    if (liegenschaft)  parts.push(liegenschaft);
-    parts.push(datum);
+    if (liegenschaft)  parts.push(liegenschaft);  // 1) Liegenschaft
+    if (absender)      parts.push(absender);      // 2) Absender
+    parts.push(datum);                            // 3) Datum (immer)
   }
 
   // Fallback falls alles leer
@@ -3287,8 +3289,14 @@ if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
 }
 
 
-    // Lokal (optional)
-    const wantLocal = $("#chkLocal")?.checked === true;
+    // Lokal (optional) – neue Checkbox-ID "chkLocalSave" + Fallback auf alte ID
+    const wantLocal = (typeof flag === "function")
+      ? flag("chkLocalSave", "chkLocal")
+      : (
+          document.getElementById("chkLocalSave")?.checked === true ||
+          document.getElementById("chkLocal")?.checked === true
+        );
+
     if (wantLocal && window.showSaveFilePicker) {
       try {
         const fh = await window.showSaveFilePicker({
@@ -3306,6 +3314,7 @@ if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
         }
       }
     }
+
 
     // Erfolgsauswertung
     const successTargets = [
