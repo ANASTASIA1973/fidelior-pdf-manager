@@ -843,3 +843,156 @@ a:focus-visible{ outline:0; box-shadow: var(--focus-ring); border-radius:6px; }
 /* Rechte Statuszeile */
 .conn-right{ font-size:.92rem; color:var(--muted); }
 .conn-right--ok{ color:#2f6f3e; }       /* grünlich */
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header-settings {
+  margin-left: 1rem;
+}
+/* Alten Verbindungs-Button neben "Speichern" verstecken */
+#fdlConnBtn {
+  display: none !important;
+}
+/* === Einstellungen-Dialog: Layout & Menü =============================== */
+
+#settingsDialog{
+  max-width: 460px;
+  width: min(460px, 96vw);
+}
+
+/* Innenabstände sauber steuern */
+#settingsDialog .dialog-body{
+  padding: 0;
+}
+
+/* Header etwas kompakter */
+#settingsDialog .dialog-titlebar{
+  padding: 1rem 1.4rem;
+  border-bottom: 1px solid #eee;
+}
+
+/* Hinweistext als eigene Zeile, linksbündig */
+#settingsDialog .hint{
+  margin: 0;
+  padding: .6rem 1.4rem .2rem;
+  font-size: .95rem;
+  color: var(--muted);
+}
+
+/* Grid in eine saubere Liste verwandeln */
+#settingsDialog .settings-grid{
+  display: flex !important;
+  flex-direction: column;
+  gap: .45rem;
+  margin: 0;
+  padding: .2rem 1.4rem 1.1rem;
+}
+
+/* Menü-Buttons nur im Einstellungs-Dialog anders stylen */
+#settingsDialog .settings-grid .btn-outline{
+  width: 100%;
+  justify-content: space-between;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  border-radius: 12px;
+  padding: .5rem .9rem;
+  background: #fbf9fe;
+  border: 1px solid #e3dde8;
+  color: #3f3944;
+  font-size: .95rem;
+  font-weight: 500;
+  gap: .5rem;
+  transition: background .15s ease,
+              border-color .15s ease,
+              box-shadow .15s ease,
+              transform .04s ease;
+}
+
+/* kleiner Pfeil rechts, ohne HTML-Änderung */
+#settingsDialog .settings-grid .btn-outline::after{
+  content: "›";
+  margin-left: auto;
+  font-size: 1.1rem;
+  color: #a39ab3;
+}
+
+/* Hover/Active-Zustand */
+#settingsDialog .settings-grid .btn-outline:hover{
+  background: #f5f0fc;
+  border-color: #d1c4e3;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+}
+
+#settingsDialog .settings-grid .btn-outline:active{
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+/* Schließen-Button unten etwas einrücken */
+#settingsDialog .dialog-actions{
+  padding: .8rem 1.4rem 1rem;
+}
+/* === Liegenschaften verwalten: "Neu"-Button aufräumen =================== */
+#manageObjectsDialog #objectsAddRow{
+  display:inline-flex;
+  align-items:center;
+  justify-content:flex-start;
+  padding:.3rem 0;
+  margin: .2rem 1.2rem .5rem 1.2rem;
+  width:auto;
+  border:none;
+  background:none;
+  color:var(--primary);
+  font-size:.95rem;
+  font-weight:500;
+}
+
+/* kleines Plus-Symbol davor */
+#manageObjectsDialog #objectsAddRow::before{
+  content:"＋";
+  margin-right:.3rem;
+  font-size:1.05rem;
+}
+
+/* Hover dezent, kein riesiger Pill-Button */
+#manageObjectsDialog #objectsAddRow:hover{
+  text-decoration:underline;
+  background:none;
+  border:none;
+}
+#manageObjectsDialog .hint{
+  padding: .6rem 1.2rem .4rem;
+  font-size: .95rem;
+  color: var(--muted);
+}
+/* === Dokumentarten verwalten: "Neu"-Button wie bei Liegenschaften ======= */
+#manageTypesDialog #typesAddRow{
+  display:inline-flex;
+  align-items:center;
+  justify-content:flex-start;
+  padding:.3rem 0;
+  margin:.2rem 1.2rem .5rem 1.2rem;
+  width:auto;
+  border:none;
+  background:none;
+  color:var(--primary);
+  font-size:.95rem;
+  font-weight:500;
+}
+
+#manageTypesDialog #typesAddRow::before{
+  content:"＋";
+  margin-right:.3rem;
+  font-size:1.05rem;
+}
+
+#manageTypesDialog #typesAddRow:hover{
+  text-decoration:underline;
+  background:none;
+  border:none;
+}
