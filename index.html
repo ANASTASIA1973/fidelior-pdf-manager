@@ -31,8 +31,14 @@
       <h1 id="appTitle">Fidelior DMS</h1>
       <p class="subtitle">PDF Management – Grundbesitzverwaltung</p>
     </div>
+
+    <!-- Einstellungen-Zahnrad oben rechts -->
+    <button id="settingsBtn" class="icon-btn header-settings" type="button" title="Einstellungen">
+      ⚙
+    </button>
   </div>
 </header>
+
 
 <main class="container" role="main" aria-labelledby="appTitle">
   <div class="grid" id="mainGrid">
@@ -61,19 +67,17 @@
         <h2 id="docH2">Dokument</h2>
 
         <label class="label" for="docTypeSelect">Dokumentenart</label>
-        <div class="row">
-          <select id="docTypeSelect" class="select" aria-describedby="docTypeHelp"></select>
-          <button id="addDocTypeBtn"     class="linklike" type="button" title="Neuen Typ anlegen">Neu</button>
-          <button id="manageDocTypesBtn" class="linklike" type="button" title="Dokumentarten verwalten">Verwalten</button>
-        </div>
+       <div class="row">
+  <select id="docTypeSelect" class="select" aria-describedby="docTypeHelp"></select>
+  <button id="addDocTypeBtn" class="linklike" type="button" title="Neuen Typ anlegen">Neu</button>
+</div>
+
 
         <label class="label" for="objectSelect">Liegenschaft</label>
-        <div class="row">
-          <select id="objectSelect" class="select"></select>
-          <button id="addObjectBtn"      class="linklike" type="button" title="Neue Liegenschaft anlegen">Neu</button>
-          <button id="manageObjectsBtn"  class="linklike" type="button" title="Liegenschaften verwalten">Verwalten</button>
-          <button id="manageAssignmentsBtn" class="linklike" type="button" title="Zuordnungsmuster verwalten">Zuordnung</button>
-        </div>
+      <div class="row">
+  <select id="objectSelect" class="select"></select>
+  <button id="addObjectBtn" class="linklike" type="button" title="Neue Liegenschaft anlegen">Neu</button>
+</div>
 
         <!-- Generischer Unterordner-Selector (für ALLE Objekte) -->
         <div id="subfolderRow" class="row" style="display:none; margin-top:.6rem">
@@ -108,66 +112,10 @@
           <div><strong>Zielordner:</strong> <span id="targetPreview">-</span></div>
         </div>
 
-        <!-- Versand (kompakt) -->
-        <details class="acc acc--mail" id="accMail">
-          <summary class="acc-sum">Versand</summary>
-
-          <div class="mail-row">
-            <div class="grow"></div>
-            <button type="button" id="mailManageBtn" class="btn-outline btn-small" title="Adressbuch & Vorlagen verwalten">Verwalten</button>
-          </div>
-
-          <div class="mail-row mail-row--status" id="mailStatusRow" style="display:none">
-            <label class="label mail-col--label">Status</label>
-            <label class="pill"><input type="radio" name="mailStatus" id="stOpen"> Zahlung offen</label>
-            <label class="pill"><input type="radio" name="mailStatus" id="stReview"> Prüfung erforderlich</label>
-          </div>
-
-          <div class="mail-row">
-            <label class="label mail-col--label" for="mailFree">An</label>
-            <input id="mailFree" class="input" placeholder="E-Mail-Adresse eingeben und Enter drücken" list="mailBook" />
-            <datalist id="mailBook"></datalist>
-            <select id="mailSelect" class="select" hidden></select>
-            <a href="#" id="linkShowCc"  class="linklike mail-col--addon">+ CC</a>
-            <a href="#" id="linkShowBcc" class="linklike mail-col--addon">+ BCC</a>
-          </div>
-          <div class="mail-row">
-            <span class="label mail-col--label" aria-hidden="true"></span>
-            <div id="chipsTo" class="chips-wrap" data-k="to"></div>
-          </div>
-
-          <div class="mail-row" id="rowCc" style="display:none">
-            <label class="label mail-col--label" for="mailCc">CC</label>
-            <input id="mailCc" class="input" placeholder="Mehrere Adressen mit Komma/Leerzeichen trennen" />
-          </div>
-          <div class="mail-row" id="rowCcChips" style="display:none">
-            <span class="label mail-col--label" aria-hidden="true"></span>
-            <div id="chipsCc" class="chips-wrap" data-k="cc"></div>
-          </div>
-
-          <div class="mail-row" id="rowBcc" style="display:none">
-            <label class="label mail-col--label" for="mailBcc">BCC</label>
-            <input id="mailBcc" class="input" placeholder="optional" />
-          </div>
-          <div class="mail-row" id="rowBccChips" style="display:none">
-            <span class="label mail-col--label" aria-hidden="true"></span>
-            <div id="chipsBcc" class="chips-wrap" data-k="bcc"></div>
-          </div>
-
-          <div class="mail-row">
-            <label class="label mail-col--label" for="mailSubjectInput">Betreff</label>
-            <input id="mailSubjectInput" class="input" placeholder="Betreff eingeben" />
-          </div>
-
-          <div class="mail-row">
-            <label class="label mail-col--label" for="mailReplyToInput">Reply-To</label>
-            <input id="mailReplyToInput" class="input" placeholder="z. B. documents@fidelior.de" />
-          </div>
-        </details>
 
 <!-- Verbindungen / Speicherziele -->
 <details class="acc" id="accConnections" open>
-  <summary class="acc-sum">Verbindungen und Zähler</summary>
+  <summary class="acc-sum">Speicherziele und Zähler</summary>
 
   <!-- Kompakte Verbindungskontrollen -->
   <div class="conn-compact" style="display:grid;gap:.6rem;margin:.6rem 0">
@@ -225,9 +173,12 @@
 
 
 <div class="row row-actions">
-  <button id="saveBtn"   class="btn-primary" type="button">Dokument speichern…</button>
-  <button id="cancelBtn" class="btn-outline" type="button">Abbrechen</button>
+  <button id="saveBtn"      class="btn-primary" type="button">Dokument speichern…</button>
+  <button id="sendEmailBtn" class="btn-outline" type="button">E-Mail senden…</button>
+  <span class="grow"></span>
+  <button id="cancelBtn"    class="btn-outline" type="button">Abbrechen</button>
 </div>
+
 
 </div>
 </section>
@@ -274,14 +225,23 @@
       <h3 id="typesTitle">Dokumentarten verwalten</h3>
       <button class="dialog-close" data-close="#manageTypesDialog" type="button" title="Schließen">×</button>
     </div>
-    <button id="typesAddRow" class="btn-outline btn-small" type="button">+ Neu</button>
-    <ul id="typesList" class="list"></ul>
-    <div class="dialog-actions">
-      <button id="typesConnect" class="btn-outline btn-small" type="button">Ordner verbinden…</button>
-      <button id="typesSaveShared" class="btn-outline btn-small" type="button">In gemeinsamen Ordner speichern</button>
-      <button class="btn-primary" data-close="#manageTypesDialog" type="button">Schließen</button>
-    </div>
-    <p class="hint">Quelle: config/document_types.json – lokal/pCloud.</p>
+ <button id="typesAddRow" class="btn-outline btn-small" type="button">
+  Neue Dokumentart hinzufügen
+</button>
+
+<ul id="typesList" class="list"></ul>
+
+<div class="dialog-actions">
+  <button id="typesSaveShared" class="btn-primary" type="button">
+    Speichern
+  </button>
+  <button class="btn-outline btn-small" data-close="#manageTypesDialog" type="button">
+    Schließen
+  </button>
+</div>
+
+<p class="hint">Quelle: config/document_types.json – lokal/pCloud.</p>
+
   </div>
 </dialog>
 
@@ -338,12 +298,24 @@
       <h3 id="objectsTitle">Liegenschaften verwalten</h3>
       <button class="dialog-close" data-close="#manageObjectsDialog" type="button" title="Schließen">×</button>
     </div>
-    <button id="objectsAddRow" class="btn-outline btn-small" type="button">+ Neu</button>
+        <p class="hint" style="padding:0.6rem 1.2rem 0.4rem 1.2rem">
+      Nur <strong>Anzeigename</strong> füllen → speichern → Rest wird automatisch gesetzt.
+    </p>
+
+    <button id="objectsAddRow" class="btn-outline btn-small" type="button">
+  Neue Liegenschaft hinzufügen
+</button>
+
     <ul id="objectsList" class="list"></ul>
     <div class="dialog-actions">
-      <button id="objectsConnect" class="btn-outline btn-small" type="button">Ordner verbinden…</button>
-      <button id="objectsSaveShared" class="btn-outline btn-small" type="button">In gemeinsamen Ordner speichern</button>
-      <button class="btn-primary" data-close="#manageObjectsDialog" type="button">Schließen</button>
+      
+      <button id="objectsSaveShared" class="btn-primary" type="button">
+  Speichern
+</button>
+<button class="btn-outline btn-small" data-close="#manageObjectsDialog" type="button">
+  Schließen
+</button>
+
     </div>
     <p class="hint">Quelle: config/objects.json – lokal/pCloud.</p>
   </div>
@@ -443,6 +415,42 @@
     </div>
   </div>
 </dialog>
+<!-- Einstellungs-Zentrale -->
+<dialog id="settingsDialog" class="dialog" aria-labelledby="settingsTitle">
+  <div class="dialog-body">
+    <div class="dialog-titlebar">
+      <h3 id="settingsTitle">Einstellungen</h3>
+      <button class="dialog-close" data-close="#settingsDialog" type="button" title="Schließen">×</button>
+    </div>
+
+    <p class="hint" style="margin-bottom:.8rem">
+      Hier kannst du Verbindungen und Verwaltungsdaten bearbeiten.
+    </p>
+
+    <div class="settings-grid" style="display:grid;gap:.6rem;margin-bottom:1rem">
+      <button id="btnSettingsConnections" class="btn-outline" type="button">
+        Verbindungen
+      </button>
+      <button id="btnSettingsEmails" class="btn-outline" type="button">
+        Versand verwalten (E-Mail)
+      </button>
+      <button id="btnSettingsObjects" class="btn-outline" type="button">
+        Liegenschaften verwalten
+      </button>
+      <button id="btnSettingsTypes" class="btn-outline" type="button">
+        Dokumentarten verwalten
+      </button>
+      <button id="btnSettingsAssignments" class="btn-outline" type="button">
+        Zuordnungsmuster
+      </button>
+    </div>
+
+    <div class="dialog-actions">
+      <button class="btn-primary" data-close="#settingsDialog" type="button">Schließen</button>
+    </div>
+  </div>
+</dialog>
+<datalist id="mailBook"></datalist>
 
 </body>
 </html>

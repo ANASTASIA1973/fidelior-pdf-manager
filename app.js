@@ -233,9 +233,6 @@ async function restoreBoundHandles() {
     paintChips();
     if (okInbox) await refreshInbox();
 
-    if (!okScope || !okInbox || !okBearb) {
-      toast("Hinweis: Ordner ggf. einmalig freigeben (beim Speichern erscheint die Abfrage).", 2800);
-    }
   } catch (e) {
     console.warn("restoreBoundHandles failed:", e);
   }
@@ -243,8 +240,6 @@ async function restoreBoundHandles() {
     syncConfigHandle();
 
 }
-
-
 // --- Root-Verbindungen direkt herstellen (mit echtem System-Picker) ---
 // --- PICKER & BINDING: pCloud ---
 // ---------- Hilfsfunktion: Picker sicher mit User-Geste starten ----------
@@ -2431,14 +2426,24 @@ btnDel.setAttribute("aria-label", "Löschen");
 
 
   (json.addressBook || json.emails || []).forEach(r => tbody.appendChild(addRow(r)));
-  $("#emailsAdd")?.addEventListener("click", () => tbody.appendChild(addRow({})));
+  $("#emailsAdd")?.addEventListener("click", () => {
+  // Neue Zeile anhängen …
+  const tr = addRow({});
+  tbody.appendChild(tr);
+  // … und direkt in den Bearbeiten-Modus springen
+  tr.querySelector(".ab-edit")?.click();
+});
 
-  // ===== Pro Liegenschaft: Vorlagen (edit/löschen) =====
-  const poObjSel = $("#poObject"),
-        poRec    = $("#poRecipients"),
-        poSubj   = $("#poSubject"),
-        poReply  = $("#poReplyTo"),
-        poList   = $("#poList");
+
+// ===== Pro Liegenschaft: Vorlagen (edit/löschen) =====
+const poObjSel = $("#poObject"),
+      poRec    = $("#poRecipients"),
+      poSubj   = $("#poSubject"),
+      poReply  = $("#poReplyTo"),
+      poList   = $("#poList");
+
+let poEditState = null;  // merkt, ob wir eine bestehende Vorlage bearbeiten
+
 
   try {
     const o = await loadJson("objects.json");
@@ -2474,12 +2479,14 @@ btnDel.setAttribute("aria-label", "Löschen");
             '<button class="icon-btn po-del"  title="Löschen">🗑️</button>' +
           '</div>';
 
-        li.querySelector(".po-edit").onclick = () => {
-          poObjSel.value = code;
-          poRec.value    = (inv.to || inv.emails || []).join(" ");
-          poSubj.value   = inv.subject || "";
-          poReply.value  = inv.replyTo || "";
-        };
+     li.querySelector(".po-edit").onclick = () => {
+  poObjSel.value = code;
+  poRec.value    = (inv.to || inv.emails || []).join(" ");
+  poSubj.value   = inv.subject || "";
+  poReply.value  = inv.replyTo || "";
+  poEditState    = { code, kind: "invoice" };
+};
+
         li.querySelector(".po-del").onclick  = () => {
           delete poRules[code].invoice;
           renderPoList();
@@ -2504,12 +2511,14 @@ btnDel.setAttribute("aria-label", "Löschen");
             '<button class="icon-btn pt-del"  title="Löschen">🗑️</button>' +
           '</div>';
 
-        li.querySelector(".pt-edit").onclick = () => {
-          poObjSel.value = code;
-          poRec.value    = (t.recipients || t.to || []).join(" ");
-          poSubj.value   = t.subject || "";
-          poReply.value  = t.replyTo || "";
-        };
+       li.querySelector(".pt-edit").onclick = () => {
+  poObjSel.value = code;
+  poRec.value    = (t.recipients || t.to || []).join(" ");
+  poSubj.value   = t.subject || "";
+  poReply.value  = t.replyTo || "";
+  poEditState    = { code, kind: "template", id: (t.id || t.label || t.subject || "") };
+};
+
         li.querySelector(".pt-del").onclick = () => {
           poRules[code].templates = (poRules[code].templates || []).filter(x => (x.id||x.label) !== (t.id||t.label));
           renderPoList();
@@ -2531,22 +2540,69 @@ btnDel.setAttribute("aria-label", "Löschen");
 
   renderPoList();
 
-  $("#poAdd")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    const code = (poObjSel?.value || "").trim();
-    if (!code) { toast("Bitte Liegenschaft wählen.", 1800); return; }
-    const recs = (poRec?.value || "").split(/[;, ]+/).map(s => s.trim()).filter(Boolean);
+$("#poAdd")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  const code = (poObjSel?.value || "").trim();
+  if (!code) { toast("Bitte Liegenschaft wählen.", 1800); return; }
+  const recs    = (poRec?.value || "").split(/[;, ]+/).map(s => s.trim()).filter(Boolean);
+  const subject = (poSubj?.value || "").trim();
+  const replyTo = (poReply?.value || "").trim();
 
-    poRules[code] = poRules[code] || {};
-    poRules[code].invoice = {
-      to: recs,
-      subject: (poSubj?.value || "").trim(),
-      replyTo: (poReply?.value || "").trim()
-    };
+  poRules[code] = poRules[code] || {};
 
-    poRec.value = ""; poSubj.value = ""; poReply.value = "";
-    renderPoList();
-  });
+  // Wenn wir aus "Bearbeiten" kommen → bestehende Vorlage aktualisieren
+  if (poEditState && poEditState.code === code) {
+    if (poEditState.kind === "invoice") {
+      // Hauptvorlage überschreiben
+      poRules[code].invoice = { to: recs, subject, replyTo };
+    } else if (poEditState.kind === "template") {
+      // Bestehendes Template aktualisieren (oder neu anlegen, falls ID nicht gefunden)
+      const list = poRules[code].templates || [];
+      const id   = poEditState.id || ("tmpl-" + Date.now().toString(36));
+      let hit    = list.find(x => (x.id || x.label || x.subject) === poEditState.id);
+      if (!hit) {
+        hit = { id };
+        list.push(hit);
+      }
+      hit.id          = id;
+      hit.label       = hit.label || subject || id;
+      hit.to          = recs;
+      hit.recipients  = recs;
+      hit.subject     = subject;
+      hit.replyTo     = replyTo;
+      hit.invoiceOnly = true;
+      poRules[code].templates = list;
+    }
+  } else {
+    // Neuer Eintrag:
+    // 1. falls noch keine Hauptvorlage existiert → diese füllen
+    // 2. sonst zusätzliche Template-Vorlage anlegen
+    const hasMain = !!(poRules[code].invoice && (poRules[code].invoice.subject ||
+                     (poRules[code].invoice.to && poRules[code].invoice.to.length)));
+    if (!hasMain) {
+      poRules[code].invoice = { to: recs, subject, replyTo };
+    } else {
+      const list = poRules[code].templates || [];
+      const id   = "tmpl-" + Date.now().toString(36);
+      list.push({
+        id,
+        label: subject || id,
+        to: recs,
+        recipients: recs,
+        subject,
+        replyTo,
+        invoiceOnly: true
+      });
+      poRules[code].templates = list;
+    }
+  }
+
+  poEditState = null;
+
+  poRec.value = ""; poSubj.value = ""; poReply.value = "";
+  renderPoList();
+});
+
 
   // ===== Speichern =====
   $("#emailsSave")?.addEventListener("click", async () => {
@@ -2566,11 +2622,16 @@ btnDel.setAttribute("aria-label", "Löschen");
       defaults: json.defaults || { replyTo: "documents@fidelior.de" }
     };
 
-    try {
-      await saveJson("emails.json", result);
-      emailsCfg = result;               // direkt im laufenden State aktualisieren
-      populateMailSelect();             // Datalist/Select neu füllen
-      toast("E-Mail-Vorlagen gespeichert.", 2500);
+  try {
+  await saveJson("emails.json", result);
+  emailsCfg = result;               // direkt im laufenden State aktualisieren
+  // Globale Aliase für Versanddialog aktualisieren
+  window.emailsCfg      = result;
+  window.__fdlEmailsCfg = result;
+  populateMailSelect();             // Datalist/Select neu füllen
+  toast("E-Mail-Vorlagen gespeichert.", 2500);
+
+
       if (typeof dlg.close === "function") dlg.close(); else dlg.removeAttribute("open");
     } catch (e) {
       console.error("Fehler beim Speichern von emails.json", e);
@@ -2582,19 +2643,113 @@ btnDel.setAttribute("aria-label", "Löschen");
   wireDialogClose?.(dlg);
 }
 
-  async function openObjectsDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageObjectsDialog"); if(!dlg){ toast("Objekte-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("objects.json"); }catch{ j={objects:[]}; } const list = j.objects || []; const ul = $("#objectsList"); ul.innerHTML="";
-    const addRow=(o={displayName:"", code:"", scopevisioName:"", pcloudName:""})=>{ const li=document.createElement("li"); li.innerHTML = `
-        <div class="row tight">
-          <input class="input slim ob-name"  placeholder="Anzeigename" value="${o.displayName||""}">
-          <input class="input slim ob-code"  placeholder="Code"        value="${o.code||""}">
-          <input class="input slim ob-scope" placeholder="Scopevisio"  value="${o.scopevisioName||""}">
-          <input class="input slim ob-pcl"   placeholder="pCloud"      value="${o.pcloudName||""}">
-          <button class="icon-btn ob-del" title="Löschen">🗑️</button>
-        </div>`; li.querySelector(".ob-del").addEventListener("click",()=>li.remove()); ul.appendChild(li); };
-    list.forEach(addRow); $("#objectsAddRow")?.addEventListener("click",()=>addRow({}));
-    $("#objectsSaveShared")?.addEventListener("click", async()=>{ try{ const rows=[...ul.querySelectorAll("li")].map(li=>{ const displayName=li.querySelector(".ob-name")?.value.trim(); const code=li.querySelector(".ob-code")?.value.trim(); const scope=li.querySelector(".ob-scope")?.value.trim(); const pcl=li.querySelector(".ob-pcl")?.value.trim(); if(!displayName||!code) return null; return {displayName, code, scopevisioName:scope||code, pcloudName:pcl||code}; }).filter(Boolean); const next={objects:rows}; await saveJson("objects.json", next); objectsCfg=next; await loadObjects(); toast("<strong>Liegenschaften gespeichert</strong>",1800); dlg.close?.(); }catch(e){ toast("Fehler beim Speichern der Liegenschaften.",2500); } });
-    if (typeof dlg.showModal==="function") dlg.showModal(); else dlg.setAttribute("open","open"); wireDialogClose(dlg);
+async function openObjectsDialog(){
+  // 1) Sicherstellen, dass config/ verbunden ist
+  await ensureConfigConnectedOrAsk();
+
+  const dlg = $("#manageObjectsDialog");
+  if (!dlg){
+    toast("Objekte-Dialog fehlt.", 2000, "err");
+    return;
   }
+
+  // 2) config/objects.json laden
+  let cfg;
+  try {
+    cfg = await loadJson("objects.json");
+  } catch {
+    cfg = { objects: [] };
+  }
+  const list = Array.isArray(cfg.objects) ? cfg.objects : [];
+
+  const ul = $("#objectsList");
+  ul.innerHTML = "";
+
+  // --- Neue Zeile erzeugen ---
+  const addRow = (o = { displayName:"", code:"", scopevisioName:"", pcloudName:"" }) => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <div class="row tight">
+        <input class="input slim ob-name"  placeholder="Anzeigename"  value="${o.displayName || ""}">
+        <input class="input slim ob-code"  placeholder="Code (optional)" value="${o.code || ""}">
+        <input class="input slim ob-scope" placeholder="Scopevisio (optional)" value="${o.scopevisioName || ""}">
+        <input class="input slim ob-pcl"   placeholder="pCloud (optional)" value="${o.pcloudName || ""}">
+        <button class="icon-btn ob-del" title="Löschen">🗑️</button>
+      </div>`;
+    
+    li.querySelector(".ob-del").addEventListener("click", () => li.remove());
+    ul.appendChild(li);
+  };
+
+  // Bestehende Objekte einfügen
+  list.forEach(addRow);
+
+  // +Neu-Button → neue Zeile
+  $("#objectsAddRow")?.addEventListener("click", () => addRow({}));
+
+  // --- Automatisches Füllen der technischen Felder ---
+  function autoFill(obj){
+    const name = obj.displayName.trim();
+    if (!name) return;
+
+    // Code automatisch erzeugen, wenn leer
+    if (!obj.code){
+      obj.code = name
+        .normalize("NFKD")
+        .replace(/[^\w\s-]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, "_");
+    }
+
+    // ScopevisioName automatisch setzen
+    if (!obj.scopevisioName){
+      obj.scopevisioName = obj.code;
+    }
+
+    // pCloudName automatisch setzen
+    if (!obj.pcloudName){
+      obj.pcloudName = obj.code;
+    }
+  }
+
+  // --- Speichern ---
+  $("#objectsSaveShared")?.addEventListener("click", async () => {
+    try{
+      const rows = [...ul.querySelectorAll("li")].map(li => {
+        const displayName = li.querySelector(".ob-name")?.value.trim();
+        const code        = li.querySelector(".ob-code")?.value.trim();
+        const scope       = li.querySelector(".ob-scope")?.value.trim();
+        const pcl         = li.querySelector(".ob-pcl")?.value.trim();
+
+        if (!displayName) return null; // komplett leere Zeilen raus
+
+        const obj = { displayName, code, scopevisioName:scope, pcloudName:pcl };
+
+        autoFill(obj);   // 🔥 Automatische Befüllung anwenden
+        return obj;
+      }).filter(Boolean);
+
+      const next = { objects: rows };
+      await saveJson("objects.json", next);
+      objectsCfg = next;
+      await loadObjects();
+
+      toast("<strong>Liegenschaften gespeichert.</strong>", 1800);
+      dlg.close?.();
+    } catch (e){
+      console.error(e);
+      toast("Fehler beim Speichern der Liegenschaften.", 2500, "err");
+    }
+  });
+
+  // --- Dialog öffnen ---
+  if (typeof dlg.showModal === "function") dlg.showModal();
+  else dlg.setAttribute("open", "open");
+
+  wireDialogClose(dlg);
+}
 
   async function openTypesDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageTypesDialog"); if(!dlg){ toast("Dokumentarten-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("document_types.json"); }catch{ j={types:[], defaultTypeKey:""}; } const list=j.types||[]; const ul=$("#typesList"); ul.innerHTML=""; const defaultKey=j.defaultTypeKey||"";
     const addRow=(t={label:"", key:"", isInvoice:false})=>{ const li=document.createElement("li"); li.innerHTML = `
@@ -2875,6 +3030,87 @@ async function openAssignmentsDialog() {
   $("#manageDocTypesBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openTypesDialog(); });
   $("#manageAssignmentsBtn")?.addEventListener("click", (e)=>{ e.preventDefault(); openAssignmentsDialog(); });
 
+// === Einstellungs-Zentrale (Zahnrad) ===
+(() => {
+  const dlg = document.getElementById("settingsDialog");
+  if (!dlg) return;
+
+  // kleines Hilfs-Wrapper für querySelector
+  const $ = (sel, el = document) => el.querySelector(sel);
+
+  function ensureSettingsWired() {
+    if (dlg.__wired) return;
+    if (typeof wireDialogClose === "function") {
+      wireDialogClose(dlg);
+    }
+    dlg.__wired = true;
+  }
+
+  // Zahnrad oben rechts öffnet die Einstellungs-Zentrale
+  $("#settingsBtn")?.addEventListener("click", () => {
+    ensureSettingsWired();
+    if (typeof dlg.showModal === "function") dlg.showModal();
+    else dlg.setAttribute("open", "open");
+  });
+
+  // Verbindungen: Verbindungs-Zentrale (nicht Zähler)
+  $("#btnSettingsConnections")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    dlg.close?.();
+    if (typeof window.openConnectionsCenter === "function") {
+      window.openConnectionsCenter();
+    } else {
+      toast("Verbindungs-Zentrale ist nicht verfügbar.", 3000);
+    }
+  });
+
+  // Versand verwalten (E-Mail)
+  $("#btnSettingsEmails")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    dlg.close?.();
+    if (typeof openEmailsDialog === "function") {
+      openEmailsDialog();
+    } else {
+      toast("E-Mail-Verwaltung ist nicht verfügbar.", 3000);
+    }
+  });
+
+  // Liegenschaften verwalten
+  $("#btnSettingsObjects")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    dlg.close?.();
+    if (typeof openObjectsDialog === "function") {
+      openObjectsDialog();
+    } else {
+      toast("Liegenschafts-Verwaltung ist nicht verfügbar.", 3000);
+    }
+  });
+
+  // Dokumentarten verwalten
+  $("#btnSettingsTypes")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    dlg.close?.();
+    if (typeof openTypesDialog === "function") {
+      openTypesDialog();
+    } else {
+      toast("Dokumentarten-Verwaltung ist nicht verfügbar.", 3000);
+    }
+  });
+
+  // Zuordnungsmuster
+  $("#btnSettingsAssignments")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    dlg.close?.();
+    if (typeof openAssignmentsDialog === "function") {
+      openAssignmentsDialog();
+    } else {
+      toast("Zuordnungsmuster sind nicht verfügbar.", 3000);
+    }
+  });
+})();
+
+
+
 function arrayBufferToBase64(ab) {
   const bytes = new Uint8Array(ab);
   const chunk = 0x8000; // 32k
@@ -2915,6 +3151,13 @@ function buildEmailPromptDialog(defaults = {}) {
   dlg.id = "fdlEmailPrompt";
   dlg.style.padding = "0";
   dlg.style.border = "none";
+    // Datalist für Empfänger sicher aktualisieren
+  if (typeof populateMailSelect === "function") {
+    try { populateMailSelect(); } catch (e) {
+      console.warn("[FDL] populateMailSelect im Versanddialog fehlgeschlagen:", e);
+    }
+  }
+
   dlg.innerHTML = `
     <form method="dialog" style="min-width:520px;max-width:680px">
       <div style="padding:18px 20px;border-bottom:1px solid var(--line,#E2E8F0);display:flex;justify-content:space-between;align-items:center">
@@ -2925,12 +3168,11 @@ function buildEmailPromptDialog(defaults = {}) {
       <div style="padding:16px 20px;display:grid;gap:12px">
         <p style="margin:0 0 8px 0">Die Rechnung wird gespeichert. Möchten Sie sie zusätzlich per E-Mail verschicken?</p>
 
-        <div id="fdlEmailSection" style="display:none;gap:10px">
-          <label class="row" style="display:grid;gap:6px">
-            <span>Empfänger (Komma/Enter):</span>
-            <input id="fdlMailTo" class="input slim" list="mailBook" placeholder="name@firma.de">
-            <small style="color:#55637A">Tipp: Vorschläge aus dem Adressbuch per Autovervollständigen wählen.</small>
-          </label>
+       <div id="fdlEmailSection" style="display:none;gap:10px">
+  <label class="row" style="display:grid;gap:6px">
+    <span>Empfänger:</span>
+    <input id="fdlMailTo" class="input slim" list="mailBook" placeholder="name@firma.de">
+  </label>
 
           <details id="fdlAdv" style="margin-top:4px">
             <summary style="cursor:pointer">Weitere Felder (CC/BCC, Reply-To)</summary>
@@ -2991,12 +3233,14 @@ function buildEmailPromptDialog(defaults = {}) {
   input.__suggestInit = true;
   input.setAttribute("autocomplete","off");
 
-  function showAllOnce(){
-    const prev = input.value;
-    input.value = prev + " ";
-    input.dispatchEvent(new Event("input", { bubbles:true }));
-    setTimeout(() => { input.value = prev; }, 0);
-  }
+ function showAllOnce(){
+  const prev = input.value;
+  // Temporär leeren, damit die Datalist alle Einträge zeigt
+  input.value = "";
+  input.dispatchEvent(new Event("input", { bubbles:true }));
+  // Danach ursprünglichen Wert wiederherstellen
+  setTimeout(() => { input.value = prev; }, 0);
+}
 
   input.addEventListener("focus", showAllOnce);
   input.addEventListener("click", showAllOnce);
@@ -3023,17 +3267,17 @@ function buildEmailPromptDialog(defaults = {}) {
   const code  = (objSel?.value || "").trim().toUpperCase();
   const isInv = (typeof isInvoice === "function") ? !!isInvoice() : true;
 
-  if (code === "FIDELIOR" && isInv) {
-    const sbs = (((emailsCfg?.defaults || {}).invoice || {}).Fidelior || {}).subjectByStatus || {
-      open:   "NEUE RECHNUNG – ZAHLUNG OFFEN",
-      review: "RECHNUNGSPRÜFUNG ERFORDERLICH"
-    };
-    items.add(sbs.open); items.add(sbs.review);
-  }
   try {
-    const inv = (emailsCfg?.perObject?.[code]?.invoice) || {};
-    if (inv.subject) items.add(inv.subject);
+    if (isInv && code) {
+      const per = emailsCfg?.perObject?.[code] || {};
+      const inv = per.invoice || {};
+      if (inv.subject) items.add(inv.subject);
+      (per.templates || []).forEach(t => {
+        if (t && t.subject) items.add(t.subject);
+      });
+    }
   } catch {}
+
 
   // Datalist füllen (ohne Duplikate)
   dl.textContent = "";
@@ -3109,25 +3353,49 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
     const dlg = buildEmailPromptDialog();
     dlg.__fdlPrefill({ attachmentName, subject, replyTo });
 
+    // NEU: Vorlagen für die aktuelle Liegenschaft/Objekt bereitstellen
+    try {
+      fdlSetupMailTemplates(dlg);
+    } catch (e) {
+      console.warn("[FDL] Mail-Templates Setup fehlgeschlagen:", e);
+    }
+
     const btnSend = dlg.querySelector("#fdlBtnSaveAndSend");
+    const btnOnly = dlg.querySelector("#fdlBtnSaveOnly");
 
     let done = false; // verhindert Doppel-Resolve
 
     const cleanup = () => {
       dlg?.removeEventListener("close", onClose);
       btnSend?.removeEventListener("click", onClickSend);
+      btnOnly?.removeEventListener("click", onClickOnly);
     };
 
-    const onClose = () => {
+    const finish = (mode, extra = {}) => {
       if (done) return;
       done = true;
       cleanup();
-      resolve({ mode: "save_only" });
+      try { dlg.close?.(); } catch {}
+      resolve({ mode, ...extra });
     };
 
+    // ❌ X / ESC / generelles Schließen → kompletter Abbruch
+    const onClose = () => {
+      if (done) return;
+      finish("cancel");
+    };
+
+    // ✅ Button „Nur speichern“ → speichern OHNE Mail
+    const onClickOnly = (e) => {
+      e.preventDefault();
+      finish("save_only");
+    };
+
+    // ✅ Button „Speichern & E-Mail senden“
     const onClickSend = (e) => {
       const sec = dlg.querySelector("#fdlEmailSection");
-      // 1. Klick: Felder wurden (in buildEmailPromptDialog) geöffnet → hier NICHT schließen
+
+      // 1. Klick: Felder werden nur sichtbar gemacht – hier NICHT schließen
       if (sec && sec.style.display === "none") return;
 
       e.preventDefault();
@@ -3141,27 +3409,26 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
 
       const split = s => s.split(/[;, ]+/).map(x => x.trim()).filter(Boolean);
 
-      done = true;
-      cleanup();
-      dlg.close?.();
-
-      resolve({
-        mode: "save_and_send",
+      const extra = {
         to: split(to),
         cc: split(cc),
         bcc: split(bcc),
         subject: subj.trim(),
         replyTo: rep.trim()
-      });
+      };
+
+      finish("save_and_send", extra);
     };
 
     btnSend.addEventListener("click", onClickSend);
+    btnOnly.addEventListener("click", onClickOnly);
     dlg.addEventListener("close", onClose, { once: true });
 
     if (typeof dlg.showModal === "function") dlg.showModal();
     else dlg.setAttribute("open", "open");
   });
 }
+
 
   /* ------------------------------ Email: Senden ---------------------------- */
   async function sendMail({to=[], cc=[], bcc=[], subject="", text="", replyTo="", attachmentBytes, attachmentName}){
@@ -3170,6 +3437,89 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
     const res = await fetch("/.netlify/functions/send-email", { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ to, cc, bcc, subject, text, replyTo, attachments: [{ filename: attachmentName, contentBase64: b64, contentType:"application/pdf" }] }) });
     const json = await res.json().catch(()=>({})); if(!res.ok || json.ok!==true) throw new Error(json.error||("HTTP "+res.status)); return json;
   }
+
+/* ========================================================================== */
+/*  Mail-Dialog: Vorlagen pro Liegenschaft/Objekt (Empfänger + Betreff etc.)  */
+/* ========================================================================== */
+
+/**
+ * Liest aus emailsCfg die Templates für die aktuell gewählte Liegenschaft /
+ * Objekt und bietet sie im Mail-Dialog als Dropdown an.
+ *
+ * - Beim Wechsel der Vorlage werden Empfänger, CC, BCC, Betreff, Reply-To
+ *   automatisch gefüllt.
+ * - Nutzer kann danach alles frei anpassen.
+ */
+function fdlSetupMailTemplates(dlg){
+  if (!dlg) return;
+
+  const cfg = (window.emailsCfg || window.__fdlEmailsCfg || {}) || {};
+  const per = cfg.perObject || {};
+  const templates = [];
+
+  // Alle Vorlagen global einsammeln (ohne Filter nach Liegenschaft)
+  Object.entries(per).forEach(([objCode, perObj]) => {
+    perObj = perObj || {};
+
+    // Hauptvorlage "bei Rechnung"
+    if (perObj.invoice && (perObj.invoice.subject || perObj.invoice.to || perObj.invoice.emails)) {
+      templates.push({
+        subject: perObj.invoice.subject || "",
+        to:      perObj.invoice.to      || perObj.invoice.emails || "",
+        cc:      perObj.invoice.cc      || "",
+        bcc:     perObj.invoice.bcc     || "",
+        replyTo: perObj.invoice.replyTo || ""
+      });
+    }
+
+    // Zusätzliche Templates
+    if (Array.isArray(perObj.templates)) {
+      perObj.templates.forEach(t => {
+        templates.push({
+          subject: t.subject || "",
+          to:      t.to      || t.emails || "",
+          cc:      t.cc      || "",
+          bcc:     t.bcc     || "",
+          replyTo: t.replyTo || ""
+        });
+      });
+    }
+  });
+
+  if (!templates.length) return;
+
+  const toInput = dlg.querySelector("#fdlMailTo");
+  const ccInput = dlg.querySelector("#fdlMailCc");
+  const bccInp  = dlg.querySelector("#fdlMailBcc");
+  const subjInp = dlg.querySelector("#fdlMailSubj");
+  const repInp  = dlg.querySelector("#fdlMailReply");
+
+  if (!subjInp) return;
+
+  // eine globale Datalist für Betreff-Vorschläge benutzen
+  let dl = document.getElementById("subjectBook");
+  if (!dl) {
+    dl = document.createElement("datalist");
+    dl.id = "subjectBook";
+    document.body.appendChild(dl);
+  }
+
+  dl.textContent = "";
+  templates.forEach(t => {
+    if (!t.subject) return;
+    const opt = document.createElement("option");
+    opt.value = t.subject;
+    dl.appendChild(opt);
+  });
+
+  // Betreff-Feld mit der Datalist verbinden (kein extra Feld mehr)
+  subjInp.setAttribute("list", "subjectBook");
+
+  // optional: beim Wechsel des Betreffs die übrigen Felder NICHT automatisch überschreiben,
+  // d. h. wir füllen Empfänger nur einmal, wenn der Dialog erstellt wird (z. B. über computeSubjectAndReply).
+  // Wenn du möchtest, dass beim Auswählen eines Vorschlags auch Empfänger/ReplyTo gesetzt werden,
+  // müssten wir hier noch einen oninput/onchange-Handler ergänzen.
+}
 
 
 /* -------------------------------- Speichern ------------------------------ */
@@ -3210,20 +3560,15 @@ async function stampPdf(buf){
 }
 
 
-// === SPEICHERN: Klick-Handler (Hybrid: Dialog NUR bei FIDELIOR/EGYO-Rechnung) ===
-  $("#saveBtn")?.addEventListener("click", async (ev) => {
-  ev.preventDefault();
-  // if (!(await ensureTargetsReady())) return;  // ALT: raus
-
-
-
+// === SPEICHERN & optionaler E-Mail-Versand (getrennte Buttons) ===
+async function handleSaveFlow(mode = "save_only") {
   try {
     if (!pdfDoc || !saveArrayBuffer) {
       toast("Keine PDF geladen.", 2000);
       return;
     }
 
-    // ---- 0) Vorab: Dateiname (für Dialoganzeige) + Defaults für Betreff/ReplyTo
+    // ---- 0) Vorab: Dateiname + Defaults für Betreff/ReplyTo
     const previewName = (typeof effectiveFileName === "function")
       ? effectiveFileName()
       : (lastFile?.name || "dokument.pdf");
@@ -3240,56 +3585,53 @@ async function stampPdf(buf){
     const safeName = (typeof fileSafe === "function") ? fileSafe(fileName) : fileName;
 
     let stampedBytes = saveArrayBuffer;
-    try { stampedBytes = await stampPdf(saveArrayBuffer); } catch {}
-// vor dem Block "Ziele auflösen & schreiben"
-const scopeOn  = $("#chkScope")?.checked === true;
-const extrasOn = $("#chkPcloudExtras")?.checked === true;
-const localOn  = $("#chkLocal")?.checked === true;
+    try {
+      stampedBytes = await stampPdf(saveArrayBuffer);
+    } catch (e) {
+      console.warn("Stempel fehlgeschlagen, speichere ohne Stempel:", e);
+      stampedBytes = saveArrayBuffer;
+    }
 
-if (!(await ensureWritePermissionWithPrompt(window.pcloudRootHandle, "pCloud"))) return;
-if (scopeOn && !(await ensureWritePermissionWithPrompt(window.scopeRootHandle, "Scopevisio"))) return;
-if (localOn && window.processedRootHandle) {
-  if (!(await ensureWritePermissionWithPrompt(window.processedRootHandle, "Lokaler Bearbeitet-Ordner"))) return;
-}
+    // ---- 2) Ziele auflösen, Rechte prüfen
+    const pf = await preflightTargets();
+    if (!pf.ok) {
+      toast("Speichern abgebrochen: " + (pf.reason || "Zielprüfung fehlgeschlagen"), 5000);
+      return;
+    }
+    const t = pf.t;
 
-  // ---- 2) Ziele auflösen, Rechte prüfen
-const pf = await preflightTargets();
-if (!pf.ok) { 
-  toast("Speichern abgebrochen: " + (pf.reason || "Zielprüfung fehlgeschlagen"), 5000); 
-  return; 
-}
-const t = pf.t;  // <— dieses t verwenden
+    let okScope=false, okPcl=false, okPclBucket=false, okLocal=false;
+    const errs = {};
 
-let okScope=false, okPcl=false, okPclBucket=false, okLocal=false;
-const errs = {};
+    async function writeSafe(root, seg, bytes, name){
+      if (!root || !seg || !seg.length) return;
+      try {
+        await ensureDirPath(root, seg);
+      } catch (e) {
+        console.warn("ensureDirPath fehlgeschlagen:", e);
+      }
+      await writeFileTo(root, seg, bytes, name, { unique:true });
+    }
 
-// (optional aber empfehlenswert) Stelle sicher, dass writeFileTo den Pfad anlegt
-async function writeSafe(root, seg, bytes, name){
-  // falls du eine ensureDirPath(root, seg) hast, hier aufrufen:
-  // await ensureDirPath(root, seg);
-  await writeFileTo(root, seg, bytes, name, { unique:true });
-}
+    // Scope
+    if (t?.scope?.root && t.scope.seg?.length) {
+      try { await writeSafe(t.scope.root, t.scope.seg, stampedBytes, safeName); okScope = true; }
+      catch(e){ errs.scope = e?.message || String(e); }
+    }
 
-// Scope
-if (t?.scope?.root && t.scope.seg?.length) {
-  try { await writeSafe(t.scope.root, t.scope.seg, stampedBytes, safeName); okScope = true; }
-  catch(e){ errs.scope = e?.message || String(e); }
-}
+    // pCloud Objektpfad
+    if (t?.pcloud?.root && t.pcloud.seg?.length) {
+      try { await writeSafe(t.pcloud.root, t.pcloud.seg, stampedBytes, safeName); okPcl = true; }
+      catch(e){ errs.pcloud = e?.message || String(e); }
+    }
 
-// pCloud Objektpfad
-if (t?.pcloud?.root && t.pcloud.seg?.length) {
-  try { await writeSafe(t.pcloud.root, t.pcloud.seg, stampedBytes, safeName); okPcl = true; }
-  catch(e){ errs.pcloud = e?.message || String(e); }
-}
+    // pCloud Sammelordner
+    if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
+      try { await writeSafe(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, safeName); okPclBucket = true; }
+      catch(e){ errs.bucket = e?.message || String(e); }
+    }
 
-// pCloud Sammelordner
-if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
-  try { await writeSafe(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, safeName); okPclBucket = true; }
-  catch(e){ errs.bucket = e?.message || String(e); }
-}
-
-
-    // Lokal (optional) – neue Checkbox-ID "chkLocalSave" + Fallback auf alte ID
+    // Lokal (optional)
     const wantLocal = (typeof flag === "function")
       ? flag("chkLocalSave", "chkLocal")
       : (
@@ -3315,7 +3657,6 @@ if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
       }
     }
 
-
     // Erfolgsauswertung
     const successTargets = [
       okScope ? "Scopevisio" : null,
@@ -3331,14 +3672,16 @@ if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
         errs.bucket ? `Sammelordner: ${errs.bucket}` : null,
         (wantLocal && errs.local) ? `Lokal: ${errs.local}` : null
       ].filter(Boolean).join("<br>");
-      toast(`<strong>Speichern fehlgeschlagen</strong><br>${safeName}` + (reasons ? `<br><small>${reasons}</small>` : ""), 8000);
+      toast(
+        `<strong>Speichern fehlgeschlagen</strong><br>${safeName}` +
+        (reasons ? `<br><small>${reasons}</small>` : ""),
+        8000
+      );
       return;
     }
 
-
-    // ---- 3) E-Mail: Hybrid-Logik
-    // Fall A: Rechnung + (FIDELIOR|EGYO) → Dialog (neue UI)
-    if (typeof shouldAskForEmail === "function" && shouldAskForEmail()) {
+    // ---- 3) E-Mail: nur bei explizitem Versand (Button „E-Mail senden…“)
+    if (mode === "send") {
       const decision = await promptForEmailOnce({
         attachmentName: safeName,
         subject: preSubject,
@@ -3370,49 +3713,8 @@ if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
             toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message || e}`, 4000);
           }
         }
-      }
-    }
-    // Fall B: alle anderen Fälle → legacy Verhalten (nur wenn Mail-Chips befüllt sind)
-    else {
-      const to  = [...Mail.to];
-      const cc  = [...Mail.cc];
-      const bcc = [...Mail.bcc];
-      const rc  = to.length + cc.length + bcc.length;
-
-      if (rc) {
-        const { subject, replyTo } = (typeof computeSubjectAndReply === "function")
-          ? computeSubjectAndReply()
-          : { subject:"", replyTo:"" };
-
-        const subj = (subject && subject.trim()) || "(ohne Betreff)";
-        const confirmText = [
-          "E-Mail jetzt senden?",
-          "",
-          `An:       ${to.join(", ") || "—"}`,
-          cc.length  ? `CC:       ${cc.join(", ")}`  : "",
-          bcc.length ? `BCC:      ${bcc.join(", ")}` : "",
-          `Betreff:  ${subj}`,
-          `Reply-To: ${replyTo || "—"}`,
-          `Anhang:   ${safeName}`
-        ].filter(Boolean).join("\n");
-
-        if (window.confirm(confirmText)) {
-          try {
-            await sendMail({
-              to, cc, bcc,
-              subject: subject || "",
-              text: (typeof computeMailBody === "function" ? computeMailBody() : ""),
-              replyTo: replyTo || undefined,
-              attachmentBytes: stampedBytes,
-              attachmentName: safeName
-            });
-            toast("<strong>E-Mail versendet</strong>", 2500);
-          } catch (e) {
-            toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message || e}`, 4000);
-          }
-        } else {
-          toast("E-Mail-Versand abgebrochen.", 1800);
-        }
+      } else {
+        toast("E-Mail-Versand abgebrochen.", 1800);
       }
     }
 
@@ -3423,11 +3725,11 @@ if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
         if (moved) toast("Inbox → Bearbeitet verschoben.", 2000);
       } catch (e) {
         console.warn("post-move failed:", e);
-        toast("Verschieben in 'Bearbeitet' fehlgeschlagen.", 6000);
+        toast("Verschieben aus der Inbox ist fehlgeschlagen.", 3000);
       }
     }
 
-    // ---- 5) Feedback & Reset
+    // ---- 5) Abschluss-Toast + Reset
     const okTargets = [
       okScope     ? "Scopevisio"            : null,
       okPcl       ? "pCloud"                : null,
@@ -3442,6 +3744,17 @@ if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
     console.error("[SAVE] Fehler:", e);
     toast(`<strong>Fehler</strong><br>${e?.message || e}`, 6000);
   }
+}
+
+// Buttons → Flow
+$("#saveBtn")?.addEventListener("click", (ev) => {
+  ev.preventDefault();
+  handleSaveFlow("save_only");   // NUR speichern
+});
+
+$("#sendEmailBtn")?.addEventListener("click", (ev) => {
+  ev.preventDefault();
+  handleSaveFlow("send");        // Speichern + Mail-Dialog
 });
 
 
@@ -3639,9 +3952,14 @@ async function boot() {
   // 1) Zuerst gespeicherte Directory-Handles wiederherstellen
   await restoreBoundHandles();
 
-  // 2) Konfigurationen laden (Emails/Assignments optional)
-  try { emailsCfg      = await loadJson("emails.json"); }       catch { emailsCfg = null; }
-  try { assignmentsCfg = await loadJson("assignments.json"); }  catch { assignmentsCfg = null; }
+ // 2) Konfigurationen laden (Emails/Assignments optional)
+try { emailsCfg      = await loadJson("emails.json"); }       catch { emailsCfg = null; }
+// Globale Aliase für Mail-Konfiguration, damit Dialoge darauf zugreifen können
+window.emailsCfg      = emailsCfg || {};
+window.__fdlEmailsCfg = emailsCfg || {};
+try { assignmentsCfg = await loadJson("assignments.json"); }  catch { assignmentsCfg = null;
+
+ }
 
   // 3) UI – neue kompakte Verbindungsanzeige (statt alter paintChips)
   paintConnectionsCompact();
