@@ -363,3 +363,41 @@ dialog .dialog-actions{ padding:.8rem 1rem; }
   pointer-events: none;
 }
 
+
+/* Standard-Pill-Checkbox im Bereich "Speichern in" */
+.save-box .chk {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  margin-bottom: .35rem;
+}
+
+/* Hauptzeilen (Pill-Stil bleibt von deinen bestehenden .chk-Styles) */
+.save-box .chk-main {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Unterzeilen: einfache eingerückte Checkbox, keine Pill */
+.save-box .chk.chk-sub {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin-left: 1.8rem;
+}
+
+.save-box .chk.chk-sub span {
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  font-size: 0.9rem;
+  color: #444 !important;
+}
+
+.save-box .chk.chk-sub input[type="checkbox"] {
+  transform: scale(0.9);
+  margin-right: 0.35rem;
+}
+
