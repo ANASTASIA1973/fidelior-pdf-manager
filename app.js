@@ -1508,6 +1508,11 @@ function renderTargetSummary(){
     lines.push(`<strong>Scopevisio:</strong> ${t.scope.seg.join(" \\ ")}`);
   }
 
+  // Scopevisio – Betriebskosten (separate Zeile)
+  if (t?.scopeBk?.root && Array.isArray(t.scopeBk.seg) && t.scopeBk.seg.length){
+    lines.push(`<strong>Scopevisio – Betriebskosten:</strong> ${t.scopeBk.seg.join(" \\ ")}`);
+  }
+
   // pCloud Zusatzablage (strukturierter Objektpfad)
   if (t?.pcloud?.root && Array.isArray(t.pcloud.seg) && t.pcloud.seg.length){
     lines.push(`<strong>pCloud (Zusatzablage):</strong> ${t.pcloud.seg.join(" \\ ")}`);
@@ -1583,12 +1588,14 @@ function refreshPreview(){
     catch(e){ console.warn("refreshPreview failed", e); }
   }
 
-  const ids = [
+   const ids = [
     "#chkScope", "#chkScopevisio",
+    "#chkScopeBk",
     "#chkPcloudExtras", "#chkPcloudExtra", "#chkPcloudBackup",
     "#chkLocal", "#chkLocalSave",
     "#objectSelect", "#genericSubfolder", "#docTypeSelect"
   ];
+
 
   function attach(){
     ids.forEach(sel => {
@@ -1607,6 +1614,7 @@ function refreshPreview(){
 })();
 
 // === TARGETS: Pfade für das Speichern bestimmen (neu, kompakt) ===
+// === TARGETS: Pfade für das Speichern bestimmen (neu, kompakt) ===
 function resolveTargets(){
   const code    = (objSel?.value || "").trim();
   const invoice = (typeof isInvoice === "function") ? isInvoice() : true;
@@ -1614,10 +1622,11 @@ function resolveTargets(){
   const sub     = (subSel?.value || "").trim();
 
   // NEUE Schalter
-  const useScope   = flag("chkScopevisio", "chkScope");
-  const useExtras  = flag("chkPcloudExtra", "chkPcloudExtras");
-  const wantLocal  = flag("chkLocalSave",  "chkLocal");
-  const wantBackup = !!document.getElementById("chkPcloudBackup")?.checked; // NEU
+  const useScope    = flag("chkScopevisio", "chkScope");
+  const useExtras   = flag("chkPcloudExtra", "chkPcloudExtras");
+  const wantLocal   = flag("chkLocalSave",  "chkLocal");
+  const wantBackup  = !!document.getElementById("chkPcloudBackup")?.checked;
+  const wantScopeBk = !!document.getElementById("chkScopeBk")?.checked;   // NEU
 
   // Root-Handles: bevorzugt window.*, Fallback alte lokalen Variablen
   const scopeRoot  = window.scopeRootHandle  || scopeRootHandle  || null;
@@ -1625,12 +1634,13 @@ function resolveTargets(){
 
   const out = {
     scope:        { root:null, seg:[] },
-    pcloud:       { root:null, seg:[] },       // strukturierte pCloud (Extras)
-    pcloudBucket: { root:null, seg:[] },       // Sammelordner (Backup)
+    scopeBk:      { root:null, seg:[] },     // NEU: Betriebskosten-Kopie
+    pcloud:       { root:null, seg:[] },     // strukturierte pCloud (Extras)
+    pcloudBucket: { root:null, seg:[] },     // Sammelordner (Backup)
     local:        wantLocal === true
   };
 
-  // ---------- Scopevisio ----------
+  // ---------- Scopevisio (Hauptablage) ----------
   if (useScope && scopeRoot && code){
     let seg;
     if (code === "FIDELIOR"){
@@ -1649,6 +1659,24 @@ function resolveTargets(){
     }
     out.scope.root = scopeRoot;
     out.scope.seg  = seg;
+  }
+
+  // ---------- Scopevisio – Betriebskosten (nur Objekte, nur Rechnungen) ----------
+  if (
+    useScope &&
+    scopeRoot &&
+    code &&
+    invoice &&
+    wantScopeBk &&
+    code !== "FIDELIOR" &&
+    code !== "PRIVAT" &&
+    !(typeof isArndtCie === "function" && isArndtCie(code))
+  ){
+    const scopeNameBk = (typeof getFolderNames === "function" ? getFolderNames(code).scopeName : code);
+   // NEU: OBJEKTE / Objektname / Betriebskosten / Jahr
+out.scopeBk.root = scopeRoot;
+out.scopeBk.seg  = ["OBJEKTE", scopeNameBk, "Betriebskosten", year];
+
   }
 
   // ---------- pCloud: strukturierte Ablage (Extras) ----------
@@ -1682,15 +1710,14 @@ function resolveTargets(){
     }
   }
 
-  // ---------- pCloud: Sammelordner (Backup immer, wenn pCloud verbunden) ----------
-  if (pcloudRoot){
+     // ---------- pCloud: Sammelordner (Backup nur, wenn Checkbox aktiv) ----------
+  if (wantBackup && pcloudRoot){
     const seg = ["FIDELIOR", (typeof PCL_COLLECT_FOLDER === "string" ? PCL_COLLECT_FOLDER : "DMS BACKUP PCLOUD")];
     out.pcloudBucket.root = pcloudRoot;
     out.pcloudBucket.seg  = seg;
   }
-
   return out;
-}
+}      
 
 // --- Vorprüfung der Ziele und Rechte ---
 // Prüft NUR, was wirklich aktiv ist (neue ODER alte Checkbox-IDs).
@@ -1972,7 +1999,7 @@ async function assertProcessedNotInsideInbox(inboxDir, processedDir){
 // Kopiert die aktuelle Inbox-Datei nach "Bearbeitet" und löscht das Original.
 // Nutzt currentInboxRelPath (['sub','sub','Datei.pdf']) oder fällt zurück auf currentInboxFileName.
 async function moveInboxToProcessed(){
-  // Root-Handles: bevorzugt window.*, Fallback alte lokale Variablen
+  // Root-Handles: bevorzugt window.*, Fallback alte lokalen Variablen
   const inboxRoot     = window.inboxRootHandle      || inboxRootHandle;
   const processedRoot = window.bearbeitetRootHandle || processedRootHandle;
 
@@ -1987,13 +2014,11 @@ async function moveInboxToProcessed(){
   try {
     await assertProcessedNotInsideInbox?.(inboxRoot, processedRoot);
   } catch (e) {
-    throw new Error("Bearbeitet liegt innerhalb der Inbox");
+    throw new Error("Konfiguration ungültig (Inbox/Bearbeitet): " + (e?.message || e));
   }
 
-  // Berechtigungen
-  const okIn  = await requestDirWrite(inboxRoot);
-  const okOut = await requestDirWrite(processedRoot);
-  if (!okIn)  throw new Error("Inbox: Schreibrecht verweigert");
+  // Schreibrecht für Bearbeitet einholen
+  const okOut = await ensureWritePermissionWithPrompt(processedRoot, "Bearbeitet");
   if (!okOut) throw new Error("Bearbeitet: Schreibrecht verweigert");
 
   // Pfad der Inbox-Datei bestimmen
@@ -2024,7 +2049,7 @@ async function moveInboxToProcessed(){
   }
 
   if (!fileObj || !fileObj.size) {
-    throw new Error("Quelle leer oder nicht vorhanden");
+    throw new Error("Inbox-Datei ist leer oder nicht lesbar");
   }
 
   // Zielordner (Bearbeitet) aufbauen: gleiche Substruktur wie in Inbox
@@ -2036,9 +2061,19 @@ async function moveInboxToProcessed(){
   // Schreiben (überschreibt existierende Datei gleichen Namens NICHT)
   const finalName = await uniqueName(outDir, name);
   const outHandle = await outDir.getFileHandle(finalName, { create:true });
-  const ws = await outHandle.createWritable();
-  await ws.write(fileObj);
-  await ws.close();
+
+  let ws;
+  try {
+    ws = await outHandle.createWritable({ keepExistingData:false });
+    await ws.write(fileObj);
+    await ws.close();
+  } catch (e) {
+    try { await ws?.abort?.(); } catch {}
+    throw new Error("Schreiben nach Bearbeitet fehlgeschlagen: " + (e?.message || e));
+  }
+
+  // Chrome .crswap-Reste säubern (best effort, wie bei writeFileTo)
+  try { await tryRemoveCrSwap(outDir, finalName); } catch {}
 
   // Quelle in der Inbox löschen (best effort)
   try {
@@ -2067,6 +2102,7 @@ async function moveInboxToProcessed(){
 
   return true;
 }
+
 
 
 /* ---------------------- Verbindungen: Root-Ordner binden ---------------------- */
@@ -2498,7 +2534,7 @@ let poEditState = null;  // merkt, ob wir eine bestehende Vorlage bearbeiten
       (poRules[code].templates || []).forEach(t => {
         const mails = (t.recipients || t.to || []).join(", ");
         const li = document.createElement("li");
-        const labelTxt = t.label || t.id || "Vorlage";
+        const labelTxt = t.label || t.subject || t.id || "Vorlage";
         li.innerHTML =
           '<div><strong>'+code+'</strong> · <span class="muted">'+escapeHtml(labelTxt)+'</span> — '+
           (mails || "—") +
@@ -2556,7 +2592,6 @@ $("#poAdd")?.addEventListener("click", (e) => {
       // Hauptvorlage überschreiben
       poRules[code].invoice = { to: recs, subject, replyTo };
     } else if (poEditState.kind === "template") {
-      // Bestehendes Template aktualisieren (oder neu anlegen, falls ID nicht gefunden)
       const list = poRules[code].templates || [];
       const id   = poEditState.id || ("tmpl-" + Date.now().toString(36));
       let hit    = list.find(x => (x.id || x.label || x.subject) === poEditState.id);
@@ -2565,7 +2600,7 @@ $("#poAdd")?.addEventListener("click", (e) => {
         list.push(hit);
       }
       hit.id          = id;
-      hit.label       = hit.label || subject || id;
+      hit.label       = subject || hit.label || id;   // neuer Betreff überschreibt tmpl-ID
       hit.to          = recs;
       hit.recipients  = recs;
       hit.subject     = subject;
@@ -2573,6 +2608,7 @@ $("#poAdd")?.addEventListener("click", (e) => {
       hit.invoiceOnly = true;
       poRules[code].templates = list;
     }
+
   } else {
     // Neuer Eintrag:
     // 1. falls noch keine Hauptvorlage existiert → diese füllen
@@ -2629,6 +2665,10 @@ $("#poAdd")?.addEventListener("click", (e) => {
   window.emailsCfg      = result;
   window.__fdlEmailsCfg = result;
   populateMailSelect();             // Datalist/Select neu füllen
+
+    // NEU: alten E-Mail-Prompt verwerfen, damit Betreff-Datalist neu aufgebaut wird
+      const oldPrompt = document.getElementById("fdlEmailPrompt");
+      if (oldPrompt) oldPrompt.remove();
   toast("E-Mail-Vorlagen gespeichert.", 2500);
 
 
@@ -3177,14 +3217,15 @@ function buildEmailPromptDialog(defaults = {}) {
           <details id="fdlAdv" style="margin-top:4px">
             <summary style="cursor:pointer">Weitere Felder (CC/BCC, Reply-To)</summary>
             <div style="display:grid;gap:10px;margin-top:8px">
-              <label class="row" style="display:grid;gap:6px">
-                <span>CC:</span>
-                <input id="fdlMailCc" class="input slim" placeholder="optional">
-              </label>
-              <label class="row" style="display:grid;gap:6px">
-                <span>BCC:</span>
-                <input id="fdlMailBcc" class="input slim" placeholder="optional">
-              </label>
+             <label class="row" style="display:grid;gap:6px">
+  <span>CC:</span>
+  <input id="fdlMailCc" class="input slim" placeholder="optional" list="mailBook">
+</label>
+<label class="row" style="display:grid;gap:6px">
+  <span>BCC:</span>
+  <input id="fdlMailBcc" class="input slim" placeholder="optional" list="mailBook">
+</label>
+
               <label class="row" style="display:grid;gap:6px">
                 <span>Reply-To:</span>
                 <input id="fdlMailReply" class="input slim" placeholder="z. B. documents@fidelior.de">
@@ -3559,31 +3600,37 @@ async function stampPdf(buf){
   }
 }
 
-
 // === SPEICHERN & optionaler E-Mail-Versand (getrennte Buttons) ===
 async function handleSaveFlow(mode = "save_only") {
   try {
+    // 0) Guard: keine Datei geladen
     if (!pdfDoc || !saveArrayBuffer) {
       toast("Keine PDF geladen.", 2000);
       return;
     }
 
-    // ---- 0) Vorab: Dateiname + Defaults für Betreff/ReplyTo
+    // 1) Dateiname + Defaults für Betreff/Reply-To
     const previewName = (typeof effectiveFileName === "function")
       ? effectiveFileName()
       : (lastFile?.name || "dokument.pdf");
 
-    let preSubject = "", preReply = "";
+    let preSubject = "";
+    let preReply   = "";
+
     try {
-      const meta = (typeof computeSubjectAndReply === "function") ? computeSubjectAndReply() : null;
+      const meta = (typeof computeSubjectAndReply === "function")
+        ? computeSubjectAndReply()
+        : null;
       preSubject = meta?.subject || "";
       preReply   = meta?.replyTo || "";
-    } catch {}
+    } catch {
+      // stiller Fallback
+    }
 
-    // ---- 1) Stempeln & Bytes vorbereiten
     const fileName = previewName;
     const safeName = (typeof fileSafe === "function") ? fileSafe(fileName) : fileName;
 
+    // 2) PDF stempeln (nur im Speicher)
     let stampedBytes = saveArrayBuffer;
     try {
       stampedBytes = await stampPdf(saveArrayBuffer);
@@ -3592,7 +3639,7 @@ async function handleSaveFlow(mode = "save_only") {
       stampedBytes = saveArrayBuffer;
     }
 
-    // ---- 2) Ziele auflösen, Rechte prüfen
+    // 3) Ziele auflösen, Rechte prüfen (noch kein Schreiben)
     const pf = await preflightTargets();
     if (!pf.ok) {
       toast("Speichern abgebrochen: " + (pf.reason || "Zielprüfung fehlgeschlagen"), 5000);
@@ -3600,35 +3647,85 @@ async function handleSaveFlow(mode = "save_only") {
     }
     const t = pf.t;
 
-    let okScope=false, okPcl=false, okPclBucket=false, okLocal=false;
-    const errs = {};
+    // 4) E-Mail-Entscheidung VOR dem Schreiben (nur bei mode === "send")
+    let decision   = null;
+    let doSendMail = false;
 
-    async function writeSafe(root, seg, bytes, name){
+    if (mode === "send") {
+      decision = await promptForEmailOnce({
+        attachmentName: safeName,
+        subject: preSubject,
+        replyTo: preReply
+      });
+
+      // X / ESC / Schließen → GAR NICHT speichern
+      if (!decision || decision.mode === "cancel") {
+        toast("E-Mail-Versand abgebrochen.", 1800);
+        return;
+      }
+
+      // „Nur speichern“ → kein Mailversand
+      // „Speichern & E-Mail senden“ → später speichern + mailen
+      doSendMail = decision.mode === "save_and_send";
+      // decision.mode === "save_only" = nur speichern, keine Mail
+    }
+
+    // 5) Jetzt wirklich schreiben (Scope, Betriebskosten, pCloud, Lokal …)
+    let okScope      = false;
+    let okScopeBk    = false;
+    let okPcl        = false;
+    let okPclBucket  = false;
+    let okLocal      = false;
+    const errs       = {};
+
+    async function writeSafe(root, seg, bytes, name) {
       if (!root || !seg || !seg.length) return;
       try {
         await ensureDirPath(root, seg);
       } catch (e) {
         console.warn("ensureDirPath fehlgeschlagen:", e);
       }
-      await writeFileTo(root, seg, bytes, name, { unique:true });
+      await writeFileTo(root, seg, bytes, name, { unique: true });
     }
 
-    // Scope
+    // Scope – Hauptablage
     if (t?.scope?.root && t.scope.seg?.length) {
-      try { await writeSafe(t.scope.root, t.scope.seg, stampedBytes, safeName); okScope = true; }
-      catch(e){ errs.scope = e?.message || String(e); }
+      try {
+        await writeSafe(t.scope.root, t.scope.seg, stampedBytes, safeName);
+        okScope = true;
+      } catch (e) {
+        errs.scope = e?.message || String(e);
+      }
     }
 
-    // pCloud Objektpfad
+    // Scope – Betriebskosten
+    if (t?.scopeBk?.root && t.scopeBk.seg?.length) {
+      try {
+        await writeSafe(t.scopeBk.root, t.scopeBk.seg, stampedBytes, safeName);
+        okScopeBk = true;
+      } catch (e) {
+        errs.scopeBk = e?.message || String(e);
+      }
+    }
+
+    // pCloud – Objektpfad
     if (t?.pcloud?.root && t.pcloud.seg?.length) {
-      try { await writeSafe(t.pcloud.root, t.pcloud.seg, stampedBytes, safeName); okPcl = true; }
-      catch(e){ errs.pcloud = e?.message || String(e); }
+      try {
+        await writeSafe(t.pcloud.root, t.pcloud.seg, stampedBytes, safeName);
+        okPcl = true;
+      } catch (e) {
+        errs.pcloud = e?.message || String(e);
+      }
     }
 
-    // pCloud Sammelordner
+    // pCloud – Sammelordner
     if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
-      try { await writeSafe(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, safeName); okPclBucket = true; }
-      catch(e){ errs.bucket = e?.message || String(e); }
+      try {
+        await writeSafe(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, safeName);
+        okPclBucket = true;
+      } catch (e) {
+        errs.bucket = e?.message || String(e);
+      }
     }
 
     // Lokal (optional)
@@ -3645,33 +3742,48 @@ async function handleSaveFlow(mode = "save_only") {
           suggestedName: safeName,
           types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }]
         });
-        const ws = await fh.createWritable({ keepExistingData:false });
-        await ws.write(new Blob([stampedBytes], { type:"application/pdf" }));
+
+        const ws = await fh.createWritable({ keepExistingData: false });
+        await ws.write(new Blob([stampedBytes], { type: "application/pdf" }));
         await ws.close();
         okLocal = true;
+
       } catch (e) {
-        if (e?.name !== "AbortError") {
-          errs.local = e?.message || String(e);
-          toast("Lokal: Speichern fehlgeschlagen.", 6000);
+        const msg = String(e?.message || e || "");
+
+        // Benutzer klickt auf „Abbrechen“ → still ignorieren
+        if (e?.name === "AbortError") {
+          console.debug("[LOCAL] User aborted save dialog");
+        }
+        // Chrome: „User activation is required…“ → nur loggen
+        else if (msg.includes("User activation is required to show a file picker")) {
+          console.warn("[LOCAL] File picker ohne User-Aktivierung blockiert:", e);
+        }
+        // andere Fehler merken
+        else {
+          errs.local = msg;
         }
       }
     }
 
-    // Erfolgsauswertung
+    // 6) Erfolgsauswertung
     const successTargets = [
-      okScope ? "Scopevisio" : null,
-      okPcl ? "pCloud" : null,
-      okPclBucket ? "pCloud (Sammelordner)" : null,
-      okLocal ? "Lokal" : null
+      okScope     ? "Scopevisio"                   : null,
+      okScopeBk   ? "Scopevisio – Betriebskosten"  : null,
+      okPcl       ? "pCloud"                       : null,
+      okPclBucket ? "pCloud (Sammelordner)"        : null,
+      okLocal     ? "Lokal"                        : null
     ].filter(Boolean);
 
     if (successTargets.length === 0) {
       const reasons = [
-        errs.scope  ? `Scopevisio: ${errs.scope}` : null,
-        errs.pcloud ? `pCloud: ${errs.pcloud}` : null,
-        errs.bucket ? `Sammelordner: ${errs.bucket}` : null,
+        errs.scope     ? `Scopevisio: ${errs.scope}`     : null,
+        errs.scopeBk   ? `Betriebskosten: ${errs.scopeBk}` : null,
+        errs.pcloud    ? `pCloud: ${errs.pcloud}`        : null,
+        errs.bucket    ? `Sammelordner: ${errs.bucket}`  : null,
         (wantLocal && errs.local) ? `Lokal: ${errs.local}` : null
       ].filter(Boolean).join("<br>");
+
       toast(
         `<strong>Speichern fehlgeschlagen</strong><br>${safeName}` +
         (reasons ? `<br><small>${reasons}</small>` : ""),
@@ -3680,46 +3792,39 @@ async function handleSaveFlow(mode = "save_only") {
       return;
     }
 
-    // ---- 3) E-Mail: nur bei explizitem Versand (Button „E-Mail senden…“)
-    if (mode === "send") {
-      const decision = await promptForEmailOnce({
-        attachmentName: safeName,
-        subject: preSubject,
-        replyTo: preReply
-      });
+    // 7) E-Mail-Versand NACH erfolgreichem Speichern (nur wenn gewünscht)
+    if (mode === "send" && doSendMail && decision) {
+      const to      = (decision.to  || []).filter(Boolean);
+      const cc      = (decision.cc  || []).filter(Boolean);
+      const bcc     = (decision.bcc || []).filter(Boolean);
+      const subject = (decision.subject || "").trim();
+      const replyTo = (decision.replyTo || "").trim();
 
-      if (decision?.mode === "save_and_send") {
-        const to  = (decision.to  || []).filter(Boolean);
-        const cc  = (decision.cc  || []).filter(Boolean);
-        const bcc = (decision.bcc || []).filter(Boolean);
-        const subject = (decision.subject || "").trim();
-        const replyTo = (decision.replyTo || "").trim();
+      const rc = to.length + cc.length + bcc.length;
 
-        const rc = to.length + cc.length + bcc.length;
-        if (!rc || !subject) {
-          toast("E-Mail unvollständig (Empfänger/Betreff). Versand abgebrochen.", 6000);
-        } else {
-          try {
-            await sendMail({
-              to, cc, bcc,
-              subject,
-              text: (typeof computeMailBody === "function" ? computeMailBody() : ""),
-              replyTo: replyTo || undefined,
-              attachmentBytes: stampedBytes,
-              attachmentName: safeName
-            });
-            toast("<strong>E-Mail versendet</strong>", 2500);
-          } catch (e) {
-            toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message || e}`, 4000);
-          }
-        }
+      if (!rc || !subject) {
+        toast("E-Mail unvollständig (Empfänger/Betreff). Versand abgebrochen.", 6000);
       } else {
-        toast("E-Mail-Versand abgebrochen.", 1800);
+        try {
+          await sendMail({
+            to,
+            cc,
+            bcc,
+            subject,
+            text: (typeof computeMailBody === "function" ? computeMailBody() : ""),
+            replyTo: replyTo || undefined,
+            attachmentBytes: stampedBytes,
+            attachmentName: safeName
+          });
+          toast("<strong>E-Mail versendet</strong>", 2500);
+        } catch (e) {
+          toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message || e}`, 4000);
+        }
       }
     }
 
-    // ---- 4) Inbox → Bearbeitet
-    if (currentInboxFileHandle && (okScope || okPcl || okPclBucket || okLocal)) {
+    // 8) Inbox → Bearbeitet (nur wenn irgendwo gespeichert wurde)
+    if (currentInboxFileHandle && (okScope || okScopeBk || okPcl || okPclBucket || okLocal)) {
       try {
         const moved = await moveInboxToProcessed();
         if (moved) toast("Inbox → Bearbeitet verschoben.", 2000);
@@ -3729,16 +3834,18 @@ async function handleSaveFlow(mode = "save_only") {
       }
     }
 
-    // ---- 5) Abschluss-Toast + Reset
-    const okTargets = [
-      okScope     ? "Scopevisio"            : null,
-      okPcl       ? "pCloud"                : null,
-      okPclBucket ? "pCloud (Sammelordner)" : null,
-      okLocal     ? "Lokal"                 : null
-    ].filter(Boolean).join(" & ");
+    // 9) Abschluss-Toast + Reset
+    const okTargetsLabel = successTargets.join(" & ");
 
-    toast(`<strong>Gespeichert</strong><br>${safeName}<br><em>${okTargets}</em>`, 5000);
-    if (typeof hardReset === "function") hardReset();
+    toast(
+      `<strong>Gespeichert</strong><br>${safeName}` +
+      (okTargetsLabel ? `<br><em>${okTargetsLabel}</em>` : ""),
+      5000
+    );
+
+    if (typeof hardReset === "function") {
+      hardReset();
+    }
 
   } catch (e) {
     console.error("[SAVE] Fehler:", e);
@@ -3746,22 +3853,26 @@ async function handleSaveFlow(mode = "save_only") {
   }
 }
 
-// Buttons → Flow
+// ---------------------------------------------------------------
+// Buttons → Flow (GENAU EINMAL, direkt NACH handleSaveFlow einfügen)
+// ---------------------------------------------------------------
 $("#saveBtn")?.addEventListener("click", (ev) => {
   ev.preventDefault();
-  handleSaveFlow("save_only");   // NUR speichern
+  handleSaveFlow("save_only");   // nur speichern
 });
 
 $("#sendEmailBtn")?.addEventListener("click", (ev) => {
   ev.preventDefault();
-  handleSaveFlow("send");        // Speichern + Mail-Dialog
+  handleSaveFlow("send");        // speichern + ggf. E-Mail
 });
 
-
-// Cancel: full reset
-$("#cancelBtn")?.addEventListener("click",(e)=>{ e.preventDefault(); hardReset(); toast("Vorgang abgebrochen.",1500); });
-
-
+$("#cancelBtn")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  if (typeof hardReset === "function") {
+    hardReset();
+  }
+  toast("Vorgang abgebrochen.", 1500);
+});
 function hardReset(){
   // PDF/Preview state
   pdfDoc = null;
@@ -4018,26 +4129,31 @@ try { assignmentsCfg = await loadJson("assignments.json"); }  catch { assignment
   applyPrefs(prefs);
   renderTargetSummary();
 
-  // Änderungen speichern (localStorage), damit die Wahl erhalten bleibt
+   // Änderungen speichern (localStorage), damit die Wahl erhalten bleibt
   [
     "#chkScope", "#chkScopevisio",
+    "#chkScopeBk",
     "#chkPcloudCollect",
     "#chkPcloudConfig",
     "#chkPcloudExtras", "#chkPcloudExtra",
+    "#chkPcloudBackup",
     "#chkLocal", "#chkLocalSave"
   ].forEach(sel => {
     $(sel)?.addEventListener("change", () => {
       const next = {
         scope:   flag("chkScopevisio", "chkScope"),
+        scopeBk: !!document.getElementById("chkScopeBk")?.checked,
         collect: $("#chkPcloudCollect")?.checked || false,
         config:  $("#chkPcloudConfig")?.checked || false,
         extras:  flag("chkPcloudExtra", "chkPcloudExtras"),
+        backup:  !!document.getElementById("chkPcloudBackup")?.checked,
         local:   flag("chkLocalSave",  "chkLocal"),
       };
       saveTargetPrefs(next);
       refreshPreview();
     });
   });
+
 
   // Direkt nach dem Anwenden rendern
   paintConnectionsCompact();
@@ -4708,7 +4824,7 @@ async function pickDirectory(target){
     mo.observe(host, { childList: true, subtree: true });
   }
 
-  // 3) Checkboxen sicherstellen (Scopevisio, pCloud Backup, pCloud Zusatz (pCloud), Lokal)
+// 3) Checkboxen sicherstellen (Scopevisio, Scope-BK, pCloud Extra + Backup, Lokal)
   function ensureSaveCheckboxes(){
     const host = getSaveHost();
     if (!host) return;
@@ -4735,21 +4851,65 @@ async function pickDirectory(target){
         else box.appendChild(wrap);
       }
       const chk = $('#'+id, wrap);
-      if (typeof chk.checked === 'boolean') chk.checked = defChecked;
+      // Default nur beim ersten Mal setzen, nicht bei jedem Aufruf wieder überschreiben
+      if (typeof chk.checked === 'boolean' && !chk._fdlInitDone) {
+        chk.checked = defChecked;
+        chk._fdlInitDone = true;
+      }
       return {wrap, chk};
     };
 
-    // Scopevisio (Default AN)
-    const sc = addCheck('chkScopevisio', 'Scopevisio',
-      'Schaltet die Ablage in Scopevisio ein/aus (Verbindung bleibt erhalten).', true);
+    // --- Scopevisio (Hauptschalter, Default AN) ---
+    const sc = addCheck(
+      'chkScopevisio',
+      'Scopevisio',
+      'Schaltet die Ablage in Scopevisio ein/aus (Verbindung bleibt erhalten).',
+      true
+    );
+sc.wrap.classList.add('chk-main');   // <--- NEU
+    // --- Scopevisio – Betriebskosten (unter Scopevisio eingerückt) ---
+    const scBk = addCheck(
+      'chkScopeBk',
+      'Scopevisio – Betriebskosten',
+      'Legt zusätzlich eine Kopie im Objektordner unter „Betriebskosten/{Jahr}“ ab.',
+      false,
+      sc.wrap
+    );
+   scBk.wrap.classList.add('chk-sub');
 
-    // pCloud (Backup) (Default AN) + Statusanhang
+    // Verknüpfung: ohne Scopevisio kein Betriebskosten
+    sc.chk.addEventListener('change', () => {
+      if (!sc.chk.checked) {
+        const bk = document.getElementById('chkScopeBk');
+        if (bk) bk.checked = false;
+      }
+    });
+    scBk.chk.addEventListener('change', () => {
+      if (scBk.chk.checked && !sc.chk.checked) {
+        sc.chk.checked = true;
+      }
+    });
+
+    // --- pCloud – zusätzliche Ablageziele (Hauptzeile) ---
+    const pcExtra = addCheck(
+      'chkPcloudExtra',
+      'pCloud – zusätzliche Ablageziele',
+      'Speichert in strukturierte pCloud-Ordner (OBJEKTE/VERWALTUNG/…).',
+      false
+    );
+ pcExtra.wrap.classList.add('chk-main');   // <--- NEU
+    // --- pCloud (Backup) eingerückt darunter, Default AN ---
     const pc = addCheck(
       'chkPcloudBackup',
       'pCloud (Backup)',
-      'Sichert zusätzlich in pCloud. Abhängig vom pCloud-Root.',
-      true
+      'Sichert zusätzlich in den pCloud-Sammelordner (DMS BACKUP PCLOUD).',
+      true,
+      pcExtra.wrap
     );
+    pc.wrap.classList.add('chk-sub');
+    pc.chk.addEventListener('change', () => updateBackupInfoText());
+
+    // Status-Text neben pCloud (Backup)
     if (!$('#pcBackupStatus', pc.wrap)) {
       const info = document.createElement('span');
       info.id = 'pcBackupStatus';
@@ -4759,26 +4919,38 @@ async function pickDirectory(target){
       pc.wrap.appendChild(info);
     }
 
-    // pCloud – zusätzliche Ablageziele (pCloud) (Default AUS)
-    addCheck('chkPcloudExtra',
-      'pCloud – zusätzliche Ablageziele (pCloud)',
-      'Speichert zusätzlich in weitere pCloud-Ordner (z. B. OBJEKTE/VERWALTUNG/…)',
+    // --- Lokal (eigene Zeile) ---
+    const loc = addCheck(
+      'chkLocalSave',
+      'Lokal',
+      'Speichert zusätzlich lokal auf diesem Gerät',
       false
     );
+    loc.wrap.classList.add('chk-main');      // <--- NEU
 
-    // Lokal (Default AUS)
-    addCheck('chkLocalSave', 'Lokal', 'Speichert zusätzlich lokal auf diesem Gerät', false);
   }
 
-  // 4) Backup-Status neben der Checkbox aktualisieren (nur Root entscheidet!)
+  // 4) Backup-Status neben der Checkbox aktualisieren (Root + Checkbox)
   function updateBackupInfoText(){
     const info = $('#pcBackupStatus');
     if (!info) return;
-    const rootOk = !!window.pcloudRootHandle;
-    info.textContent = rootOk ? 'Backup aktiv' : 'Backup aus (pCloud-Root nicht verbunden)';
-    info.style.color = rootOk ? '#2c6a00' : '#9b7700';
+
+    const rootOk  = !!window.pcloudRootHandle;
+    const chk     = document.getElementById('chkPcloudBackup');
+    const enabled = !!chk?.checked;
+
+    if (!rootOk) {
+      info.textContent = 'Backup aus (pCloud-Root nicht verbunden)';
+      info.style.color = '#9b7700';
+    } else if (!enabled) {
+      info.textContent = 'Backup aus (deaktiviert)';
+      info.style.color = '#9b7700';
+    } else {
+      info.textContent = 'Backup aktiv';
+      info.style.color = '#2c6a00';
+    }
   }
-  window.fdlUpdateBackupInfoText = updateBackupInfoText; // falls anderswo gebraucht
+
 
   // 5) Alles zusammen booten
   function bootSaveSection(){
