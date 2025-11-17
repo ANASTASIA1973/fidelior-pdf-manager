@@ -1004,3 +1004,7 @@ a:focus-visible{ outline:0; box-shadow: var(--focus-ring); border-radius:6px; }
   gap: 0.25rem;
 }
 
+#app {
+  font-size: 13px;
+  line-height: 1.4;
+}
