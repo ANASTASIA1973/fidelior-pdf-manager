@@ -2171,9 +2171,9 @@ async function refreshInbox(){
     }
   }
 
-  // WICHTIG: Text immer setzen, auch wenn inboxRoot fehlt oder offen=0
-  if (counters){
-    counters.textContent = `Offen: ${offen} · In Arbeit: 0 · Fertig: 0 · Session: 0`;
+  // Anzeige: nur echte Zahl für „Offen“ zeigen, Rest vorerst weglassen
+  if (counters) {
+    counters.textContent = `Offen: ${offen}`;
   }
 }
 
@@ -4411,13 +4411,44 @@ return safeBase ? `${safeBase}.pdf` : "";
   const canPickDir = !!window.showDirectoryPicker;
 
   // ---------- Ziele (nur Handles, KEINE Checkbox‑Logik hier)
-  const TARGETS = [
-    { key: 'pcloudRoot',     label: 'pCloud – Root',            varName: 'pcloudRootHandle',  hint: 'Backup & Zusatzablagen (pCloud) hängen am Root.' },
-    { key: 'pcloudConfig',   label: 'pCloud – Config‑Ordner',   varName: 'pcloudConfigDir',   hint: 'Verwaltung (E‑Mails, Liegenschaften, Zuordnungen, Typen).' },
-    { key: 'scopeRoot',      label: 'Scopevisio – Root',        varName: 'scopeRootHandle',   hint: 'Hauptziel für Ablage in Scopevisio.' },
-    { key: 'inboxRoot',      label: 'Inbox – Quellordner',      varName: 'inboxRootHandle',   hint: 'Quelle (Dateien aus der Eingangsliste).'},
-    { key: 'bearbeitetRoot', label: 'Bearbeitet – Zielordner',  varName: 'bearbeitetRootHandle', hint: 'Nach erfolgreichem Speichern hierhin verschieben.' },
-  ];
+const TARGETS = [
+  {
+    key: "pcloudRoot",
+    label: "pCloud – Root",
+    varName: "pcloudRootHandle",
+    hint:
+      "Im Ordner-Auswahldialog bitte direkt das Laufwerk „pCloud Drive (P:)“ auswählen (oberste Ebene, hier liegen z. B. FIDELIOR, PRIVAT, OBJEKTE, DMS BACKUP PCLOUD …)."
+  },
+  {
+    key: "pcloudConfig",
+    label: "pCloud – Config-Ordner",
+    varName: "pcloudConfigDir",
+    hint:
+      "Vom pCloud-Root (P:) aus zum Ordner „config“ navigieren: FIDELIOR → SOFTWARE → „Fidelior Dokument Manager“ → „Anastasias Development“ → „Fidelior DMS Anastasia“ → „config“."
+  },
+  {
+    key: "scopeRoot",
+    label: "Scopevisio – Root",
+    varName: "scopeRootHandle",
+    hint:
+      "Scopevisio-Hauptordner wählen, z. B. „Scopevisio Documents\\Arndt“ (hier liegen OBJEKTE, Inbox, Bearbeitet …)."
+  },
+  {
+  key: "inboxRoot",
+  label: "Inbox – Quellordner",
+  varName: "inboxRootHandle",
+  hint:
+    "Im Explorer: Scopevisio Documents → Arndt → den Ordner „Inbox“ auswählen (Eingangsliste für neue PDFs)."
+},
+{
+  key: "bearbeitetRoot",
+  label: "Bearbeitet – Zielordner",
+  varName: "bearbeitetRootHandle",
+  hint:
+    "Im Explorer: Scopevisio Documents → Arndt → den Ordner „Bearbeitet“ auswählen (hier landen fertige Belege nach dem Speichern)."
+}
+
+];
 
  // ---------- Verbinden (generisch)
 async function pickDirectory(target){
@@ -4506,20 +4537,22 @@ async function pickDirectory(target){
     return rows.join('') + info;
   }
 
-  function renderConnBody(){
-    const body = $('#fdlConnBody', ensureConnDialog());
-    if (!body) return;
-    body.innerHTML = statusRows();
-    $$('.fdlConnPick', body).forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const key = btn.getAttribute('data-key');
-        const target = TARGETS.find(t => t.key === key);
-        if (!target) return;
-        const ok = await pickDirectory(target);
-        if (ok) renderConnBody();
-      });
+ function renderConnBody(){
+  const body = $('#fdlConnBody', ensureConnDialog());
+  if (!body) return;
+  body.innerHTML = statusRows();
+
+  $$('.fdlConnPick', body).forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const key = btn.getAttribute('data-key');
+      const target = TARGETS.find(t => t.key === key);
+      if (!target) return;
+
+      await pickDirectory(target);   // egal ob true/false zurückkommt
+      renderConnBody();              // immer neu zeichnen
     });
-  }
+  });
+}
 
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));

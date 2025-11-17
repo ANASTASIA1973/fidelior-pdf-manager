@@ -401,3 +401,20 @@ dialog .dialog-actions{ padding:.8rem 1rem; }
   margin-right: 0.35rem;
 }
 
+/* Zielordner-Vorschau extra klein darstellen */
+#targetPreview {
+  font-size: 10px !important;   /* wenn noch zu groß: auf 9px runtergehen */
+  line-height: 1.2;
+  margin-top: 4px;
+}
+
+#targetPreview strong,
+#targetPreview em {
+  font-size: 10px !important;
+  font-weight: 600;
+}
+/* Grundschrift der Fidelior-App etwas verkleinern */
+body {
+  font-size: 13px;
+  line-height: 1.4;
+}
