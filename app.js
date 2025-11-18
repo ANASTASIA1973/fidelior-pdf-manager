@@ -1508,9 +1508,9 @@ function renderTargetSummary(){
     lines.push(`<strong>Scopevisio:</strong> ${t.scope.seg.join(" \\ ")}`);
   }
 
-  // Scopevisio – Betriebskosten (separate Zeile)
+  // Scopevisio – Abrechnungsbelege (separate Zeile)
   if (t?.scopeBk?.root && Array.isArray(t.scopeBk.seg) && t.scopeBk.seg.length){
-    lines.push(`<strong>Scopevisio – Betriebskosten:</strong> ${t.scopeBk.seg.join(" \\ ")}`);
+    lines.push(`<strong>Scopevisio – Abrechnungsbelege:</strong> ${t.scopeBk.seg.join(" \\ ")}`);
   }
 
   // pCloud Zusatzablage (strukturierter Objektpfad)
@@ -1527,6 +1527,7 @@ function renderTargetSummary(){
   if (t?.local === true){
     lines.push(`<strong>Lokal:</strong> (wird beim Speichern abgefragt)`);
   }
+
 
   // Wenn nichts anzeigbar ist → präzise Gründe (neue ODER alte Checkbox-IDs)
   if (!lines.length){
@@ -1614,7 +1615,6 @@ function refreshPreview(){
 })();
 
 // === TARGETS: Pfade für das Speichern bestimmen (neu, kompakt) ===
-// === TARGETS: Pfade für das Speichern bestimmen (neu, kompakt) ===
 function resolveTargets(){
   const code    = (objSel?.value || "").trim();
   const invoice = (typeof isInvoice === "function") ? isInvoice() : true;
@@ -1661,7 +1661,7 @@ function resolveTargets(){
     out.scope.seg  = seg;
   }
 
-  // ---------- Scopevisio – Betriebskosten (nur Objekte, nur Rechnungen) ----------
+  // ---------- Scopevisio – Abrechnungsbelege (nur Objekte, nur Rechnungen) ----------
   if (
     useScope &&
     scopeRoot &&
@@ -1671,13 +1671,17 @@ function resolveTargets(){
     code !== "FIDELIOR" &&
     code !== "PRIVAT" &&
     !(typeof isArndtCie === "function" && isArndtCie(code))
-  ){
-    const scopeNameBk = (typeof getFolderNames === "function" ? getFolderNames(code).scopeName : code);
-   // NEU: OBJEKTE / Objektname / Betriebskosten / Jahr
-out.scopeBk.root = scopeRoot;
-out.scopeBk.seg  = ["OBJEKTE", scopeNameBk, "Betriebskosten", year];
+   ){
+    const scopeNameBk = (typeof getFolderNames === "function"
+      ? getFolderNames(code).scopeName
+      : code
+    );
 
+    // NEU: OBJEKTE / Objektname / Abrechnungsbelege / Jahr
+    out.scopeBk.root = scopeRoot;
+    out.scopeBk.seg  = ["OBJEKTE", scopeNameBk, "Abrechnungsbelege", year];
   }
+
 
   // ---------- pCloud: strukturierte Ablage (Extras) ----------
   if (useExtras && pcloudRoot && code){
@@ -1720,56 +1724,122 @@ out.scopeBk.seg  = ["OBJEKTE", scopeNameBk, "Betriebskosten", year];
 }      
 
 // --- Vorprüfung der Ziele und Rechte ---
-// Prüft NUR, was wirklich aktiv ist (neue ODER alte Checkbox-IDs).
-// pCloud-Root ist NUR nötig, wenn Backup oder Zusatzablage aktiv ist.
-// Config wird hier NICHT benötigt.
+// Prüft nur die aktivierten Ziele, schreibt aber noch nichts.
 async function preflightTargets(){
   const t = resolveTargets();
 
-  // Flags: neu ODER alt
-  const wantScope  = flag("chkScopevisio","chkScope");
-  const wantExtras = flag("chkPcloudExtra","chkPcloudExtras");
-  const wantLocal  = flag("chkLocalSave","chkLocal");
+  // Flags: neue ODER alte Checkbox-IDs
+  const wantScope  = flag("chkScopevisio", "chkScope");
+  const wantExtras = flag("chkPcloudExtra", "chkPcloudExtras");
+  const wantLocal  = flag("chkLocalSave", "chkLocal");
   const wantBackup = !!document.getElementById("chkPcloudBackup")?.checked;
 
-  // Mindestens ein Ziel?
+  // Mindestens ein Ziel aktiv?
   const anyOn = wantScope || wantExtras || wantLocal || wantBackup;
-  if (!anyOn){
-    return { ok:false, reason: "Kein Speicherziel aktiv" };
+  if (!anyOn) {
+    return { ok:false, reason: "Kein Speicherziel aktiv." };
   }
 
-  // ===== pCloud: nur prüfen, wenn Backup oder Extras aktiv sind =====
-  if (wantBackup || wantExtras){
+  // ===== pCloud: nur prüfen, wenn Backup oder Zusatzablage aktiv sind =====
+  if (wantBackup || wantExtras) {
     // irgendein pCloud-Root (aus resolveTargets bevorzugt)
-    const pRoot = t?.pcloudBucket?.root || t?.pcloud?.root || window.pcloudRootHandle || pcloudRootHandle;
-    if (!pRoot){
-      return { ok:false, reason: "pCloud-Root fehlt" };
+    const pRoot =
+      t?.pcloudBucket?.root ||
+      t?.pcloud?.root ||
+      window.pcloudRootHandle ||
+      (typeof pcloudRootHandle !== "undefined" ? pcloudRootHandle : null);
+
+    // noch gar kein Root verbunden
+    if (!pRoot) {
+      return {
+        ok:false,
+        reason: "pCloud ist nicht verbunden. Bitte in der Verbindungs-Zentrale einen pCloud-Ordner auswählen und dann erneut speichern."
+      };
+    }
+
+    // STUMMER Check: ist FIDELIOR wirklich erreichbar?
+    let okPcloudRoot = true;
+    try {
+      await pRoot.getDirectoryHandle("FIDELIOR", { create:false });
+    } catch (e) {
+      okPcloudRoot = false;
+    }
+    if (!okPcloudRoot) {
+      return {
+        ok:false,
+        reason: "pCloud ist nicht erreichbar. Bitte pCloud öffnen (Laufwerk P: prüfen), sich anmelden und ggf. in der Verbindungs-Zentrale neu verbinden. Danach erneut auf „Speichern“ klicken."
+      };
     }
 
     // Backup-Sammelordner Rechte
-    if (wantBackup && t?.pcloudBucket?.root){
-      const okB = await ensureWritePermissionWithPrompt(t.pcloudBucket.root, "pCloud (Sammelordner)");
-      if (!okB) return { ok:false, reason: "pCloud (Sammelordner): Schreibrecht" };
+    if (wantBackup && t?.pcloudBucket?.root) {
+      const okB = await ensureWritePermissionWithPrompt(
+        t.pcloudBucket.root,
+        "pCloud (Sammelordner)"
+      );
+      if (!okB) {
+        return {
+          ok:false,
+          reason: "pCloud (Sammelordner): kein Zugriff. Bitte Verbindung prüfen."
+        };
+      }
     }
+
     // Zusatzablage Rechte
-    if (wantExtras && t?.pcloud?.root){
-      const okE = await ensureWritePermissionWithPrompt(t.pcloud.root, "pCloud (Zusatzablage)");
-      if (!okE) return { ok:false, reason: "pCloud (Zusatzablage): Schreibrecht" };
+    if (wantExtras && t?.pcloud?.root) {
+      const okE = await ensureWritePermissionWithPrompt(
+        t.pcloud.root,
+        "pCloud (Zusatzablage)"
+      );
+      if (!okE) {
+        return {
+          ok:false,
+          reason: "pCloud (Zusatzablage): kein Zugriff. Bitte Verbindung prüfen."
+        };
+      }
     }
   }
 
   // ===== Scopevisio: nur prüfen, wenn aktiv =====
-  if (wantScope){
-    if (!t?.scope?.root){
-      return { ok:false, reason: "Scopevisio-Root fehlt" };
+  if (wantScope) {
+    if (!t?.scope?.root) {
+      return {
+        ok:false,
+        reason: "Scopevisio-Ordner ist nicht verbunden. Bitte in der Verbindungs-Zentrale verbinden und dann erneut speichern."
+      };
     }
-    const okS = await ensureWritePermissionWithPrompt(t.scope.root, "Scopevisio");
-    if (!okS) return { ok:false, reason: "Scopevisio: Schreibrecht" };
+
+    const scopeRoot = t.scope.root;
+
+    // STUMMER Check: ist Scopevisio-Drive wirklich erreichbar?
+    // Annahme: scopeRoot zeigt auf „Arndt“, darunter liegt z.B. „Inbox“.
+    let okScopeRoot = true;
+    try {
+      await scopeRoot.getDirectoryHandle("Inbox", { create:false });
+    } catch (e) {
+      okScopeRoot = false;
+    }
+    if (!okScopeRoot) {
+      return {
+        ok:false,
+        reason: "Scopevisio ist nicht erreichbar. Bitte Scopevisio / „Scopevisio Documents“ öffnen, sich anmelden und ggf. in der Verbindungs-Zentrale neu verbinden. Danach erneut auf „Speichern“ klicken."
+      };
+    }
+
+    // Schreibrecht auf dem eigentlichen Ziel
+    const okS = await ensureWritePermissionWithPrompt(scopeRoot, "Scopevisio");
+    if (!okS) {
+      return {
+        ok:false,
+        reason: "Scopevisio: kein Zugriff. Bitte Verbindung prüfen."
+      };
+    }
   }
 
-  // Lokal benötigt keine Rechteprüfung
+  // Lokal benötigt keine Extra-Prüfung
   return { ok:true, t };
 }
+
 
 
   /* --------------------------- Date-Picker (native) ------------------------ */
@@ -1902,8 +1972,107 @@ function paintConnectionsCompact(){
 }
 
 
-  async function requestDirWrite(dirHandle){ try{ if(!dirHandle?.requestPermission) return true; let p = await dirHandle.queryPermission?.({ mode: "readwrite" }); if (p !== "granted") p = await dirHandle.requestPermission({ mode: "readwrite" }); return p === "granted"; }catch{ return true; } }
-  async function ensureDirWithPrompt(rootHandle, segments){ if(!rootHandle) throw new Error("Kein Root-Handle"); let dir = rootHandle; for (const s of (segments||[])){ if(!s) continue; try { dir = await dir.getDirectoryHandle(s, { create:false }); } catch { const yes = window.confirm(`Ordner fehlt: "${s}". Jetzt anlegen?`); if (!yes) throw new Error(`Abgebrochen – fehlender Ordner: ${s}`); dir = await dir.getDirectoryHandle(s, { create:true }); } } return dir; }
+
+async function requestDirWrite(dirHandle){ try{ if(!dirHandle?.requestPermission) return true; let p = await dirHandle.queryPermission?.({ mode: "readwrite" }); if (p !== "granted") p = await dirHandle.requestPermission({ mode: "readwrite" }); return p === "granted"; }catch{ return true; } }
+function detectRootKind(rootHandle) {
+  const pcRoot1 = window.pcloudRootHandle || null;
+  const pcRoot2 = (typeof pcloudRootHandle !== "undefined") ? pcloudRootHandle : null;
+  const scRoot1 = window.scopeRootHandle || null;
+  const scRoot2 = (typeof scopeRootHandle !== "undefined") ? scopeRootHandle : null;
+
+  if (rootHandle && (rootHandle === pcRoot1 || rootHandle === pcRoot2)) return "pcloud";
+  if (rootHandle && (rootHandle === scRoot1 || rootHandle === scRoot2)) return "scope";
+  return "other";
+}
+
+let lastRootWarnKey = null;  // Root-Warnungen pro Speichern nur einmal anzeigen
+
+// Erst prüfen, ob der Basis-Ordner erreichbar ist.
+// Unterscheidet zwischen pCloud-Root und Scopevisio-Root.
+// Pro Speichern wird je Root nur EIN Hinweis gezeigt.
+async function ensureDirWithPrompt(rootHandle, segments) {
+  if (!rootHandle) {
+    throw new Error("Kein Root-Handle");
+  }
+
+  const kind = detectRootKind(rootHandle);  // "pcloud" | "scope" | "other"
+
+  let dir  = rootHandle;
+  const segs = Array.isArray(segments) ? segments : [];
+
+  for (let i = 0; i < segs.length; i++) {
+    const raw = segs[i];
+    const s   = (raw || "").trim();
+    if (!s) continue;
+
+    try {
+      // vorhandenen Ordner öffnen
+      dir = await dir.getDirectoryHandle(s, { create: false });
+    } catch (e) {
+      // 1. Segment unterhalb des Roots fehlt → Grundpfad nicht erreichbar
+      if (i === 0) {
+        console.warn("[ensureDirWithPrompt] Basis-Ordner nicht erreichbar:", s, "kind:", kind, e);
+
+        const warnKey = `${kind}:${s}`;   // z.B. "pcloud:FIDELIOR"
+        const showToast = (lastRootWarnKey !== warnKey);
+        lastRootWarnKey = warnKey;
+
+        if (kind === "pcloud") {
+          if (showToast) {
+            toast(
+              `pCloud-Ordner „${s}“ ist nicht erreichbar.<br>` +
+              "<small>Bitte pCloud öffnen (Laufwerk P: prüfen) und ggf. in der Verbindungs-Zentrale erneut verbinden.</small>",
+              9000
+            );
+          }
+          const err = new Error(`Basis-Ordner nicht erreichbar: ${s}`);
+          err.fdlRootMissing = true;        // Spezial-Flag für pCloud
+          throw err;
+        }
+
+        if (kind === "scope") {
+          if (showToast) {
+            toast(
+              `Scopevisio-Ordner „${s}“ ist nicht erreichbar.<br>` +
+              "<small>Bitte Scopevisio / „Scopevisio Documents“ öffnen und ggf. in der Verbindungs-Zentrale erneut verbinden.</small>",
+              9000
+            );
+          }
+          const err = new Error(`Scopevisio-Basisordner nicht erreichbar: ${s}`);
+          err.fdlScopeRootMissing = true;   // Spezial-Flag für Scopevisio
+          throw err;
+        }
+
+        // generischer Fallback für andere Roots
+        if (showToast) {
+          toast(
+            `Ordner „${s}“ ist nicht erreichbar.<br>` +
+            "<small>Bitte Verbindung oder Berechtigungen prüfen und ggf. in der Verbindungs-Zentrale neu verbinden.</small>",
+            8000
+          );
+        }
+        throw e || new Error(`Basis-Ordner nicht erreichbar: ${s}`);
+      }
+
+      // Nur für Unterordner (i > 0) Ordner-anlegen-Dialog anbieten
+      const yes = window.confirm(`Ordner fehlt: "${s}". Jetzt anlegen?`);
+      if (!yes) {
+        throw new Error(`Abgebrochen – fehlender Ordner: ${s}`);
+      }
+
+      try {
+        dir = await dir.getDirectoryHandle(s, { create: true });
+      } catch (e2) {
+        console.warn("[ensureDirWithPrompt] Anlegen fehlgeschlagen:", s, e2);
+        throw e2;
+      }
+    }
+  }
+
+  return dir;
+}
+
+
 // Bildet einen kollisionssicheren Dateinamen:  name.pdf → name (2).pdf → name (3).pdf …
 async function uniqueName(dirHandle, fileName) {
   if (!dirHandle) return fileName;
@@ -1987,6 +2156,107 @@ async function writeFileTo(rootHandle, segments, bytes, fileName, opts = {}) {
 
   return attemptedName;
 }
+
+// Kurzer Check, ob pCloud-Root + FIDELIOR erreichbar sind
+async function verifyPcloudRootOrWarn() {
+  const root =
+    window.pcloudRootHandle ||
+    (typeof pcloudRootHandle !== "undefined" ? pcloudRootHandle : null);
+
+  // Noch gar kein Root verbunden
+  if (!root) {
+    toast(
+      "pCloud ist nicht verbunden.<br>" +
+      "<small>Bitte pCloud öffnen (Laufwerk P: prüfen) und ggf. in der Verbindungs-Zentrale erneut verbinden.</small>",
+      8000
+    );
+    return false;
+  }
+
+  try {
+    // Test: gibt es unter dem Root den Ordner „FIDELIOR“?
+    await root.getDirectoryHandle("FIDELIOR", { create: false });
+    return true;
+  } catch (e) {
+    console.warn("[verifyPcloudRootOrWarn] FIDELIOR nicht erreichbar:", e);
+    toast(
+      "pCloud-Ordner „FIDELIOR“ ist nicht erreichbar.<br>" +
+      "<small>Bitte pCloud öffnen (Laufwerk P: prüfen) und ggf. in der Verbindungs-Zentrale erneut verbinden.</small>",
+      9000
+    );
+    return false;
+  }
+}
+
+// Sorgt dafür, dass die pCloud-Checkboxen nur aktiv bleiben,
+// wenn der Root erreichbar ist
+function setupPcloudTargetGuards() {
+  const ids = ["chkPcloudBackup", "chkPcloudExtra", "chkPcloudExtras"];
+
+  ids.forEach(id => {
+    const cb = document.getElementById(id);
+    if (!cb) return;
+
+    cb.addEventListener("change", async (ev) => {
+      // Wir reagieren nur, wenn der Nutzer die Checkbox AUF "aktiv" setzt
+      if (!ev.target.checked) return;
+
+      const ok = await verifyPcloudRootOrWarn();
+      if (!ok) {
+        // Root nicht erreichbar → Auswahl sofort wieder zurücknehmen
+        ev.target.checked = false;
+      }
+    });
+  });
+}
+
+
+
+async function verifyScopeRootOrWarn() {
+  const root =
+    window.scopeRootHandle ||
+    (typeof scopeRootHandle !== "undefined" ? scopeRootHandle : null);
+
+  // Noch gar kein Scope-Root verbunden
+  if (!root) {
+    toast(
+      "Scopevisio ist nicht verbunden.<br>" +
+      "<small>Bitte Scopevisio / „Scopevisio Documents“ öffnen und in der Verbindungs-Zentrale einen Ordner auswählen.</small>",
+      8000
+    );
+    return false;
+  }
+
+  // Ordner, die es unter „Arndt“ sicher gibt (siehe Screenshot)
+  const candidates = [
+    "Arndt",
+    "OBJEKTE",
+    "Inbox",
+    "PRIVAT",
+    "Bearbeitet",
+    "FIDELIOR",
+    "ARNDT & CIE"
+  ];
+
+  for (const name of candidates) {
+    try {
+      await root.getDirectoryHandle(name, { create: false });
+      // Wenn ein typischer Unterordner erreichbar ist, gilt Scopevisio als "online"
+      return true;
+    } catch (e) {
+      // ignorieren, wir probieren die anderen Kandidaten
+    }
+  }
+
+  // Kein typischer Ordner erreichbar → Scopevisio-Drive vermutlich offline / nicht eingeloggt
+  toast(
+    "Scopevisio-Basisordner ist nicht erreichbar.<br>" +
+    "<small>Bitte Scopevisio / „Scopevisio Documents“ öffnen, sich anmelden und ggf. in der Verbindungs-Zentrale erneut verbinden. Danach erneut auf „Speichern“ klicken.</small>",
+    9000
+  );
+  return false;
+}
+
 
 // Bearbeitet darf nicht innerhalb der Inbox liegen (Crashschutz, heuristisch ok)
 async function assertProcessedNotInsideInbox(inboxDir, processedDir){
@@ -3599,10 +3869,19 @@ async function stampPdf(buf){
     return buf; // niemals blockieren
   }
 }
+let __fdlIsSaving = false;
 
 // === SPEICHERN & optionaler E-Mail-Versand (getrennte Buttons) ===
 async function handleSaveFlow(mode = "save_only") {
+  // Doppel-Aufrufe verhindern (z.B. wenn Event doppelt feuert)
+  if (__fdlIsSaving) {
+    return;
+  }
+  __fdlIsSaving = true;
+
+  lastRootWarnKey = null;   // Root-Warnungen pro Durchlauf zurücksetzen
   try {
+
     // 0) Guard: keine Datei geladen
     if (!pdfDoc || !saveArrayBuffer) {
       toast("Keine PDF geladen.", 2000);
@@ -3769,7 +4048,7 @@ async function handleSaveFlow(mode = "save_only") {
     // 6) Erfolgsauswertung
     const successTargets = [
       okScope     ? "Scopevisio"                   : null,
-      okScopeBk   ? "Scopevisio – Betriebskosten"  : null,
+      okScopeBk   ? "Scopevisio – Abrechnungsbelege"  : null,
       okPcl       ? "pCloud"                       : null,
       okPclBucket ? "pCloud (Sammelordner)"        : null,
       okLocal     ? "Lokal"                        : null
@@ -3850,6 +4129,8 @@ async function handleSaveFlow(mode = "save_only") {
   } catch (e) {
     console.error("[SAVE] Fehler:", e);
     toast(`<strong>Fehler</strong><br>${e?.message || e}`, 6000);
+  } finally {
+    __fdlIsSaving = false;
   }
 }
 
@@ -5144,9 +5425,15 @@ function wire(){
   // ❌ Keine MutationObserver mehr (verursachte Endlosschleifen)
 }
 
-function boot(){
+  
+  function boot(){
   wire();
-  schedulePreview();              // initial
+
+  if (typeof setupPcloudTargetGuards === "function") {
+    setupPcloudTargetGuards();
+  }
+  schedulePreview();
+
   setTimeout(schedulePreview, 120);
   setTimeout(schedulePreview, 400);
 }
