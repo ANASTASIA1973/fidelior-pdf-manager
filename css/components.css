@@ -38,13 +38,24 @@ button{ border:0; background:none; outline: none; }
 .linklike:focus-visible{ box-shadow: var(--focus-ring); }
 .linklike::before{ content:"⚙"; font-size:12px; line-height:1; }
 
-/* Inputs & Selects */
-.label{ display:block; font-weight:600; margin:.8rem 0 .35rem; }
-.input,.select{
-  width:100%; padding:.5rem .75rem; background:#fff;
-  border:1.5px solid #cfcaca; border-radius:10px; font-size:13px;
-  transition: border-color .15s, box-shadow .15s;
+/* Inputs & Selects – wie Universal DMS */
+.label{
+  display:block;
+  font-weight:600;
+  margin:.8rem 0 .35rem;
+  font-size:0.85rem;          /* wie udms-field label */
 }
+
+.input,.select{
+  width:100%;
+  padding:.5rem .75rem;
+  background:#fff;
+  border:1.5px solid #cfcaca;
+  border-radius:10px;
+  font-size:0.9rem;           /* wie udms-Felder */
+  transition:border-color .15s, box-shadow .15s;
+}
+
 .input:focus,.select:focus{ border-color:#b8a19e; box-shadow: var(--focus-inset); outline:none; }
 .row{ display:flex; align-items:center; gap:.8rem; flex-wrap:wrap; }
 

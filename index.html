@@ -63,54 +63,79 @@
 
         <hr class="sep" />
 
-        <!-- Dokument-Metadaten -->
-        <h2 id="docH2">Dokument</h2>
+  <h2 id="docH2">Dokument</h2>
 
-        <label class="label" for="docTypeSelect">Dokumentenart</label>
-       <div class="row">
-  <select id="docTypeSelect" class="select" aria-describedby="docTypeHelp"></select>
-  <button id="addDocTypeBtn" class="linklike" type="button" title="Neuen Typ anlegen">Neu</button>
+<!-- Block 1: Dokumentenart / Liegenschaft -->
+<div class="doc-grid">
+  <div>
+    <label class="label" for="docTypeSelect">Dokumentenart</label>
+    <div class="row">
+      <select id="docTypeSelect" class="select" aria-describedby="docTypeHelp"></select>
+      <button id="addDocTypeBtn" class="linklike" type="button" title="Neuen Typ anlegen">Neu</button>
+    </div>
+  </div>
+
+  <div>
+    <label class="label" for="objectSelect">Liegenschaft</label>
+    <div class="row">
+      <select id="objectSelect" class="select"></select>
+      <button id="addObjectBtn" class="linklike" type="button" title="Neue Liegenschaft anlegen">Neu</button>
+    </div>
+  </div>
 </div>
 
+<!-- Generischer Unterordner-Selector bleibt einspaltig -->
+<div id="subfolderRow" class="row" style="display:none; margin-top:.6rem">
+  <label class="label" for="genericSubfolder" style="min-width:160px">Unterordner</label>
 
-        <label class="label" for="objectSelect">Liegenschaft</label>
-      <div class="row">
-  <select id="objectSelect" class="select"></select>
-  <button id="addObjectBtn" class="linklike" type="button" title="Neue Liegenschaft anlegen">Neu</button>
+  <div class="subfolder-col">
+    <select id="genericSubfolder" class="select" aria-label="Unterordner auswählen"></select>
+    <div id="subfolderHint" class="muted subfolder-hint" style="display:none;"></div>
+  </div>
 </div>
 
-        <!-- Generischer Unterordner-Selector (für ALLE Objekte) -->
-        <div id="subfolderRow" class="row" style="display:none; margin-top:.6rem">
-          <label class="label" for="genericSubfolder" style="min-width:160px">Unterordner</label>
-          <select id="genericSubfolder" class="select" aria-label="Unterordner auswählen"></select>
-        </div>
+<!-- Block 2: Eingangsdatum / Rechnungsdatum -->
+<div class="doc-grid">
+  <div>
+    <label class="label" for="receivedDate">Eingangsdatum</label>
+    <div class="row tight">
+      <input id="receivedDate" type="text" class="input date-input"
+             autocomplete="off" placeholder="TT.MM.JJJJ" inputmode="numeric" />
+    </div>
+  </div>
 
-        <!-- Daten -->
-        <label class="label" for="receivedDate">Eingangsdatum</label>
-        <div class="row tight">
-          <input id="receivedDate" type="text" class="input date-input"
-                 autocomplete="off" placeholder="TT.MM.JJJJ" inputmode="numeric" />
-        </div>
+  <div>
+    <label class="label" for="invoiceDate">Rechnungsdatum</label>
+    <div class="row tight">
+      <input id="invoiceDate" type="text" class="input date-input"
+             autocomplete="off" placeholder="TT.MM.JJJJ" inputmode="numeric" />
+    </div>
+  </div>
+</div>
 
-        <label class="label" for="invoiceDate">Rechnungsdatum</label>
-        <div class="row tight">
-          <input id="invoiceDate" type="text" class="input date-input"
-                 autocomplete="off" placeholder="TT.MM.JJJJ" inputmode="numeric" />
-        </div>
+<!-- Block 3: Rechnungsnummer / Rechnungsbetrag -->
+<div class="doc-grid">
+  <div>
+    <label class="label" for="invoiceNo">Rechnungsnummer</label>
+    <input id="invoiceNo" type="text" class="input" autocomplete="off"
+           placeholder="z. B. RE-2025-0174" />
+  </div>
 
-        <label class="label" for="invoiceNo">Rechnungsnummer</label>
-        <input id="invoiceNo" type="text" class="input" autocomplete="off" placeholder="z. B. RE-2025-0174" />
+  <div>
+    <label class="label" for="amountInput">Rechnungsbetrag (EUR)</label>
+    <input id="amountInput" type="text" class="input" inputmode="decimal" autocomplete="off"
+           placeholder="z. B. 788,00" />
+  </div>
+</div>
 
-        <label class="label" for="amountInput">Rechnungsbetrag (EUR)</label>
-        <input id="amountInput" type="text" class="input" inputmode="decimal" autocomplete="off" placeholder="z. B. 788,00" />
+<!-- Absender + Meta wieder einspaltig -->
+<label class="label" for="senderInput">Absender <span class="muted">(optional)</span></label>
+<input id="senderInput" type="text" class="input" autocomplete="off" placeholder="Absender eingeben" />
 
-        <label class="label" for="senderInput">Absender <span class="muted">(optional)</span></label>
-        <input id="senderInput" type="text" class="input" autocomplete="off" placeholder="Absender eingeben" />
-
-        <div class="meta" aria-live="polite">
-          <div><strong>Dateiname:</strong> <span id="fileNamePreview">-</span></div>
-          <div><strong>Zielordner:</strong> <span id="targetPreview">-</span></div>
-        </div>
+<div class="meta" aria-live="polite">
+  <div><strong>Dateiname:</strong> <span id="fileNamePreview">-</span></div>
+  <div><strong>Zielordner:</strong> <span id="targetPreview">-</span></div>
+</div>
 
 
 <!-- Verbindungen / Speicherziele -->
@@ -380,6 +405,45 @@
     <p class="hint" style="padding:0 1.2rem 1rem 1.2rem">Quelle: <code>config/emails.json</code> – lokal/pCloud.</p>
   </div>
 </dialog>
+<dialog id="manageStampDialog" class="dialog" aria-labelledby="stampTitle">
+  <div class="dialog-body">
+    <div class="dialog-titlebar">
+      <h3 id="stampTitle">Wasserzeichen / Stempel</h3>
+      <button class="dialog-close" data-close="#manageStampDialog" type="button" title="Schließen">×</button>
+    </div>
+
+    <p class="hint" style="padding:0.6rem 1.2rem 0.4rem 1.2rem">
+      Hier kannst du Text und Aufbau des Stempels anpassen.
+    </p>
+
+    <div style="padding:0.4rem 1.2rem 1rem 1.2rem;display:grid;gap:.6rem">
+      <label class="row">
+        <input id="stampEnabled" type="checkbox">
+        <span>Stempel beim Speichern anwenden</span>
+      </label>
+
+      <label class="row" style="display:grid;gap:.35rem">
+        <span>Text in der Mitte:</span>
+        <input id="stampText" class="input" placeholder="z. B. EINGEGANGEN">
+      </label>
+
+      <label class="row">
+        <input id="stampInclDate" type="checkbox">
+        <span>Datum im Stempel anzeigen</span>
+      </label>
+
+      <label class="row">
+        <input id="stampInclObj" type="checkbox">
+        <span>Liegenschaft / Objekt im Stempel anzeigen</span>
+      </label>
+    </div>
+
+    <div class="dialog-actions">
+      <button class="btn-outline" data-close="#manageStampDialog" type="button">Abbrechen</button>
+      <button id="stampSaveBtn" class="btn-primary" type="button">Speichern</button>
+    </div>
+  </div>
+</dialog>
 
 <!-- Gatekeeper-Dialog: Root fehlt -->
 <dialog id="connectGuardDialog" class="dialog" aria-labelledby="connectGuardTitle">
@@ -434,6 +498,10 @@
       <button id="btnSettingsEmails" class="btn-outline" type="button">
         Versand verwalten (E-Mail)
       </button>
+      <!-- NEU: Stempel-Konfiguration -->
+<button id="btnSettingsStamp" class="btn-outline" type="button">
+  Wasserzeichen / Stempel
+</button>
       <button id="btnSettingsObjects" class="btn-outline" type="button">
         Liegenschaften verwalten
       </button>
