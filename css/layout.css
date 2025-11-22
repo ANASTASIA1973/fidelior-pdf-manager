@@ -74,3 +74,30 @@
   .container{ padding-left:1rem; padding-right:1rem; }
   .card{ box-shadow: 0 6px 18px rgba(0,0,0,.06); }
 }
+
+
+
+/* Zweispaltiges Layout für Dokument-Felder (Desktop) */
+.doc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 1.2rem;   /* Abstand zwischen den Spalten */
+  row-gap: 0.75rem;     /* Abstand zwischen den Zeilen */
+}
+
+/* Label/Inputs in der Zelle wieder vollbreit */
+.doc-grid .label {
+  margin-top: 0.4rem;
+}
+
+.doc-grid .input,
+.doc-grid .select {
+  width: 100%;
+}
+
+/* Auf kleineren Screens einspaltig */
+@media (max-width: 900px) {
+  .doc-grid {
+    grid-template-columns: 1fr;
+  }
+}

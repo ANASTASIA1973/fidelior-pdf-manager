@@ -1008,3 +1008,14 @@ a:focus-visible{ outline:0; box-shadow: var(--focus-ring); border-radius:6px; }
   font-size: 13px;
   line-height: 1.4;
 }
+
+.subfolder-col {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subfolder-hint {
+  font-size: 0.8rem;
+}

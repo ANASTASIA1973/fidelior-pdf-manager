@@ -380,8 +380,9 @@ let currentInboxFileHandle=null, currentInboxFileName="";
 let currentInboxRelPath=null; // NEU: Pfadsegmente relativ zur Inbox (für korrektes Löschen)
 
 
-  // Configs
-  let objectsCfg=null, docTypesCfg=null, emailsCfg=null, assignmentsCfg=null;
+// Configs
+let objectsCfg=null, docTypesCfg=null, emailsCfg=null, assignmentsCfg=null, stampCfg=null;
+
 
   // UI Refs
   const amountEl=$("#amountInput"), senderEl=$("#senderInput");
@@ -1391,10 +1392,13 @@ async function updateSubfolderOptions({ silent = false } = {}) {
 
   const code    = (objSel?.value || "").trim();
   const invoice = isInvoice();
+  const subLabel = subRow.querySelector("label");
+  const subHint  = document.getElementById("subfolderHint");
 
   // Standard: ausblenden & leeren
   subRow.style.display = "none";
   subSel.innerHTML = "";
+  if (subHint) subHint.style.display = "none";
 
   // PRAGMATIK: Für PRV/ohne Code nichts anzeigen
   if (!code || code === "PRIVAT") return;
@@ -1418,8 +1422,26 @@ async function updateSubfolderOptions({ silent = false } = {}) {
       subSel.value = "";
     }
 
+    // Label + Erklärung für B75
+    if (subLabel) subLabel.textContent = "Zusatz im Dateinamen";
+    if (subHint) {
+      subHint.innerHTML =
+        'Diese Auswahl steuert nur den Dateinamen, z.&nbsp;B. <code>B75-D1-…</code>.' +
+        ' Die Ablage erfolgt immer im Ordner „Rechnungsbelege“ der Liegenschaft B75.';
+      subHint.style.display = "block";
+    }
+
     if (!silent) subRow.style.display = "grid";
     return;
+  }
+
+  // ---- alle anderen Objekte: echter Unterordner ----
+  if (subLabel) subLabel.textContent = "Unterordner";
+  if (subHint) {
+    subHint.textContent =
+      "Hier kannst du einen Unterordner innerhalb der Liegenschaft auswählen. " +
+      "Er beeinflusst Ablagepfad und Dateinamen.";
+    subHint.style.display = "block";
   }
 
   // Sichtbarkeits-Flag statt mehrfacher DOM-Schalter
@@ -2953,6 +2975,62 @@ $("#poAdd")?.addEventListener("click", (e) => {
   wireDialogClose?.(dlg);
 }
 
+async function openStampDialog(){
+  await ensureConfigConnectedOrAsk();
+  const dlg = $("#manageStampDialog");
+  if (!dlg) { toast("Stempel-Dialog fehlt im HTML.", 2500); return; }
+
+  const txt   = dlg.querySelector("#stampText");
+  const cbEn  = dlg.querySelector("#stampEnabled");
+  const cbDat = dlg.querySelector("#stampInclDate");
+  const cbObj = dlg.querySelector("#stampInclObj");
+  const btn   = dlg.querySelector("#stampSaveBtn");
+
+  let cfg;
+  try {
+    cfg = await loadJson("stamp.json");
+  } catch {
+    cfg = {
+      enabled: true,
+      coreText: "EINGEGANGEN",
+      includeDate: true,
+      includeObject: true
+    };
+  }
+
+  cbEn.checked  = cfg.enabled !== false;
+  txt.value     = cfg.coreText || "EINGEGANGEN";
+  cbDat.checked = cfg.includeDate !== false;
+  cbObj.checked = cfg.includeObject !== false;
+
+  btn.onclick = async () => {
+    const out = {
+      enabled:       !!cbEn.checked,
+      coreText:      (txt.value || "EINGEGANGEN").trim() || "EINGEGANGEN",
+      includeDate:   !!cbDat.checked,
+      includeObject: !!cbObj.checked
+    };
+    try {
+      await saveJson("stamp.json", out);
+      stampCfg = out; // Cache aktualisieren
+      toast("Stempel-Einstellungen gespeichert.", 2000);
+      dlg.close?.();
+    } catch (e) {
+      console.error(e);
+      toast("Stempel-Konfiguration konnte nicht gespeichert werden.", 3000);
+    }
+  };
+
+  if (typeof dlg.showModal === "function") dlg.showModal();
+  else dlg.setAttribute("open", "open");
+
+  if (!dlg.__wired && typeof wireDialogClose === "function") {
+    wireDialogClose(dlg);
+    dlg.__wired = true;
+  }
+}
+
+
 async function openObjectsDialog(){
   // 1) Sicherstellen, dass config/ verbunden ist
   await ensureConfigConnectedOrAsk();
@@ -3384,6 +3462,17 @@ async function openAssignmentsDialog() {
       toast("E-Mail-Verwaltung ist nicht verfügbar.", 3000);
     }
   });
+    // Wasserzeichen / Stempel
+  $("#btnSettingsStamp")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    dlg.close?.();
+    if (typeof openStampDialog === "function") {
+      openStampDialog();
+    } else {
+      toast("Stempel-Verwaltung ist nicht verfügbar.", 3000);
+    }
+  });
+
 
   // Liegenschaften verwalten
   $("#btnSettingsObjects")?.addEventListener("click", (e) => {
@@ -3461,7 +3550,8 @@ function buildEmailPromptDialog(defaults = {}) {
   dlg.id = "fdlEmailPrompt";
   dlg.style.padding = "0";
   dlg.style.border = "none";
-    // Datalist für Empfänger sicher aktualisieren
+
+  // Datalist für Empfänger sicher aktualisieren
   if (typeof populateMailSelect === "function") {
     try { populateMailSelect(); } catch (e) {
       console.warn("[FDL] populateMailSelect im Versanddialog fehlgeschlagen:", e);
@@ -3478,24 +3568,23 @@ function buildEmailPromptDialog(defaults = {}) {
       <div style="padding:16px 20px;display:grid;gap:12px">
         <p style="margin:0 0 8px 0">Die Rechnung wird gespeichert. Möchten Sie sie zusätzlich per E-Mail verschicken?</p>
 
-       <div id="fdlEmailSection" style="display:none;gap:10px">
-  <label class="row" style="display:grid;gap:6px">
-    <span>Empfänger:</span>
-    <input id="fdlMailTo" class="input slim" list="mailBook" placeholder="name@firma.de">
-  </label>
+        <div id="fdlEmailSection" style="display:none;gap:10px">
+          <label class="row" style="display:grid;gap:6px">
+            <span>Empfänger:</span>
+            <input id="fdlMailTo" class="input slim" list="mailBook" placeholder="name@firma.de">
+          </label>
 
           <details id="fdlAdv" style="margin-top:4px">
             <summary style="cursor:pointer">Weitere Felder (CC/BCC, Reply-To)</summary>
             <div style="display:grid;gap:10px;margin-top:8px">
-             <label class="row" style="display:grid;gap:6px">
-  <span>CC:</span>
-  <input id="fdlMailCc" class="input slim" placeholder="optional" list="mailBook">
-</label>
-<label class="row" style="display:grid;gap:6px">
-  <span>BCC:</span>
-  <input id="fdlMailBcc" class="input slim" placeholder="optional" list="mailBook">
-</label>
-
+              <label class="row" style="display:grid;gap:6px">
+                <span>CC:</span>
+                <input id="fdlMailCc" class="input slim" placeholder="optional" list="mailBook">
+              </label>
+              <label class="row" style="display:grid;gap:6px">
+                <span>BCC:</span>
+                <input id="fdlMailBcc" class="input slim" placeholder="optional" list="mailBook">
+              </label>
               <label class="row" style="display:grid;gap:6px">
                 <span>Reply-To:</span>
                 <input id="fdlMailReply" class="input slim" placeholder="z. B. documents@fidelior.de">
@@ -3506,6 +3595,13 @@ function buildEmailPromptDialog(defaults = {}) {
           <label class="row" style="display:grid;gap:6px">
             <span>Betreff:</span>
             <input id="fdlMailSubj" class="input slim" placeholder="Betreff">
+          </label>
+
+          <!-- NEU: optionale Freitext-Nachricht -->
+          <label class="row" style="display:grid;gap:6px">
+            <span>Nachricht (optional):</span>
+            <textarea id="fdlMailBody" class="input" rows="3"
+              placeholder="Kurze Nachricht an den Empfänger"></textarea>
           </label>
 
           <div style="font-size:12px;color:#55637A;margin-top:2px">
@@ -3531,6 +3627,7 @@ function buildEmailPromptDialog(defaults = {}) {
   const bcc  = dlg.querySelector("#fdlMailBcc");
   const subj = dlg.querySelector("#fdlMailSubj");
   const rep  = dlg.querySelector("#fdlMailReply");
+  const body = dlg.querySelector("#fdlMailBody");      // NEU
   const att  = dlg.querySelector("#fdlMailAttachment");
   const sec  = dlg.querySelector("#fdlEmailSection");
   const note = dlg.querySelector("#fdlGentleNote");
@@ -3538,77 +3635,74 @@ function buildEmailPromptDialog(defaults = {}) {
   const btnOnly = dlg.querySelector("#fdlBtnSaveOnly");
 
   /* PATCH C1: Empfänger-Vorschläge (sanft, tippbar) */
-(function enableMailToSuggestions(){
-  const input = dlg.querySelector("#fdlMailTo");
-  if (!input || input.__suggestInit) return;
-  input.__suggestInit = true;
-  input.setAttribute("autocomplete","off");
+  (function enableMailToSuggestions(){
+    const input = dlg.querySelector("#fdlMailTo");
+    if (!input || input.__suggestInit) return;
+    input.__suggestInit = true;
+    input.setAttribute("autocomplete","off");
 
- function showAllOnce(){
-  const prev = input.value;
-  // Temporär leeren, damit die Datalist alle Einträge zeigt
-  input.value = "";
-  input.dispatchEvent(new Event("input", { bubbles:true }));
-  // Danach ursprünglichen Wert wiederherstellen
-  setTimeout(() => { input.value = prev; }, 0);
-}
-
-  input.addEventListener("focus", showAllOnce);
-  input.addEventListener("click", showAllOnce);
-  input.addEventListener("keydown", (e) => { if (e.key === "ArrowDown") showAllOnce(); });
-})();
-
-/* PATCH C2: Betreff-Vorlagen (sanft, kein Blur/Reset) */
-(function setupSubjectDatalist(){
-  if (!subj || subj.__subjectInit) return;
-  subj.__subjectInit = true;
-  subj.setAttribute("autocomplete","off");
-
-  // Datalist einmalig
-  let dl = document.getElementById("subjectBook");
-  if (!dl) {
-    dl = document.createElement("datalist");
-    dl.id = "subjectBook";
-    document.body.appendChild(dl);
-  }
-  subj.setAttribute("list","subjectBook");
-
-  // Kandidaten sammeln
-  const items = new Set();
-  const code  = (objSel?.value || "").trim().toUpperCase();
-  const isInv = (typeof isInvoice === "function") ? !!isInvoice() : true;
-
-  try {
-    if (isInv && code) {
-      const per = emailsCfg?.perObject?.[code] || {};
-      const inv = per.invoice || {};
-      if (inv.subject) items.add(inv.subject);
-      (per.templates || []).forEach(t => {
-        if (t && t.subject) items.add(t.subject);
-      });
+    function showAllOnce(){
+      const prev = input.value;
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles:true }));
+      setTimeout(() => { input.value = prev; }, 0);
     }
-  } catch {}
 
+    input.addEventListener("focus", showAllOnce);
+    input.addEventListener("click", showAllOnce);
+    input.addEventListener("keydown", (e) => { if (e.key === "ArrowDown") showAllOnce(); });
+  })();
 
-  // Datalist füllen (ohne Duplikate)
-  dl.textContent = "";
-  [...items].filter(Boolean).forEach(v => {
-    const o = document.createElement("option");
-    o.value = v;
-    dl.appendChild(o);
-  });
+  /* PATCH C2: Betreff-Vorlagen (sanft, kein Blur/Reset) */
+  (function setupSubjectDatalist(){
+    if (!subj || subj.__subjectInit) return;
+    subj.__subjectInit = true;
+    subj.setAttribute("autocomplete","off");
 
-  // Liste anzeigen – ohne blur/empty, damit Tippen nicht blockiert
-  function peekList(){
-    const prev = subj.value;
-    subj.value = prev + " ";
-    subj.dispatchEvent(new Event("input", { bubbles:true }));
-    setTimeout(() => { subj.value = prev; }, 0);
-  }
-  subj.addEventListener("focus", peekList);
-  subj.addEventListener("click", peekList);
-  subj.addEventListener("keydown", (e) => { if (e.key === "ArrowDown") peekList(); });
-})();
+    // Datalist einmalig
+    let dl = document.getElementById("subjectBook");
+    if (!dl) {
+      dl = document.createElement("datalist");
+      dl.id = "subjectBook";
+      document.body.appendChild(dl);
+    }
+    subj.setAttribute("list","subjectBook");
+
+    // Kandidaten sammeln
+    const items = new Set();
+    const code  = (objSel?.value || "").trim().toUpperCase();
+    const isInv = (typeof isInvoice === "function") ? !!isInvoice() : true;
+
+    try {
+      if (isInv && code) {
+        const per = emailsCfg?.perObject?.[code] || {};
+        const inv = per.invoice || {};
+        if (inv.subject) items.add(inv.subject);
+        (per.templates || []).forEach(t => {
+          if (t && t.subject) items.add(t.subject);
+        });
+      }
+    } catch {}
+
+    // Datalist füllen (ohne Duplikate)
+    dl.textContent = "";
+    [...items].filter(Boolean).forEach(v => {
+      const o = document.createElement("option");
+      o.value = v;
+      dl.appendChild(o);
+    });
+
+    // Liste anzeigen – ohne blur/empty, damit Tippen nicht blockiert
+    function peekList(){
+      const prev = subj.value;
+      subj.value = prev + " ";
+      subj.dispatchEvent(new Event("input", { bubbles:true }));
+      setTimeout(() => { subj.value = prev; }, 0);
+    }
+    subj.addEventListener("focus", peekList);
+    subj.addEventListener("click", peekList);
+    subj.addEventListener("keydown", (e) => { if (e.key === "ArrowDown") peekList(); });
+  })();
 
   btnSend.disabled = false;
   btnSend.removeAttribute("disabled");
@@ -3624,6 +3718,7 @@ function buildEmailPromptDialog(defaults = {}) {
     to.value = ""; cc.value = ""; bcc.value = "";
     subj.value = (p.subject || "").trim();
     rep.value  = (p.replyTo || "").trim();
+    if (body) body.value = (p.text || "");   // falls später einmal vorbelegt werden soll
     sec.style.display = "none";
     note.style.display = "none";
 
@@ -3648,7 +3743,7 @@ function buildEmailPromptDialog(defaults = {}) {
   btnSend.addEventListener("click", (e) => {
     if (sec.style.display === "none") {
       e.preventDefault();
-      e.stopImmediatePropagation(); // blockt nachfolgende Listener im selben Tick
+      e.stopImmediatePropagation();
       sec.style.display = "grid";
       to?.focus();
     }
@@ -3717,15 +3812,17 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
       const bcc  = dlg.querySelector("#fdlMailBcc")?.value || "";
       const subj = dlg.querySelector("#fdlMailSubj")?.value || "";
       const rep  = dlg.querySelector("#fdlMailReply")?.value || "";
+      const body = dlg.querySelector("#fdlMailBody")?.value || ""; // NEU
 
       const split = s => s.split(/[;, ]+/).map(x => x.trim()).filter(Boolean);
 
       const extra = {
-        to: split(to),
-        cc: split(cc),
-        bcc: split(bcc),
+        to:      split(to),
+        cc:      split(cc),
+        bcc:     split(bcc),
         subject: subj.trim(),
-        replyTo: rep.trim()
+        replyTo: rep.trim(),
+        text:    body.trim()          // NEU: optionale Nachricht
       };
 
       finish("save_and_send", extra);
@@ -3739,6 +3836,7 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
     else dlg.setAttribute("open", "open");
   });
 }
+
 
 
   /* ------------------------------ Email: Senden ---------------------------- */
@@ -3835,9 +3933,44 @@ function fdlSetupMailTemplates(dlg){
 
 /* -------------------------------- Speichern ------------------------------ */
 /** Stempelt links vertikal: Datum – EINGEGANGEN – Kürzel (einzeilig, rotiert). */
+// Helper zum Laden / Cachen der Stempel-Konfiguration
+async function getStampConfig(){
+  if (stampCfg) return stampCfg;
+
+  try {
+    const cfg = await loadJson("stamp.json");
+    stampCfg = {
+      enabled:       cfg.enabled !== false,
+      coreText:      (cfg.coreText || "EINGEGANGEN").trim() || "EINGEGANGEN",
+      includeDate:   cfg.includeDate !== false,
+      includeObject: cfg.includeObject !== false
+    };
+  } catch {
+    // Fallback: aktuelles Verhalten
+    stampCfg = {
+      enabled:       true,
+      coreText:      "EINGEGANGEN",
+      includeDate:   true,
+      includeObject: true
+    };
+  }
+  return stampCfg;
+}
+
+/* Eingangsstempel: Datum / Text / Objekt (konfigurierbar) */
 async function stampPdf(buf){
   if (!window.PDFLib) return buf;
   const { PDFDocument, StandardFonts, rgb, degrees } = PDFLib;
+
+  let cfg;
+  try {
+    cfg = await getStampConfig();
+  } catch {
+    cfg = { enabled:true, coreText:"EINGEGANGEN", includeDate:true, includeObject:true };
+  }
+
+  // Stempel global deaktiviert → PDF unverändert zurück
+  if (!cfg.enabled) return buf;
 
   try {
     const doc  = await PDFDocument.load(buf);
@@ -3846,21 +3979,40 @@ async function stampPdf(buf){
 
     const font = await doc.embedFont(StandardFonts.HelveticaBold);
 
-    // Text in gewünschter Reihenfolge
-    const dateStr = (recvDateEl?.value || (typeof today === "function" ? today() : new Date().toLocaleDateString("de-DE")));
+    const dateStr = (recvDateEl?.value || (typeof today === "function"
+      ? today()
+      : new Date().toLocaleDateString("de-DE")));
     const objStr  = (objSel?.value || "—");
-    const text    = `${dateStr} – EINGEGANGEN – ${objStr}`;
 
-    // Größe/Farbe wie bisher, Position links oben, vertikal nach unten
-    const size = Math.max(10, Math.round(page.getWidth() * 0.018));
-    page.drawText(text, {
-      x: 16,
-      y: page.getHeight() - 40,
-      size,
-      font,
-      color: rgb(0.886, 0, 0.102),
-      rotate: degrees(-90)
-    });
+  const parts = [];
+
+// Reihenfolge so wählen, dass VISUELL oben das Datum steht
+if (cfg.includeObject) parts.push(objStr);
+parts.push(cfg.coreText || "EINGEGANGEN");
+if (cfg.includeDate)   parts.push(dateStr);
+
+const text = parts.join(" – ");
+
+
+// Position und Stil wie bisher, nur nach innen gedreht
+const size = Math.max(10, Math.round(page.getWidth() * 0.018));
+const margin  = 16;
+
+// Länge des Textes in PDF-Punkten
+const textLen = font.widthOfTextAtSize(text, size);
+
+// y so wählen, dass der Text oben beginnt, aber im Blatt bleibt:
+const yPos = page.getHeight() - margin - textLen;
+
+page.drawText(text, {
+  x: margin,
+  y: yPos,
+  size,
+  font,
+  color: rgb(0.886, 0, 0.102),
+  rotate: degrees(90)   // nach innen lesbar
+});
+
 
     const out = await doc.save({ useObjectStreams: true });
     return out.buffer || out; // kompatibel bleiben
@@ -3869,6 +4021,7 @@ async function stampPdf(buf){
     return buf; // niemals blockieren
   }
 }
+
 let __fdlIsSaving = false;
 
 // === SPEICHERN & optionaler E-Mail-Versand (getrennte Buttons) ===
@@ -4072,35 +4225,41 @@ async function handleSaveFlow(mode = "save_only") {
     }
 
     // 7) E-Mail-Versand NACH erfolgreichem Speichern (nur wenn gewünscht)
-    if (mode === "send" && doSendMail && decision) {
-      const to      = (decision.to  || []).filter(Boolean);
-      const cc      = (decision.cc  || []).filter(Boolean);
-      const bcc     = (decision.bcc || []).filter(Boolean);
-      const subject = (decision.subject || "").trim();
-      const replyTo = (decision.replyTo || "").trim();
+  if (mode === "send" && doSendMail && decision) {
+  const to      = (decision.to  || []).filter(Boolean);
+  const cc      = (decision.cc  || []).filter(Boolean);
+  const bcc     = (decision.bcc || []).filter(Boolean);
+  const subject = (decision.subject || "").trim();
+  const replyTo = (decision.replyTo || "").trim();
 
-      const rc = to.length + cc.length + bcc.length;
+  // NEU: Body aus Dialog, Fallback auf bestehendes Template
+  const textFromDialog = (decision.text || "").trim();
+  const bodyText = textFromDialog ||
+    (typeof computeMailBody === "function" ? computeMailBody() : "");
 
-      if (!rc || !subject) {
-        toast("E-Mail unvollständig (Empfänger/Betreff). Versand abgebrochen.", 6000);
-      } else {
-        try {
-          await sendMail({
-            to,
-            cc,
-            bcc,
-            subject,
-            text: (typeof computeMailBody === "function" ? computeMailBody() : ""),
-            replyTo: replyTo || undefined,
-            attachmentBytes: stampedBytes,
-            attachmentName: safeName
-          });
-          toast("<strong>E-Mail versendet</strong>", 2500);
-        } catch (e) {
-          toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message || e}`, 4000);
-        }
-      }
+  const rc = to.length + cc.length + bcc.length;
+
+  if (!rc || !subject) {
+    toast("E-Mail unvollständig (Empfänger/Betreff). Versand abgebrochen.", 6000);
+  } else {
+    try {
+      await sendMail({
+        to,
+        cc,
+        bcc,
+        subject,
+        text: bodyText,
+        replyTo: replyTo || undefined,
+        attachmentBytes: stampedBytes,
+        attachmentName: safeName
+      });
+      toast("<strong>E-Mail versendet</strong>", 2500);
+    } catch (e) {
+      toast(`⚠️ E-Mail-Versand fehlgeschlagen: ${e?.message || e}`, 4000);
     }
+  }
+}
+
 
     // 8) Inbox → Bearbeitet (nur wenn irgendwo gespeichert wurde)
     if (currentInboxFileHandle && (okScope || okScopeBk || okPcl || okPclBucket || okLocal)) {
