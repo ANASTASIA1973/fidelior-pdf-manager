@@ -122,10 +122,14 @@
   </div>
 
   <div>
-    <label class="label" for="amountInput">Rechnungsbetrag (EUR)</label>
+    <label class="label" for="amountInput">
+      Rechnungsbetrag (EUR)
+      <span id="amountRequiredStar" class="required-star" aria-hidden="true" style="display:none">*</span>
+    </label>
     <input id="amountInput" type="text" class="input" inputmode="decimal" autocomplete="off"
            placeholder="z. B. 788,00" />
   </div>
+
 </div>
 
 <!-- Absender + Meta wieder einspaltig -->
