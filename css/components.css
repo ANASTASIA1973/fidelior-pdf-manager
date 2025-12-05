@@ -429,3 +429,13 @@ body {
   font-size: 13px;
   line-height: 1.4;
 }
+.required-star {
+  margin-left: 0.25rem;
+  color: #e11d48;         /* rot */
+  font-weight: 600;
+}
+
+.input--error {
+  border-color: #e11d48 !important;
+  box-shadow: 0 0 0 1px rgba(225, 29, 72, 0.35);
+}

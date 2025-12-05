@@ -390,6 +390,34 @@ let objectsCfg=null, docTypesCfg=null, emailsCfg=null, assignmentsCfg=null, stam
   const typeSel=$("#docTypeSelect"), objSel=$("#objectSelect");
   const subRow=$("#subfolderRow"), subSel=$("#genericSubfolder");
   const fileNamePrev=$("#fileNamePreview"), targetPrev=$("#targetPreview");
+  const amountLabel = document.querySelector("label[for='amountInput']");
+  const amountStar  = document.getElementById("amountRequiredStar");
+
+  function updateAmountRequiredUI() {
+    const isInv = (typeof isInvoice === "function") ? isInvoice() : false;
+
+    if (amountEl) {
+      // Pflichtflag
+      amountEl.required = isInv;
+
+      // aktueller Inhalt (raw bevorzugen, falls vorhanden)
+      const current = (amountEl.dataset.raw !== undefined
+        ? amountEl.dataset.raw
+        : amountEl.value || ""
+      ).trim();
+
+      const isEmpty = current === "";
+
+      // Rot nur: Rechnung + leer
+      amountEl.classList.toggle("input--error", isInv && isEmpty);
+    }
+
+    if (amountStar) {
+      // Sternchen nur bei Rechnung
+      amountStar.style.display = isInv ? "inline" : "none";
+    }
+  }
+
 
 // Manuelle Eingaben merken (überschreibt Auto-Erkennung) + Preview sofort aktualisieren
 invNoEl?.addEventListener("input", ()=>{
@@ -453,8 +481,17 @@ const isFideliorInvoice = ()=> {
 };
 function updateStatusPillsVisibility(){
   const row=$("#mailStatusRow");
-  if(row) row.style.display = isFideliorInvoice()?"grid":"none";
+  if (row) row.style.display = isFideliorInvoice() ? "grid" : "none";
+
+  // Rechnungsbetrag: Pflichtfeld nur bei Dokumentart "Rechnung"
+  if (amountEl) {
+    const isInv = (typeof isInvoice === "function") ? isInvoice() : false;
+    amountEl.required = !!isInv;
+    // visuelle Kennzeichnung (falls im CSS hinterlegt)
+    amountEl.classList.toggle("required", !!isInv);
+  }
 }
+
 function numToEuro(n){
   // 75.16 -> "75,16"
   return (isFinite(n) ? Number(n) : 0).toFixed(2).replace(".", ",");
@@ -622,10 +659,28 @@ function attachMailUI(){
   return `${euros||"0"},${cents}`;
 }
 
-  if (amountEl){
-    amountEl.addEventListener("input",(e)=>{ amountEl.dataset.raw = e.target.value; refreshPreview(); });
-    amountEl.addEventListener("blur",()=>{ amountEl.value = formatAmountDisplay(amountEl.dataset.raw||amountEl.value||""); refreshPreview(); });
+  if (amountEl) {
+    const onAmountInput = (e) => {
+      // rohen Text merken (auch wenn leer)
+      amountEl.dataset.raw = e.target.value;
+      updateAmountRequiredUI();   // Pflicht/Fehler direkt nachziehen
+      refreshPreview();
+    };
+
+    amountEl.addEventListener("input", onAmountInput);
+    amountEl.addEventListener("change", onAmountInput);
+
+    amountEl.addEventListener("blur", () => {
+      // beim Verlassen schön formatieren
+      amountEl.value = formatAmountDisplay(
+        amountEl.dataset.raw || amountEl.value || ""
+      );
+      updateAmountRequiredUI();   // nach dem Formatieren nochmal prüfen
+      refreshPreview();
+    });
   }
+
+
   senderEl?.addEventListener("input", ()=>{ refreshPreview(); });
   recvDateEl?.addEventListener("input", ()=>{ refreshPreview(); });
   invDateEl?.addEventListener("input",  ()=>{ refreshPreview(); });
@@ -1174,18 +1229,25 @@ async function autoRecognize() {
     const { text: txt, lines } = await extractTextAndLinesFirstPages(pdfDoc, 3);
 
 
-    /* Betrag – Priorität statt „größter Wert“ */
-const total = detectTotalAmountFromLines(lines);
-if (amountEl && !amountEl.dataset.userTyped){
-  if (isFinite(total) && !isNaN(total)){
-  amountEl.dataset.raw = numToEuro(total);
-amountEl.value = numToEuro(total);
-amountEl.classList.add("auto");
-  } else {
-    amountEl.value = "";
-    amountEl.classList.remove("auto");
-  }
-}
+      /* Betrag – Priorität statt „größter Wert“ */
+    const total = detectTotalAmountFromLines(lines);
+    if (amountEl && !amountEl.dataset.userTyped) {
+      if (isFinite(total) && !isNaN(total)) {
+        const euro = numToEuro(total);
+        amountEl.dataset.raw = euro;
+        amountEl.value = euro;
+        amountEl.classList.add("auto");
+      } else {
+        amountEl.dataset.raw = "";
+        amountEl.value = "";
+        amountEl.classList.remove("auto");
+      }
+
+      // Pflicht/Fehler-Style nachziehen
+      if (typeof updateAmountRequiredUI === "function") {
+        updateAmountRequiredUI();
+      }
+    }
 
  
    /* Datum (konservativ; nur plausibles jüngstes Datum ≤ heute, sonst leer) */
@@ -1235,6 +1297,7 @@ if (invNoEl && !invNoEl.dataset.userTyped) {
     if (typeSel && typeSel.value !== "rechnung") {
       typeSel.value = "rechnung";
       toast('Dokumentenart gesetzt: <strong>Rechnung</strong>', 2000);
+          updateAmountRequiredUI();   // <<< neu
     }
 
    /* 2) AUTO-ASSIGN: Objekt & (optional) Unterordner (robuste Scoring-Engine) */
@@ -3984,14 +4047,27 @@ async function stampPdf(buf){
       : new Date().toLocaleDateString("de-DE")));
     const objStr  = (objSel?.value || "—");
 
-  const parts = [];
+    const parts = [];
 
-// Reihenfolge so wählen, dass VISUELL oben das Datum steht
-if (cfg.includeObject) parts.push(objStr);
-parts.push(cfg.coreText || "EINGEGANGEN");
-if (cfg.includeDate)   parts.push(dateStr);
+    // Objekt/Liegenschaft optional einfügen
+    if (cfg.includeObject && objStr && objStr !== "—") {
+      parts.push(objStr);
+    }
 
-const text = parts.join(" – ");
+    // Kerntext (z.B. "Eingegangen:"), Leerzeichen abschneiden
+    const coreText = (cfg.coreText || "EINGEGANGEN").trim() || "EINGEGANGEN";
+    parts.push(coreText);
+
+    // Erst Objekt + Kerntext mit " – " verbinden
+    let text = parts.join(" – ");
+
+    // Datum anhängen – aber OHNE Strich vor dem Datum,
+    // wenn der Kerntext auf ":" endet.
+    if (cfg.includeDate && dateStr) {
+      const needsDash = !coreText.endsWith(":");
+      text += needsDash ? " – " + dateStr : " " + dateStr;
+    }
+
 
 
 // Position und Stil wie bisher, nur nach innen gedreht
@@ -4035,10 +4111,22 @@ async function handleSaveFlow(mode = "save_only") {
   lastRootWarnKey = null;   // Root-Warnungen pro Durchlauf zurücksetzen
   try {
 
+   
     // 0) Guard: keine Datei geladen
     if (!pdfDoc || !saveArrayBuffer) {
       toast("Keine PDF geladen.", 2000);
       return;
+    }
+
+    // 0b) Pflichtfeld: Rechnungsbetrag bei Dokumentenart "Rechnung"
+    // (nutzt die vorhandene Funktion isInvoice() und amountEl aus den UI-Refs)
+    if (typeof isInvoice === "function" && isInvoice() && amountEl) {
+      const rawAmount = (amountEl.value || "").trim();
+
+      if (!rawAmount) {
+        toast("Bitte den Rechnungsbetrag eingeben (Pflichtfeld bei Dokumentart „Rechnung“).", 4500);
+        return;
+      }
     }
 
     // 1) Dateiname + Defaults für Betreff/Reply-To
@@ -4467,6 +4555,7 @@ typeSel?.addEventListener("change", async () => {
   Mail.customSubject = "";
   Mail.baseTo = new Set();
   Mail.recipientsTouched = false; // ← wichtig: Vorbelegung wieder erlauben
+    updateAmountRequiredUI();   // <<< neu
 
   applyPerObjectMailRules();
   prefillMail();
@@ -4608,6 +4697,10 @@ try { assignmentsCfg = await loadJson("assignments.json"); }  catch { assignment
     }
   } catch (e) {
     console.warn("[boot] refreshInbox beim Start fehlgeschlagen:", e);
+  }
+// 11) Pflichtstatus Rechnungsbetrag initial setzen
+  if (typeof updateAmountRequiredUI === "function") {
+    updateAmountRequiredUI();
   }
 }
 
