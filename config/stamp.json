@@ -2,5 +2,8 @@
   "enabled": true,
   "coreText": "Eingegangen",
   "includeDate": true,
-  "includeObject": true
+  "includeObject": true,
+
+  "paidEnabled": true,
+  "paidText": "BEZAHLT"
 }

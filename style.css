@@ -170,38 +170,6 @@ input[type="date"].date-input{ background:none; }
   position:absolute;left:10px;top:12px;transform-origin:left top;transform:rotate(90deg);
   font-weight:800;color:#7A2C8E;opacity:.38;white-space:nowrap;pointer-events:none;user-select:none;line-height:1}
 
-/* ==== Dialoge & Toasts (Dialog-Basis) =================================== */
-dialog::backdrop{background:rgba(0,0,0,.25)}
-dialog{border:none;border-radius:14px;padding:0;box-shadow:var(--shadow);max-width:min(560px,92vw)}
-.dialog-body{display:flex;flex-direction:column;max-height:80vh;background:#fff;border-radius:14px}
-.dialog-titlebar{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.2rem;border-bottom:1px solid #eee}
-.dialog .list{padding:.4rem 1rem .6rem;overflow:auto;max-height:56vh}
-.dialog .list li{display:grid;grid-template-columns:1fr auto;align-items:center;gap:.6rem;padding:.45rem 0;border-bottom:1px solid #eee}
-.dialog .list li>div:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dialog .list .actions{display:flex;gap:.4rem}
-.dialog-actions{display:flex;justify-content:flex-end;gap:.6rem;padding:1rem 1.2rem;border-top:1px solid #eee}
-.dialog-close{background:none;border:none;font-size:1.1rem;cursor:pointer}
-dialog{z-index:1000}
-dialog{display:none}
-dialog[open]{display:block}
-
-/* === Emails-Dialog Hotfix v2 ============================================= */
-#manageEmailsDialog{ max-width:min(760px,96vw); max-height:90vh; overflow:hidden; }
-#manageEmailsDialog .dialog-body{ display:flex; flex-direction:column; max-height:90vh; overflow:auto; padding:0; }
-#manageEmailsDialog .dialog-titlebar{ position:sticky; top:0; z-index:2; background:#fff; border-bottom:1px solid #eee; padding:1rem 1.2rem; }
-#manageEmailsDialog .dialog-body > *:not(.dialog-titlebar):not(.dialog-actions){ padding:.6rem 1.2rem 0 1.2rem; overflow:visible !important; }
-#manageEmailsDialog #poList{ max-height:40vh; overflow:auto; margin:.4rem 0 .8rem 0; padding:0; }
-#manageEmailsDialog .dialog-actions{ position:sticky; bottom:0; z-index:2; background:linear-gradient(to top,#fff 85%,rgba(255,255,255,0)); border-top:1px solid #eee; padding:.8rem 1.2rem; }
-#manageEmailsDialog table{ width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0; }
-#manageEmailsDialog th, #manageEmailsDialog td{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-#manageEmailsDialog input.input.slim{ width:100%; }
-#manageEmailsDialog .table td.right, #manageEmailsDialog table td.right{ white-space:nowrap !important; width:1% !important; overflow:visible !important; }
-#manageEmailsDialog .icon-btn{ display:inline-flex !important; align-items:center !important; justify-content:center !important; width:30px !important; height:30px !important; padding:0 !important; line-height:1 !important; font-size:18px !important; border-radius:8px; overflow:visible !important; vertical-align:middle; }
-#manageEmailsDialog .icon-btn + .icon-btn { margin-left:.35rem; }
-#manageEmailsDialog #poList li{ display:flex; align-items:center; gap:.5rem; }
-#manageEmailsDialog #poList li > div:first-child{ flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-#manageEmailsDialog #poList li > div:last-child{ flex:0 0 auto; white-space:nowrap; }
-
 /* === Mail: kompakter, aufgeräumter ======================================= */
 #accMail .status-row{display:grid;grid-template-columns:78px 1fr 1fr;align-items:center;gap:.35rem;margin:.35rem 0 .45rem}
 #accMail .status-row .pill,#accMail .status-row .chk{display:inline-flex;align-items:center;gap:.5rem;font-size:.9rem;padding:.22rem .48rem;border:1px solid #d8d3d1;border-radius:10px;background:#fff;cursor:pointer}
@@ -384,7 +352,7 @@ a:focus-visible{ outline:0; box-shadow: var(--focus-ring); border-radius:6px; }
 .input::placeholder{ color:#9AA0A6; }
 .input[disabled], .select[disabled], .input[readonly]{ background:#F7F8FA !important; color:#8A8F98; border-color:#E3E6EB; cursor:not-allowed; }
 .row.tight{ gap:.5rem; }
-.row-actions{ position:sticky; bottom:0; z-index:3; display:flex; gap:.6rem; padding-top:.6rem; padding-bottom:.5rem; background:linear-gradient(to top, var(--surface) 78%, rgba(255,255,255,0)); border-top:1px solid #EEE; }
+.row-actions{ position:sticky; bottom:0; z-index:3; display:flex; gap:.6rem; align-items:center; padding:.7rem 0; background:linear-gradient(to top, var(--surface) 78%, rgba(255,255,255,0)); border-top:1px solid #EEE; }
 .row-actions .btn-primary{ padding:.62rem 1.05rem; font-weight:600; box-shadow:0 2px 0 rgba(91,27,112,.14); }
 .row-actions .btn-primary:hover{ box-shadow:0 3px 0 rgba(91,27,112,.18); }
 .row-actions .btn-outline{ border-color:#DFE3E8; color:#4B3F49; }
@@ -757,265 +725,543 @@ a:focus-visible{ outline:0; box-shadow: var(--focus-ring); border-radius:6px; }
 }
 
 
-/* --- Save box: Pill-Layout reparieren --- */
-#saveBox{
-  display:flex !important;
-  flex-wrap:wrap !important;
-  gap:.6rem .7rem;
-  width:100%;
-  box-sizing:border-box;
-  overflow:visible;           /* nichts mehr abschneiden */
-  margin-bottom:.4rem;        /* Abstand zu den Countern */
+/* --- Dateiablage + Versand: einfache Checkbox-Listen -------------------- */
+
+/* Überschriften im Block „Speicherziele und Zähler“ */
+#accConnections h2{
+  font-size: var(--fs-h2);
+  margin: 1rem 0 .35rem;
+  color: var(--primary);
 }
 
-#saveBox .chk{
+/* Gemeinsames Layout für Dateiablage- und Mail-Liste */
+#accConnections .stack{
+  display:flex;
+  flex-direction:column;
+  gap:.25rem;
+  margin-bottom:.5rem;
+}
+
+/* Einfache Checkbox-Zeilen, keine Pills mehr */
+#accConnections .stack .chk{
   display:flex;
   align-items:center;
   gap:.4rem;
-  padding:.38rem .72rem;
-  border-radius:999px;
-  white-space:nowrap;         /* ein Pill pro Zeile, aber kein Textumbruch im Pill */
-  max-width:100%;
+  padding:.1rem 0;
+  border:0;
+  background:none;
+  border-radius:0;
+  font-size:13px;
+  color:var(--text);
 }
 
-#saveBox input[type="checkbox"]{
+#accConnections .stack .chk input{
+  width:15px;
+  height:15px;
   margin:0;
-  transform:translateY(1px);
+  accent-color:var(--primary);
 }
 
-/* Falls ein übergeordneter Container clippt: überschreiben */
-#accConnections,
-#accConnections .acc-sum,
+/* „Überwiesen?“ optisch angleichen */
+#accConnections #chkPaid{
+  width:15px;
+  height:15px;
+  accent-color:var(--primary);
+}
+
+/* Falls irgendwo noch ein altes saveBox-Feldset existiert → neutralisieren */
+#saveBox,
 #accConnections .save-box{
-  overflow:visible !important;
+  border:0;
+  padding:0;
+  margin:0;
 }
 
-/* Alte Chip-Anzeige ausblenden */
-.chips{ display:none !important; }
-
-/* Kompakte Verbindungsanzeige: Buttons als farbige Pills */
-.conn-pill{
-  border:1px solid var(--line);
-  padding:8px 12px;
-  border-radius:12px;
-  font-weight:600;
-  background:#f8f9fb;
-  color:var(--text);
-}
-.conn-pill--ok{
-  background:#e7f8ee;       /* hellgrün */
-  border-color:#b7e3c7;
-  color:#0f5132;
-}
-.conn-pill--off{
-  background:#f8f9fb;
-  color:#6b7280;             /* grau */
+#accConnections .save-box .chk{
+  border:0;
+  padding:0;
+  background:none;
+  border-radius:0;
 }
 
-/* Rechte Statuszeile farblich mitziehen */
-.conn-right{ font-size:.92rem; color:var(--muted); }
-.conn-right--ok{ color:#2f6f3e; }
-.conn-right--warn{ color:#9a3412; }
-
-/* Alte Chip-Leiste (falls noch vorhanden) ausblenden */
-.chips{ display:none !important; }
-
-/* Neue Pill-Buttons */
-.conn-pill{
-  border:1px solid var(--line);
-  padding:8px 12px;
-  border-radius:12px;
-  font-weight:600;
-  background:#f8f9fb;
-  color:var(--text);
-  text-decoration:none;                 /* lila Unterstreichung verhindern */
-}
-.conn-pill--ok{
-  background:#e7f8ee;                   /* hellgrün */
-  border-color:#b7e3c7;
-  color:#0f5132;
-}
-.conn-pill--off{
-  background:#f8f9fb;
-  color:#6b7280;
+/* Container "Speichern in" – falls save-box anderswo genutzt wird */
+.save-box{
+  display:flex;
+  flex-direction:column;
+  gap:.25rem;
 }
 
-/* Rechte Statuszeile */
-.conn-right{ font-size:.92rem; color:var(--muted); }
-.conn-right--ok{ color:#2f6f3e; }       /* grünlich */
+/* Rest von deinem Tail unverändert lassen */
+#app{
+  font-size:13px;
+  line-height:1.4;
+}
 
-.header-inner {
-  display: flex;
+.subfolder-col{
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+
+.subfolder-hint{
+  font-size:.8rem;
+}
+/* Dateiablage + Versand: einfache Listen-Checkboxen */
+#saveTargets .chk,
+#emailTargets .chk {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  gap: .4rem;
+  padding: .12rem 0;
+  border: 0;
+  background: none;
+  border-radius: 0;
+  font-weight: 400;
+  color: var(--text);
 }
 
-.header-settings {
-  margin-left: 1rem;
-}
-/* Alten Verbindungs-Button neben "Speichern" verstecken */
-#fdlConnBtn {
-  display: none !important;
-}
-/* === Einstellungen-Dialog: Layout & Menü =============================== */
-
-#settingsDialog{
-  max-width: 460px;
-  width: min(460px, 96vw);
-}
-
-/* Innenabstände sauber steuern */
-#settingsDialog .dialog-body{
-  padding: 0;
-}
-
-/* Header etwas kompakter */
-#settingsDialog .dialog-titlebar{
-  padding: 1rem 1.4rem;
-  border-bottom: 1px solid #eee;
-}
-
-/* Hinweistext als eigene Zeile, linksbündig */
-#settingsDialog .hint{
+#saveTargets .chk input,
+#emailTargets .chk input {
+  width: 16px;
+  height: 16px;
   margin: 0;
-  padding: .6rem 1.4rem .2rem;
-  font-size: .95rem;
-  color: var(--muted);
 }
 
-/* Grid in eine saubere Liste verwandeln */
-#settingsDialog .settings-grid{
-  display: flex !important;
+#saveTargets,
+#emailTargets {
+  display: flex;
   flex-direction: column;
-  gap: .45rem;
-  margin: 0;
-  padding: .2rem 1.4rem 1.1rem;
+  gap: .15rem;
+}
+/* === Einstellungs-Dialog – eigenes Design =============================== */
+
+#settingsDialog .dialog {
+  max-width: 420px;
+  width: 100%;
+  margin: 4vh auto;
 }
 
-/* Menü-Buttons nur im Einstellungs-Dialog anders stylen */
-#settingsDialog .settings-grid .btn-outline{
+#settingsDialog .dialog-body {
+  padding: 1.1rem 1.4rem 1rem;
+  max-height: 80vh;
+  overflow: auto;
+}
+
+/* Einleitungstext */
+#settingsDialog .list {
+  padding: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+#settingsDialog .list p.muted {
+  margin: .4rem 0 .8rem;
+  font-size: .85rem;
+}
+
+/* Liste der Bereiche – wieder „schöne“ Karten statt Tabellen-Layout */
+#settingsDialog .list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+#settingsDialog .list li {
+  padding: 0;
+  border: 0;
+  display: block;
+}
+
+/* Buttons im Kartendesign */
+#settingsDialog .list .btn.slim {
   width: 100%;
   justify-content: space-between;
-  display: flex;
-  align-items: center;
   text-align: left;
-  border-radius: 12px;
-  padding: .5rem .9rem;
-  background: #fbf9fe;
-  border: 1px solid #e3dde8;
-  color: #3f3944;
-  font-size: .95rem;
+  border-radius: 999px;
+  padding: .65rem 1rem;
+  background: #f8f5ff;
+  border: 1px solid #eadfff;
   font-weight: 500;
-  gap: .5rem;
-  transition: background .15s ease,
-              border-color .15s ease,
-              box-shadow .15s ease,
-              transform .04s ease;
 }
 
-/* kleiner Pfeil rechts, ohne HTML-Änderung */
-#settingsDialog .settings-grid .btn-outline::after{
+/* kleiner Pfeil rechts */
+#settingsDialog .list .btn.slim::after {
   content: "›";
-  margin-left: auto;
-  font-size: 1.1rem;
-  color: #a39ab3;
+  font-size: .85rem;
+  opacity: .7;
 }
 
-/* Hover/Active-Zustand */
-#settingsDialog .settings-grid .btn-outline:hover{
-  background: #f5f0fc;
-  border-color: #d1c4e3;
-  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+/* Hover-/Focus-Effekt */
+#settingsDialog .list .btn.slim:hover,
+#settingsDialog .list .btn.slim:focus-visible {
+  background: #f0e8ff;
+  border-color: var(--primary, #5B1B70);
+  box-shadow: 0 0 0 1px rgba(91, 27, 112, .12);
 }
 
-#settingsDialog .settings-grid .btn-outline:active{
-  transform: translateY(1px);
-  box-shadow: none;
+/* Footer-Button „Schließen“ etwas absetzen */
+#settingsDialog .dialog-actions {
+  padding: .9rem 1.4rem 1.1rem;
+}
+/* === Schließen-Button im Einstellungsdialog: Hover in Lila === */
+#settingsDialog .dialog-actions .btn:hover,
+#settingsDialog .dialog-actions .btn:focus-visible {
+  background: var(--primary, #5B1B70);
+  color: #fff;
+  border-color: var(--primary, #5B1B70);
+}
+/* ===== Dialog-Checkboxen untereinander ===== */
+dialog .chk,
+.dialog .chk {
+  display: flex;          /* überschreibt inline-flex */
+  align-items: center;
+  width: 100%;
+  margin: 0.35rem 0;
 }
 
-/* Schließen-Button unten etwas einrücken */
-#settingsDialog .dialog-actions{
-  padding: .8rem 1.4rem 1rem;
-}
-/* === Liegenschaften verwalten: "Neu"-Button aufräumen =================== */
-#manageObjectsDialog #objectsAddRow{
-  display:inline-flex;
-  align-items:center;
-  justify-content:flex-start;
-  padding:.3rem 0;
-  margin: .2rem 1.2rem .5rem 1.2rem;
-  width:auto;
-  border:none;
-  background:none;
-  color:var(--primary);
-  font-size:.95rem;
-  font-weight:500;
-}
-
-/* kleines Plus-Symbol davor */
-#manageObjectsDialog #objectsAddRow::before{
-  content:"＋";
-  margin-right:.3rem;
-  font-size:1.05rem;
-}
-
-/* Hover dezent, kein riesiger Pill-Button */
-#manageObjectsDialog #objectsAddRow:hover{
-  text-decoration:underline;
-  background:none;
-  border:none;
-}
-#manageObjectsDialog .hint{
-  padding: .6rem 1.2rem .4rem;
-  font-size: .95rem;
-  color: var(--muted);
-}
-/* === Dokumentarten verwalten: "Neu"-Button wie bei Liegenschaften ======= */
-#manageTypesDialog #typesAddRow{
-  display:inline-flex;
-  align-items:center;
-  justify-content:flex-start;
-  padding:.3rem 0;
-  margin:.2rem 1.2rem .5rem 1.2rem;
-  width:auto;
-  border:none;
-  background:none;
-  color:var(--primary);
-  font-size:.95rem;
-  font-weight:500;
-}
-
-#manageTypesDialog #typesAddRow::before{
-  content:"＋";
-  margin-right:.3rem;
-  font-size:1.05rem;
-}
-
-#manageTypesDialog #typesAddRow:hover{
-  text-decoration:underline;
-  background:none;
-  border:none;
-}
-
-/* Container "Speichern in" */
-.save-box {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-#app {
-  font-size: 13px;
+dialog .chk span,
+.dialog .chk span {
+  display: inline-block;
   line-height: 1.4;
 }
 
-.subfolder-col {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+
+/* =========================================================
+   LIEGENSCHAFTEN: Hinweistext wie "Bild 2"
+   ========================================================= */
+#manageObjectsDialog .muted{
+  padding: .8rem 1.2rem 0 1.2rem;
+  margin:0;
+}
+#manageObjectsDialog #objectsList{
+  padding: .6rem 1.2rem 0 1.2rem;
 }
 
-.subfolder-hint {
-  font-size: 0.8rem;
+/* === Dialog-Layout Fix (Scroll, kein "Doppelfenster", Größenlimit) ========= */
+dialog{
+  padding:0;
+  border:0;
+  background:transparent; /* verhindert "zweiten Rahmen" hinter .dialog */
+  max-width:calc(100vw - 24px);
+  max-height:calc(100vh - 24px);
+}
+
+dialog::backdrop{
+  background:rgba(0,0,0,.35);
+}
+
+dialog > .dialog{
+  width:min(920px, calc(100vw - 24px));
+  max-width:min(920px, calc(100vw - 24px));
+  max-height:calc(100vh - 24px);
+}
+
+#manageEmailsDialog > .dialog{
+  width:min(1100px, calc(100vw - 24px));
+  max-width:min(1100px, calc(100vw - 24px));
+}
+
+#manageAssignmentsDialog > .dialog,
+#manageCheckboxesDialog > .dialog{
+  width:min(1100px, calc(100vw - 24px));
+  max-width:min(1100px, calc(100vw - 24px));
+}
+
+.dialog-body{
+  display:flex;
+  flex-direction:column;
+  max-height:calc(100vh - 24px);
+}
+
+.dialog-body > .list{
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
+  max-height:none; /* überschreibt components.css max-height:56vh */
+}
+
+/* falls Inhalte ohne .list vorhanden sind (z.B. Stempel-Dialog) */
+#manageStampDialog .stack,
+#manageObjectsDialog .stack,
+#manageTypesDialog .stack{
+  flex:1 1 auto;
+  min-height:0;
+  overflow:auto;
+}
+
+
+/* ==========================================================================
+   DIALOG-SYSTEM (bereinigt): EINHEITLICHE GRÖSSE • SCROLL • PADDING • KEIN OVERLAY
+   - Ziel: alle Dialoge (Settings, E-Mail, Stempel, Liegenschaften, Dokumentarten,
+           Zuordnungsmuster, Checkboxen) sehen konsistent aus.
+   ========================================================================== */
+
+dialog{
+  padding:0 !important;
+  border:0 !important;
+  background:transparent !important;
+  max-width: calc(100vw - 24px) !important;
+  max-height: calc(100vh - 24px) !important;
+}
+
+dialog::backdrop{
+  background: rgba(0,0,0,.35) !important;
+}
+
+/* innerer Kasten */
+dialog > .dialog{
+  width: min(720px, calc(100vw - 24px)) !important;
+  max-width: calc(100vw - 24px) !important;
+  max-height: calc(100vh - 24px) !important;
+  display:flex !important;
+  flex-direction:column !important;
+  overflow:hidden !important;
+  background: var(--surface,#fff) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 18px 40px rgba(0,0,0,.22) !important;
+}
+
+/* größere Dialoge */
+#manageEmailsDialog      > .dialog{ width: min(1100px, calc(100vw - 24px)) !important; }
+#manageAssignmentsDialog > .dialog{ width: min(1150px, calc(100vw - 24px)) !important; }
+#manageCheckboxesDialog  > .dialog{ width: min(1150px, calc(100vw - 24px)) !important; }
+
+/* EIN Scroll-Container */
+dialog > .dialog > .dialog-body{
+  flex:1 1 auto !important;
+  min-height:0 !important;
+  overflow:auto !important;            /* <-- Scrollbar */
+  background: var(--surface,#fff) !important;
+}
+
+/* Sticky Header/Footer (bleiben sichtbar, aber KEIN fixed/absolute) */
+dialog .dialog-titlebar{
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 20 !important;
+  background: var(--surface,#fff) !important;
+  padding: 1rem 1.2rem !important;
+  border-bottom: 1px solid var(--border,#eee) !important;
+}
+
+dialog .dialog-actions{
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 20 !important;
+  background: linear-gradient(to top, var(--surface,#fff) 82%, rgba(255,255,255,0)) !important;
+  padding: .9rem 1.2rem !important;
+  border-top: 1px solid var(--border,#eee) !important;
+}
+
+/* Inhalt im Dialog: überall sauberes Padding, damit nichts am Rand klebt */
+dialog .dialog-body > :not(.dialog-titlebar):not(.dialog-actions){
+  padding-left: 1.2rem !important;
+  padding-right: 1.2rem !important;
+}
+
+/* Untereinander etwas Luft, ohne “Riesenabstände” */
+dialog .dialog-body > p.muted{ margin: .7rem 0 .3rem !important; }
+dialog .dialog-body > section{ margin: .6rem 0 !important; }
+
+/* Settings-Dialog bleibt bewusst schmal */
+#settingsDialog > .dialog{ width: min(440px, calc(100vw - 24px)) !important; }
+
+/* Listen-Container: NICHT doppelt scrollen */
+.dialog .list{
+  overflow: visible !important;
+  max-height: none !important;
+  padding: .6rem 0 0 !important;
+}
+
+/* Stack/UL in Dialogen bekommen Innenabstand, sonst klebt es am Rand */
+dialog .stack{
+  padding: .6rem 0 0 !important;
+}
+#manageObjectsDialog #objectsList,
+#manageTypesDialog   #typesList{
+  padding: .6rem 0 0 !important;
+}
+
+/* Tabellen in Dialogen: lieber horizontal scrollen als Layout sprengen */
+dialog .table{
+  display:block !important;
+  max-width: 100% !important;
+  overflow-x:auto !important;
+}
+
+/* Grid in Dialogen: auf schmalen Screens stapeln */
+@media (max-width: 900px){
+  dialog .grid.grid-3{ grid-template-columns: 1fr !important; }
+  dialog .grid.grid-2{ grid-template-columns: 1fr !important; }
+}
+
+/* Icon-Buttons in Tabellen dürfen NICHT “unklickbar” werden (z-index/overflow) */
+.table td.right{ overflow: visible !important; }
+.icon-btn{
+  position: relative !important;
+  z-index: 5 !important;
+  pointer-events: auto !important;
+}
+
+/* E-Mail-Verwaltung: Aktionen-Spalte sichtbar, keine Clipping-Probleme */
+#manageEmailsDialog th, #manageEmailsDialog td{
+  vertical-align: middle !important;
+}
+#manageEmailsDialog .table td.right{
+  white-space: nowrap !important;
+  width: 1% !important;
+}
+
+/* Zuordnungsmuster: Button nicht “kleben lassen”, sondern sauber im Flow */
+#manageAssignmentsDialog .sa-add-btn{
+  width: 100%;
+  margin: .6rem 0 .2rem !important;
+  position: static !important;
+}
+
+/* Stempel/Wasserzeichen: Actions nicht über Eingaben legen */
+#manageStampDialog .dialog-actions{
+  margin-top: .8rem !important;
+}
+
+/* Checkboxen: Tabellenzeilen kompakt */
+#manageCheckboxesDialog .input.slim{ width: 100% !important; }
+
+/* ganz kleine Screens: weniger horizontales Padding */
+@media (max-width: 520px){
+  dialog .dialog-titlebar{ padding: .9rem 1rem !important; }
+  dialog .dialog-actions{ padding: .8rem 1rem !important; }
+  dialog .dialog-body > :not(.dialog-titlebar):not(.dialog-actions){
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+}
+
+/* =========================================
+   DIALOG FIX PACK (override) – ganz ans Ende
+   ========================================= */
+
+/* 1) Dialog-Größe konsistent (nicht resizebar, nicht "riesig") */
+dialog{
+  border:0 !important;
+  padding:0 !important;
+  background:transparent !important;
+  width:min(980px, 96vw) !important;
+  max-width:min(980px, 96vw) !important;
+}
+dialog .dialog{
+  max-width:100% !important;
+  max-height:none !important;
+  min-width:0 !important;
+  min-height:0 !important;
+  resize:none !important;
+  overflow:hidden !important;
+  border-radius:16px !important;
+}
+
+/* 2) EIN Scroll-Container pro Dialog:
+      .dialog-body scrollt, Header/Footer sticky */
+dialog .dialog-body{
+  display:block !important;
+  max-height:min(86vh, 860px) !important;
+  overflow:auto !important;
+  scroll-padding-bottom:90px;
+  background:var(--surface, #fff);
+}
+
+/* 3) Header oben klebt sauber */
+dialog .dialog-titlebar{
+  position:sticky !important;
+  top:0 !important;
+  z-index:10 !important;
+  background:var(--surface, #fff) !important;
+  border-bottom:1px solid var(--border, #e7e2e0) !important;
+  padding:1rem 1.25rem !important;
+}
+
+/* 4) Footer unten klebt sauber (NUR der echte Footer, nicht "inner actions") */
+dialog .dialog-body > .dialog-actions{
+  position:sticky !important;
+  bottom:0 !important;
+  z-index:10 !important;
+  background:var(--surface, #fff) !important;
+  border-top:1px solid var(--border, #e7e2e0) !important;
+  padding:.9rem 1.25rem !important;
+  display:flex !important;
+  align-items:center !important;
+  gap:.6rem !important;
+}
+
+/* 5) Inhalt bekommt Padding (egal ob .list existiert oder nicht) */
+dialog .dialog-body > :not(.dialog-titlebar):not(.dialog-actions){
+  padding:1rem 1.25rem;
+}
+
+/* 6) Falls du irgendwo .list nutzt: nicht selbst scrollen, sonst Doppel-Scroll */
+dialog .dialog-body .list{
+  overflow:visible !important;
+  padding:0 !important;
+}
+
+/* 7) "Dialog-Actions" die IM Inhalt stehen (z.B. +Eintrag hinzufügen in E-Mail):
+      sollen NICHT sticky sein und keine fette Footer-Leiste bauen */
+dialog .dialog-body .list .dialog-actions,
+dialog .dialog-body section .dialog-actions{
+  position:static !important;
+  background:transparent !important;
+  border:0 !important;
+  padding:0 !important;
+  margin-top:.6rem;
+  display:flex;
+  justify-content:flex-start;
+  gap:.6rem;
+}
+
+/* 8) Tabellen in Dialogen dürfen horizontal scrollen statt Layout sprengen */
+#manageEmailsDialog .table,
+#manageAssignmentsDialog .table,
+#manageCheckboxesDialog .table{
+  display:block;
+  width:100%;
+  max-width:100%;
+  overflow-x:auto;
+}
+
+/* 9) Der lilane "Regel aus Vorschlag erstellen" Button: nicht 100% Breite */
+.sa-add-btn{
+  width:auto !important;
+  max-width:100% !important;
+  white-space:nowrap;
+}
+
+/* 10) Spacer in Footern */
+.flex-spacer{ flex:1 1 auto; }
+/* Checkboxen-Dialog: Tabelle soll die volle Breite nutzen */
+#manageCheckboxesDialog .table{
+  display:table !important;
+  width:100% !important;
+  table-layout:fixed;
+}
+
+/* Spalten sinnvoll verteilen (nimmt den rechten Leerraum weg) */
+#manageCheckboxesDialog .table th:nth-child(1),
+#manageCheckboxesDialog .table td:nth-child(1){ width:42%; }
+
+#manageCheckboxesDialog .table th:nth-child(2),
+#manageCheckboxesDialog .table td:nth-child(2){ width:42%; }
+
+#manageCheckboxesDialog .table th:nth-child(3),
+#manageCheckboxesDialog .table td:nth-child(3){ width:140px; text-align:center; }
+
+#manageCheckboxesDialog .table th:nth-child(4),
+#manageCheckboxesDialog .table td:nth-child(4){ width:140px; }
+
+/* Inputs füllen die Zelle komplett */
+#manageCheckboxesDialog .table td input,
+#manageCheckboxesDialog .table td select{
+  width:100% !important;
 }

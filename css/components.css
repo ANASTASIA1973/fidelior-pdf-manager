@@ -163,26 +163,6 @@ button{ border:0; background:none; outline: none; }
 .save-box .chk:hover{ border-color:#D8D9DE; background:#f5f6f7; }
 .save-box .chk:has(input:checked){ border-color:#CBD4FF; background:#F3F6FF; }
 
-/* Dialoge */
-dialog::backdrop{ background: rgba(0,0,0,.25); }
-dialog{ border:0; border-radius:14px; padding:0; box-shadow: var(--shadow); max-width:min(560px,92vw); }
-.dialog{ z-index:1000; }
-.dialog-body{ display:flex; flex-direction:column; max-height:80vh; background:#fff; border-radius:14px; }
-.dialog-titlebar{
-  position: sticky; top:0; z-index:2;
-  display:flex; align-items:center; justify-content:space-between;
-  padding:1rem 1.2rem; border-bottom:1px solid var(--border); background:#fff;
-}
-.dialog .list{ padding:.4rem 1rem .6rem; overflow:auto; max-height:56vh; }
-.dialog-actions{
-  position: sticky; bottom:0; z-index:2;
-  display:flex; justify-content:flex-end; gap:.6rem;
-  border-top:1px solid var(--border);
-  background: linear-gradient(to top, #fff 85%, rgba(255,255,255,0));
-  padding:1rem 1.2rem;
-}
-.dialog-close{ background:none; border:0; font-size:1.1rem; cursor:pointer; }
-
 /* Toasts */
 .toast-host{
   position:fixed; right:16px; bottom:16px; z-index:10000;
@@ -300,12 +280,6 @@ dialog{ border:0; border-radius:14px; padding:0; box-shadow: var(--shadow); max-
   font-size: var(--fs-small);
 }
 .toast strong{ margin-bottom:.15rem; }
-
-/* Dialoge: einheitlich kleiner & ruhig */
-dialog .dialog-titlebar{ padding:.8rem 1rem; }
-dialog .dialog-actions{ padding:.8rem 1rem; }
-.dialog .list{ padding:.4rem 1rem .6rem; }
-.table th, .table td{ font-size: var(--fs-small); }
 
 /* Preview-Toolbar – dezentes Hover */
 #previewTools .icon-btn:hover{ background:#f2f0f5; }
@@ -438,4 +412,59 @@ body {
 .input--error {
   border-color: #e11d48 !important;
   box-shadow: 0 0 0 1px rgba(225, 29, 72, 0.35);
+}
+/* Zuordnungsmuster-Dialog – Layout-Feinschliff */
+#manageAssignmentsDialog .section-subtitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text, #1c1a1a);
+}
+
+#manageAssignmentsDialog .stack > .field {
+  margin-bottom: 0.5rem;
+}
+
+/* Abstand zwischen Assistent und Tabelle */
+#manageAssignmentsDialog section + section {
+  margin-top: 1.1rem;
+}
+
+/* Buttons unten bündig und klar getrennt */
+#manageAssignmentsDialog .dialog-actions {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border, #ece7f2);
+}
+
+/* Tabellenkopf leicht abheben */
+#manageAssignmentsDialog .table thead th {
+  white-space: nowrap;
+}
+
+/* Eingabefelder in der Tabelle nicht gequetscht */
+#manageAssignmentsDialog .table td input,
+#manageAssignmentsDialog .table td select {
+  width: 100%;
+  box-sizing: border-box;
+}
+.sa-add-btn {
+  margin-top: .6rem;
+  border-radius: 999px;      /* Pillenform */
+  padding: .45rem 1.3rem;    /* etwas breiter */
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Body scrollt, Header/Actions bleiben nutzbar */
+dialog .dialog-body{
+  max-height: calc(90vh - 64px); /* grob: Titlebar/Actions abziehen */
+  overflow: auto;
+}
+/* Fenstergröße mit Maus ändern */
+dialog .dialog{
+  resize: both;
+  overflow: auto;   /* resize braucht overflow != visible */
+  min-width: 420px;
+  min-height: 260px;
 }

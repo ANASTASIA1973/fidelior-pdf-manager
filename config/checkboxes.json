@@ -1,0 +1,77 @@
+{
+  "saveTargets": [
+    {
+      "id": "chkScopevisio",
+      "key": "scope",
+      "label": "Scopevisio",
+      "defaultChecked": true
+    },
+    {
+      "id": "chkPcloudBackup",
+      "key": "backup",
+      "label": "pCloud Backup (Sammelordner)",
+      "defaultChecked": true
+    },
+    {
+      "id": "chkScopeBk",
+      "key": "scopeBk",
+      "label": "Betriebskosten (Scopevisio)",
+      "defaultChecked": false
+    },
+    {
+      "id": "chkPcloudExtras",
+      "key": "extras",
+      "label": "Ordner in pCloud",
+      "defaultChecked": false
+    },
+    {
+      "id": "chkLocalSave",
+      "key": "local",
+      "label": "Lokal",
+      "defaultChecked": false
+    }
+  ],
+  "emailTargets": [
+    {
+      "id": "mail-egyo",
+      "addressBookIds": ["egyo-info"],
+      "label": "EGYO Rechnungsfreigabe",
+      "status": null
+    },
+    {
+      "id": "mail-payable",
+      "addressBookIds": ["payable"],
+      "label": "Fidelior Zahlung",
+      "status": "open"
+    },
+    {
+      "id": "mail-review",
+      "addressBookIds": ["kontakt"],
+      "label": "Fidelior Prüfung",
+      "status": "review"
+    },
+    {
+      "id": "mail-sevdesk",
+      "addressBookIds": ["sevdesk"],
+      "label": "Sevdesk Autobox",
+      "status": null
+    },
+    {
+  "id": "mail-payable",
+  "addressBookIds": ["payable"],
+  "label": "Fidelior Zahlung",
+  "status": "open",
+  "subject": "NEUE RECHNUNG – ZAHLUNG OFFEN",
+  "replyTo": "documents@fidelior.de"
+},
+{
+  "id": "mail-review",
+  "addressBookIds": ["kontakt"],
+  "label": "Fidelior Prüfung",
+  "status": "review",
+  "subject": "RECHNUNGSPRÜFUNG ERFORDERLICH",
+  "replyTo": "documents@fidelior.de"
+}
+
+  ]
+}

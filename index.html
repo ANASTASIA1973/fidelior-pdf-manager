@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="css/theme.css" />
   <link rel="stylesheet" href="css/layout.css" />
   <link rel="stylesheet" href="css/components.css" />
-  <link rel="stylesheet" href="style.css" /> <!-- projekt-spezifische Overrides -->
+  <link rel="stylesheet" href="style.css" />
 
   <!-- Scripts -->
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -38,7 +38,6 @@
     </button>
   </div>
 </header>
-
 
 <main class="container" role="main" aria-labelledby="appTitle">
   <div class="grid" id="mainGrid">
@@ -63,465 +62,571 @@
 
         <hr class="sep" />
 
-  <h2 id="docH2">Dokument</h2>
+        <h2 id="docH2">Dokument</h2>
 
-<!-- Block 1: Dokumentenart / Liegenschaft -->
-<div class="doc-grid">
-  <div>
-    <label class="label" for="docTypeSelect">Dokumentenart</label>
-    <div class="row">
-      <select id="docTypeSelect" class="select" aria-describedby="docTypeHelp"></select>
-      <button id="addDocTypeBtn" class="linklike" type="button" title="Neuen Typ anlegen">Neu</button>
-    </div>
+        <!-- Block 1: Dokumentenart / Liegenschaft -->
+        <div class="doc-grid">
+          <div>
+            <label class="label" for="docTypeSelect">Dokumentenart</label>
+            <div class="row">
+              <select id="docTypeSelect" class="select" aria-describedby="docTypeHelp"></select>
+              <button id="addDocTypeBtn" class="linklike" type="button" title="Neuen Typ anlegen">Neu</button>
+            </div>
+          </div>
+
+          <div>
+            <label class="label" for="objectSelect">Liegenschaft</label>
+            <div class="row">
+              <select id="objectSelect" class="select"></select>
+              <button id="addObjectBtn" class="linklike" type="button" title="Neue Liegenschaft anlegen">Neu</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Generischer Unterordner-Selector -->
+        <div id="subfolderRow" class="row" style="display:none; margin-top:.6rem">
+          <label class="label" for="genericSubfolder" style="min-width:160px">Unterordner</label>
+
+          <div class="subfolder-col">
+            <select id="genericSubfolder" class="select" aria-label="Unterordner auswählen"></select>
+            <div id="subfolderHint" class="muted subfolder-hint" style="display:none;"></div>
+          </div>
+        </div>
+
+        <!-- Block 2: Eingangsdatum / Rechnungsdatum -->
+        <div class="doc-grid">
+          <div>
+            <label class="label" for="receivedDate">Eingangsdatum</label>
+            <div class="row tight">
+              <input id="receivedDate" type="text" class="input date-input"
+                     autocomplete="off" placeholder="TT.MM.JJJJ" inputmode="numeric" />
+            </div>
+          </div>
+
+          <div>
+            <label class="label" for="invoiceDate">Rechnungsdatum</label>
+            <div class="row tight">
+              <input id="invoiceDate" type="text" class="input date-input"
+                     autocomplete="off" placeholder="TT.MM.JJJJ" inputmode="numeric" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Block 3: Rechnungsnummer / Rechnungsbetrag -->
+        <div class="doc-grid">
+          <div>
+            <label class="label" for="invoiceNo">Rechnungsnummer</label>
+            <input id="invoiceNo" type="text" class="input" autocomplete="off"
+                   placeholder="z. B. RE-2025-0174" />
+          </div>
+
+          <div>
+            <label class="label" for="amountInput">
+              Rechnungsbetrag (EUR)
+              <span id="amountRequiredStar" class="required-star" aria-hidden="true" style="display:none">*</span>
+            </label>
+            <input id="amountInput" type="text" class="input" inputmode="decimal" autocomplete="off"
+                   placeholder="z. B. 788,00" />
+          </div>
+        </div>
+
+        <!-- Absender + Meta -->
+        <label class="label" for="senderInput">Absender <span class="muted">(optional)</span></label>
+        <input id="senderInput" type="text" class="input" autocomplete="off" placeholder="Absender eingeben" />
+
+        <div class="meta" aria-live="polite">
+          <div><strong>Dateiname:</strong> <span id="fileNamePreview">-</span></div>
+          <div><strong>Zielordner:</strong> <span id="targetPreview">-</span></div>
+        </div>
+
+        <!-- Verbindungen / Speicherziele -->
+        <details class="acc" id="accConnections" open>
+          <summary class="acc-sum">Speicherziele und Zähler</summary>
+
+          <!-- Zahlungsstatus -->
+          <label class="chk" style="margin-bottom:.6rem">
+            <input type="checkbox" id="chkPaid">
+            <span id="paidLabel">Überwiesen?</span>
+          </label>
+
+          <hr class="sep" />
+
+          <!-- DATEIABLAGE -->
+          <h2>Dateiablage</h2>
+          <div id="saveTargets" class="stack"></div>
+
+          <hr class="sep" />
+
+          <!-- VERSAND -->
+          <h2>Versand per E-Mail</h2>
+          <p class="muted" style="font-size:12.5px;margin:-.3rem 0 .4rem">
+            Auswahlhilfe – Versand erfolgt erst bei „Speichern &amp; E-Mail“
+          </p>
+          <div id="emailTargets" class="stack"></div>
+
+          <div class="status" id="counters" aria-live="polite">
+            Offen: -  In Arbeit: -  Fertig: -  Session: 0
+          </div>
+          <ul id="inboxList" class="list slim" aria-live="polite"></ul>
+        </details>
+
+        <div class="row row-actions">
+          <button id="saveBtn"      class="btn-primary" type="button">Dokument speichern…</button>
+          <button id="sendEmailBtn" class="btn-outline" type="button">E-Mail senden…</button>
+          <span class="grow"></span>
+          <button id="cancelBtn"    class="btn-outline" type="button">Abbrechen</button>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Rechte Spalte -->
+    <section class="card preview-card column" id="previewPane" role="region" aria-labelledby="previewH2">
+      <div class="preview-head">
+        <h2 id="previewH2">Vorschau</h2>
+        <div class="preview-tools" id="previewTools">
+          <button id="zoomOut"     class="icon-btn" type="button" title="Verkleinern">-</button>
+          <input  id="zoomRange"   class="zoom-range" type="range" min="50" max="250" step="1" value="110" aria-label="Zoom">
+          <span   id="zoomLabel"   class="zoom-label">110%</span>
+          <button id="zoomIn"      class="icon-btn" type="button" title="Vergrößern">+</button>
+
+          <div class="tools-sep" aria-hidden="true"></div>
+
+          <button id="openTabBtn"  class="icon-btn" type="button" title="In neuem Tab öffnen">Neu</button>
+          <button id="printBtn"    class="icon-btn" type="button" title="Drucken">Drucken</button>
+          <button id="downloadBtn" class="icon-btn" type="button" title="Download">Download</button>
+        </div>
+      </div>
+
+      <div class="preview-wrap" id="previewScroll">
+        <div id="previewPlaceholder" class="preview-placeholder" aria-live="polite">
+          <div class="preview-icon" aria-hidden="true">PDF</div>
+          <div>Keine Datei geladen</div>
+        </div>
+        <div id="pdfViewer" class="pdf-viewer"></div>
+      </div>
+    </section>
+
   </div>
-
-  <div>
-    <label class="label" for="objectSelect">Liegenschaft</label>
-    <div class="row">
-      <select id="objectSelect" class="select"></select>
-      <button id="addObjectBtn" class="linklike" type="button" title="Neue Liegenschaft anlegen">Neu</button>
-    </div>
-  </div>
-</div>
-
-<!-- Generischer Unterordner-Selector bleibt einspaltig -->
-<div id="subfolderRow" class="row" style="display:none; margin-top:.6rem">
-  <label class="label" for="genericSubfolder" style="min-width:160px">Unterordner</label>
-
-  <div class="subfolder-col">
-    <select id="genericSubfolder" class="select" aria-label="Unterordner auswählen"></select>
-    <div id="subfolderHint" class="muted subfolder-hint" style="display:none;"></div>
-  </div>
-</div>
-
-<!-- Block 2: Eingangsdatum / Rechnungsdatum -->
-<div class="doc-grid">
-  <div>
-    <label class="label" for="receivedDate">Eingangsdatum</label>
-    <div class="row tight">
-      <input id="receivedDate" type="text" class="input date-input"
-             autocomplete="off" placeholder="TT.MM.JJJJ" inputmode="numeric" />
-    </div>
-  </div>
-
-  <div>
-    <label class="label" for="invoiceDate">Rechnungsdatum</label>
-    <div class="row tight">
-      <input id="invoiceDate" type="text" class="input date-input"
-             autocomplete="off" placeholder="TT.MM.JJJJ" inputmode="numeric" />
-    </div>
-  </div>
-</div>
-
-<!-- Block 3: Rechnungsnummer / Rechnungsbetrag -->
-<div class="doc-grid">
-  <div>
-    <label class="label" for="invoiceNo">Rechnungsnummer</label>
-    <input id="invoiceNo" type="text" class="input" autocomplete="off"
-           placeholder="z. B. RE-2025-0174" />
-  </div>
-
-  <div>
-    <label class="label" for="amountInput">
-      Rechnungsbetrag (EUR)
-      <span id="amountRequiredStar" class="required-star" aria-hidden="true" style="display:none">*</span>
-    </label>
-    <input id="amountInput" type="text" class="input" inputmode="decimal" autocomplete="off"
-           placeholder="z. B. 788,00" />
-  </div>
-
-</div>
-
-<!-- Absender + Meta wieder einspaltig -->
-<label class="label" for="senderInput">Absender <span class="muted">(optional)</span></label>
-<input id="senderInput" type="text" class="input" autocomplete="off" placeholder="Absender eingeben" />
-
-<div class="meta" aria-live="polite">
-  <div><strong>Dateiname:</strong> <span id="fileNamePreview">-</span></div>
-  <div><strong>Zielordner:</strong> <span id="targetPreview">-</span></div>
-</div>
-
-
-<!-- Verbindungen / Speicherziele -->
-<details class="acc" id="accConnections" open>
-  <summary class="acc-sum">Speicherziele und Zähler</summary>
-
-  <!-- Kompakte Verbindungskontrollen -->
-  <div class="conn-compact" style="display:grid;gap:.6rem;margin:.6rem 0">
-    <div class="conn-row" style="display:flex;align-items:center;gap:.6rem">
-      <button id="btnBindScopevisio" class="btn-outline btn-small" type="button"
-              title="Scopevisio-Root verbinden (Arndt)">Scopevisio verbinden…</button>
-      <span id="connScopeLine" class="conn-line" style="font-size:.92rem;color:var(--muted)">Nicht verbunden</span>
-    </div>
-
-    <div class="conn-row" style="display:flex;align-items:center;gap:.6rem">
-      <button id="btnBindPcloud" class="btn-outline btn-small" type="button"
-              title="pCloud-Root verbinden (P:\ oder DMS BACKUP PCLOUD)">pCloud verbinden…</button>
-      <span id="connPcloudLine" class="conn-line" style="font-size:.92rem;color:var(--muted)">Nicht verbunden</span>
-    </div>
-  </div>
-
-  <!-- Status-„Chips“ (links) mit rechte Textspalte -->
-  <div class="chips" aria-live="polite" style="display:grid;grid-template-columns:auto 1fr;gap:.4rem .8rem;align-items:center">
-    <span id="chipScope"  class="chip">Scopevisio</span>
-    <span id="chipScopeRight"  class="muted">—</span>
-
-    <span id="chipPcloud" class="chip">pCloud</span>
-    <span id="chipPcloudRight" class="muted">—</span>
-  </div>
-
-   <!-- Speichern in -->
-  <div id="saveTargets">
-    <fieldset class="save-box" id="saveBox" style="margin-top:.8rem">
-      <legend>Speichern in</legend>
-
-      <!-- Scopevisio -->
-      <label class="chk" title="Schaltet die Ablage in Scopevisio ein/aus (Verbindung bleibt erhalten).">
-        <input type="checkbox" id="chkScope" checked>
-        <span>Scopevisio</span>
-      </label>
-
-      <!-- pCloud – zusätzliche Ablageziele (bleibt optional) -->
-      <label class="chk" id="pcloudExtrasWrap"
-             title="Zusätzlich zum Backup/Config auch in strukturierte pCloud-Ablagen speichern (Objekte/Verwaltung/…)">
-        <input type="checkbox" id="chkPcloudExtras">
-        <span>pCloud: zusätzliche Ablageziele aktivieren</span>
-      </label>
-
-      <!-- Lokal -->
-      <label class="chk" title="Zusätzlich lokal speichern">
-        <input type="checkbox" id="chkLocal">
-        <span>Lokal</span>
-      </label>
-    </fieldset>
-  </div>
-
-  <div class="status" id="counters" aria-live="polite">Offen: -  In Arbeit: -  Fertig: -  Session: 0</div>
-  <ul id="inboxList" class="list slim" aria-live="polite"></ul>
-</details>
-
-
-<div class="row row-actions">
-  <button id="saveBtn"      class="btn-primary" type="button">Dokument speichern…</button>
-  <button id="sendEmailBtn" class="btn-outline" type="button">E-Mail senden…</button>
-  <span class="grow"></span>
-  <button id="cancelBtn"    class="btn-outline" type="button">Abbrechen</button>
-</div>
-
-
-</div>
-</section>
-
-
-<!-- Rechte Spalte -->
-<section class="card preview-card column" id="previewPane" role="region" aria-labelledby="previewH2">
-  <div class="preview-head">
-    <h2 id="previewH2">Preview</h2>
-    <div class="preview-tools" id="previewTools">
-      <button id="zoomOut"     class="icon-btn" type="button" title="Verkleinern">-</button>
-      <input  id="zoomRange"   class="zoom-range" type="range" min="50" max="250" step="1" value="110" aria-label="Zoom">
-      <span   id="zoomLabel"   class="zoom-label">110%</span>
-      <button id="zoomIn"      class="icon-btn" type="button" title="Vergrößern">+</button>
-
-      <div class="tools-sep" aria-hidden="true"></div>
-
-      <button id="openTabBtn"  class="icon-btn" type="button" title="In neuem Tab öffnen">Neu</button>
-      <button id="printBtn"    class="icon-btn" type="button" title="Drucken">Drucken</button>
-      <button id="downloadBtn" class="icon-btn" type="button" title="Download">Download</button>
-    </div>
-  </div>
-
-  <div class="preview-wrap" id="previewScroll">
-    <div id="previewPlaceholder" class="preview-placeholder" aria-live="polite">
-      <div class="preview-icon" aria-hidden="true">PDF</div>
-      <div>Keine Datei geladen</div>
-    </div>
-    <div id="pdfViewer" class="pdf-viewer"></div>
-  </div>
-</section>
-
-</div>
 </main>
-
 
 <!-- Toasts -->
 <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
 
-<!-- Dialoge -->
-<dialog id="manageTypesDialog" class="dialog" aria-labelledby="typesTitle">
-  <div class="dialog-body">
-    <div class="dialog-titlebar">
-      <h3 id="typesTitle">Dokumentarten verwalten</h3>
-      <button class="dialog-close" data-close="#manageTypesDialog" type="button" title="Schließen">×</button>
-    </div>
- <button id="typesAddRow" class="btn-outline btn-small" type="button">
-  Neue Dokumentart hinzufügen
-</button>
+<!-- Einstellungs-Zentrale (Zahnrad) -->
+<dialog id="settingsDialog">
+  <div class="dialog">
+    <div class="dialog-body">
+      <div class="dialog-titlebar">
+        <h2>Einstellungen</h2>
+        <button type="button" class="dialog-close"
+                aria-label="Schließen"
+                onclick="this.closest('dialog').close()">✕</button>
+      </div>
 
-<ul id="typesList" class="list"></ul>
+      <div class="list">
+        <p class="muted">Wählen Sie einen Bereich:</p>
+        <ul class="stack">
+          <li><button id="btnSettingsConnections" type="button" class="btn slim">Verbindungen</button></li>
+          <li><button id="btnSettingsEmails"       type="button" class="btn slim">Versand verwalten (E-Mail)</button></li>
+          <li><button id="btnSettingsStamp"        type="button" class="btn slim">Wasserzeichen / Stempel</button></li>
+          <li><button id="btnSettingsObjects"      type="button" class="btn slim">Liegenschaften verwalten</button></li>
+          <li><button id="btnSettingsTypes"        type="button" class="btn slim">Dokumentarten verwalten</button></li>
+          <li><button id="btnSettingsAssignments"  type="button" class="btn slim">Zuordnungsmuster</button></li>
+          <li><button id="btnSettingsCheckboxes" type="button" class="btn slim">
+  Checkboxen verwalten
+</button></li>
 
-<div class="dialog-actions">
-  <button id="typesSaveShared" class="btn-primary" type="button">
-    Speichern
-  </button>
-  <button class="btn-outline btn-small" data-close="#manageTypesDialog" type="button">
-    Schließen
-  </button>
+        </ul>
+      </div>
+
+     <div class="dialog-actions">
+  <button type="button" class="btn-primary"
+          onclick="this.closest('dialog').close()">Schließen</button>
 </div>
 
-<p class="hint">Quelle: config/document_types.json – lokal/pCloud.</p>
-
-  </div>
-</dialog>
-
-<dialog id="manageAssignmentsDialog" class="dialog" aria-labelledby="assignTitle">
-  <div class="dialog-body">
-    <div class="dialog-titlebar">
-      <h3 id="assignTitle">Zuordnungsmuster</h3>
-      <button class="dialog-close" data-close="#manageAssignmentsDialog" type="button" title="Schließen">×</button>
-    </div>
-    <div class="status tiny">Quelle/Ziel: config/assignments.json</div>
-
-    <div class="row" style="gap:.5rem;margin:.6rem 1.2rem .2rem 1.2rem;flex-wrap:wrap">
-      <input id="saVendor" class="input slim" style="min-width:220px"
-             placeholder="Lieferant / Stichwort (z. B. handyvertrag.de)">
-      <input id="saId" class="input slim" style="min-width:200px"
-             placeholder="Kundennr. / Vertragsnr. (z. B. K1511645)">
-      <select id="saObject" class="select slim" style="min-width:190px">
-        <option value="">(Objekt wählen)</option>
-      </select>
-      <input id="saSub" class="input slim" style="min-width:180px"
-             placeholder="Unterordner (optional)" list="saSubList">
-      <datalist id="saSubList"></datalist>
-      <input id="saNote" class="input slim" style="min-width:220px"
-             placeholder="Hinweis (optional)">
-      <button id="saAddBtn" class="btn-outline btn-small" type="button">
-        → Regel erstellen
-      </button>
-    </div>
-
-    <table class="table" style="width:100%; margin-top:.5rem">
-      <thead>
-        <tr>
-          <th style="width:34%">Pattern (RegEx | Pipe-getrennt)</th>
-          <th style="width:16%">Objekt</th>
-          <th style="width:16%">Unterordner</th>
-          <th style="width:28%">Hinweis</th>
-          <th style="width:6%"></th>
-        </tr>
-      </thead>
-      <tbody id="assignTbody"></tbody>
-    </table>
-
-    <div class="dialog-actions">
-      <button id="assignAdd" class="btn-outline btn-small" type="button">+ Neu</button>
-      <span class="grow"></span>
-      <button id="assignSave" class="btn-primary" type="button">Speichern</button>
     </div>
   </div>
 </dialog>
 
-<dialog id="manageObjectsDialog" class="dialog" aria-labelledby="objectsTitle">
-  <div class="dialog-body">
-    <div class="dialog-titlebar">
-      <h3 id="objectsTitle">Liegenschaften verwalten</h3>
-      <button class="dialog-close" data-close="#manageObjectsDialog" type="button" title="Schließen">×</button>
-    </div>
-        <p class="hint" style="padding:0.6rem 1.2rem 0.4rem 1.2rem">
-      Nur <strong>Anzeigename</strong> füllen → speichern → Rest wird automatisch gesetzt.
-    </p>
+<!-- E-Mail-Verwaltung (Adressbuch + Vorlagen je Objekt) -->
+<dialog id="manageEmailsDialog">
+  <div class="dialog">
+    <div class="dialog-body">
+      <div class="dialog-titlebar">
+        <h2>E-Mail-Verwaltung</h2>
+        <button type="button" class="dialog-close"
+                aria-label="Schließen"
+                onclick="this.closest('dialog').close()">✕</button>
+      </div>
 
-    <button id="objectsAddRow" class="btn-outline btn-small" type="button">
-  Neue Liegenschaft hinzufügen
+      <div class="list">
+
+        <!-- Adressbuch -->
+        <section style="margin-bottom:1rem">
+          <h3>Adressbuch</h3>
+          <p class="muted">Diese Einträge kannst du in den Vorlagen und Checkboxen verwenden.</p>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Label</th>
+                <th>E-Mail</th>
+                <th>ID</th>
+                <th>Tags</th>
+                <th class="right">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody id="emailsTbody"></tbody>
+          </table>
+
+          <div class="dialog-actions" style="margin-top:.5rem">
+            <button id="emailsAdd" type="button" class="btn-outline">
+              + Eintrag hinzufügen
+            </button>
+          </div>
+        </section>
+
+        <!-- Vorlagen pro Objekt -->
+        <section>
+          <h3>Vorlagen pro Liegenschaft</h3>
+          <p class="muted">
+            Hier können je Liegenschaft E-Mail-Einstellungen (Empfänger, Reply-To, Betreff) gepflegt werden.
+          </p>
+
+          <div class="grid grid-3" style="margin-top:.5rem">
+            <label class="field">
+              <span class="field-label">Liegenschaft</span>
+              <select id="poObject" class="input"></select>
+            </label>
+
+            <label class="field">
+              <span class="field-label">Standard-Reply-To</span>
+              <input id="poReplyTo" class="input" type="email" placeholder="z.B. documents@fidelior.de" />
+            </label>
+
+            <label class="field">
+              <span class="field-label">Betreff (Status-abhängig)</span>
+              <input id="poSubject" class="input" type="text"
+                     placeholder="z.B. NEUE RECHNUNG – ZAHLUNG OFFEN" />
+            </label>
+          </div>
+
+          <div class="dialog-actions" style="margin-top:.5rem">
+            <button id="poAdd" type="button" class="btn-outline">
+              + Vorlage für Liegenschaft aktualisieren
+            </button>
+          </div>
+
+          <ul id="poList" class="stack" style="margin-top:.4rem"></ul>
+        </section>
+
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn-outline"
+                onclick="this.closest('dialog').close()">Schließen</button>
+        <button id="emailsSave" type="button" class="btn">
+          Speichern
+        </button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- Stempel / Wasserzeichen -->
+<dialog id="manageStampDialog">
+  <div class="dialog">
+    <div class="dialog-body">
+      <div class="dialog-titlebar">
+        <h2>Wasserzeichen / Stempel</h2>
+        <button type="button" class="dialog-close"
+                aria-label="Schließen"
+                onclick="this.closest('dialog').close()">✕</button>
+      </div>
+
+      <div class="stack">
+        <p class="muted">
+          Hier kannst du Text und Aufbau des Stempels anpassen.
+        </p>
+
+        <!-- Checkbox: Stempel aktiv -->
+        <label class="chk">
+          <input id="stampEnabled" type="checkbox">
+          <span>Stempel beim Speichern anwenden</span>
+        </label>
+
+        <!-- Text in der Mitte -->
+        <label class="label" for="stampText">Text in der Mitte:</label>
+        <input id="stampText" class="input" placeholder="Eingegangen:">
+
+       <!-- Optionen -->
+<label class="chk">
+  <input id="stampInclDate" type="checkbox">
+  <span>Datum im Stempel anzeigen</span>
+</label>
+
+<label class="chk">
+  <input id="stampInclObj" type="checkbox">
+  <span>Liegenschaft / Objekt im Stempel anzeigen</span>
+</label>
+
+<hr class="sep" />
+
+<p class="muted" style="margin-top:.2rem">
+  Zweiter Stempel (nur wenn „Überwiesen?“ im Formular aktiv ist)
+</p>
+
+<label class="chk">
+  <input id="stampPaidEnabled" type="checkbox">
+  <span>Zweiten Stempel aktivieren</span>
+</label>
+
+<label class="label" for="stampPaidText">Text (z. B. „BEZAHLT“):</label>
+<input id="stampPaidText" class="input" placeholder="BEZAHLT">
+
+
+      <div class="dialog-actions">
+        <button type="button" class="btn-outline"
+                onclick="this.closest('dialog').close()">Abbrechen</button>
+        <button id="stampSaveBtn" type="button" class="btn">
+          Speichern
+        </button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+
+
+<!-- Liegenschaften verwalten -->
+<dialog id="manageObjectsDialog">
+  <div class="dialog">
+    <div class="dialog-body">
+      <div class="dialog-titlebar">
+        <h2>Liegenschaften verwalten</h2>
+        <button type="button" class="dialog-close"
+                aria-label="Schließen"
+                onclick="this.closest('dialog').close()">✕</button>
+      </div>
+
+     <p class="muted">
+  Nur <strong>Anzeigename</strong> ausfüllen → <strong>Speichern</strong> → Rest wird automatisch gesetzt.
+</p>
+
+
+      <ul id="objectsList" class="stack"></ul>
+
+      <div class="dialog-actions">
+        <button id="objectsAddRow" type="button" class="btn-outline">
+          + Liegenschaft hinzufügen
+        </button>
+        <span class="flex-spacer"></span>
+        <button type="button" class="btn-outline"
+                onclick="this.closest('dialog').close()">Abbrechen</button>
+        <button id="objectsSaveShared" type="button" class="btn">
+          Speichern
+        </button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- Dokumentarten verwalten -->
+<dialog id="manageTypesDialog">
+  <div class="dialog">
+    <div class="dialog-body">
+      <div class="dialog-titlebar">
+        <h2>Dokumentarten verwalten</h2>
+        <button type="button" class="dialog-close"
+                aria-label="Schließen"
+                onclick="this.closest('dialog').close()">✕</button>
+      </div>
+
+      <p class="muted">
+        Definieren Sie, welche Dokumentarten es gibt und welche standardmäßig verwendet wird.
+      </p>
+
+      <ul id="typesList" class="stack"></ul>
+
+      <div class="dialog-actions">
+        <button id="typesAddRow" type="button" class="btn-outline">
+          + Dokumentart hinzufügen
+        </button>
+        <span class="flex-spacer"></span>
+        <button type="button" class="btn-outline"
+                onclick="this.closest('dialog').close()">Abbrechen</button>
+        <button id="typesSaveShared" type="button" class="btn">
+          Speichern
+        </button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- Zuordnungsmuster -->
+<dialog id="manageAssignmentsDialog">
+  <div class="dialog">
+    <div class="dialog-body">
+      <div class="dialog-titlebar">
+        <h2>Zuordnungsmuster</h2>
+        <button type="button" class="dialog-close"
+                aria-label="Schließen"
+                onclick="this.closest('dialog').close()">✕</button>
+      </div>
+
+      <!-- Assistent zum schnellen Anlegen -->
+      <section class="stack" style="margin-bottom:1rem">
+        <h3>Vorschlag hinzufügen</h3>
+        <p class="muted">
+          Trage Lieferant/Stichwort ein, optional eine Kundennummer sowie Objekt und Unterordner.
+          Daraus wird automatisch ein RegEx-Muster für die Tabelle unten erzeugt.
+        </p>
+
+        <!-- Zeile 1: Lieferant + Kundennummer -->
+        <div class="grid grid-2">
+          <label class="field">
+            <span class="field-label">Lieferant / Stichwort</span>
+            <input id="saVendor" class="input"
+                   placeholder="z.B. handyvertrag.de, SWB, Brunata …">
+          </label>
+          <label class="field">
+            <span class="field-label">Kundennummer / Vertragsnr. (optional)</span>
+            <input id="saId" class="input"
+                   placeholder="z.B. 7629, K1511645 …">
+          </label>
+        </div>
+
+        <!-- Zeile 2: Objekt / Unterordner / Notiz -->
+        <div class="grid grid-3">
+          <label class="field">
+            <span class="field-label">Liegenschaft / Objekt</span>
+            <select id="saObject" class="input"></select>
+          </label>
+          <label class="field">
+            <span class="field-label">Unterordner (optional)</span>
+            <input id="saSub" class="input"
+                   placeholder="z.B. 2024 oder BK 2023">
+          </label>
+          <label class="field">
+            <span class="field-label">Hinweis (optional)</span>
+            <input id="saNote" class="input"
+                   placeholder="interne Beschreibung, z.B. auto: handyvertrag.de · 7629">
+          </label>
+        </div>
+
+      <button id="saAddBtn"
+        type="button"
+        class="btn-primary btn-small sa-add-btn"
+        title="Erzeugt aus den obigen Angaben automatisch ein RegEx-Muster">
+  + Regel aus Vorschlag erstellen
 </button>
 
-    <ul id="objectsList" class="list"></ul>
-    <div class="dialog-actions">
-      
-      <button id="objectsSaveShared" class="btn-primary" type="button">
-  Speichern
-</button>
-<button class="btn-outline btn-small" data-close="#manageObjectsDialog" type="button">
-  Schließen
-</button>
+      </section>
 
-    </div>
-    <p class="hint">Quelle: config/objects.json – lokal/pCloud.</p>
-  </div>
-</dialog>
+      <!-- Tabelle mit allen Mustern -->
+      <section>
+        <h3>Regeln</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Muster (RegEx)</th>
+              <th>Objekt</th>
+              <th>Unterordner</th>
+              <th>Hinweis</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="assignTbody"></tbody>
+        </table>
+      </section>
 
-<!-- Versand verwalten (E-Mail) -->
-<dialog id="manageEmailsDialog" class="dialog" aria-labelledby="emailsTitle">
-  <div class="dialog-body">
-    <div class="dialog-titlebar">
-      <h3 id="emailsTitle">Versand verwalten</h3>
-      <button class="dialog-close" data-close="#manageEmailsDialog" type="button" title="Schließen">×</button>
-    </div>
-
-    <h4 style="padding:0 1.2rem .4rem 1.2rem">Adressbuch</h4>
-    <table class="table" style="width:100%; margin-top:.1rem">
-      <thead>
-        <tr>
-          <th style="width:28%">Name/Label</th>
-          <th style="width:32%">E-Mail</th>
-          <th style="width:18%">ID (optional)</th>
-          <th style="width:18%">Tags (optional)</th>
-          <th style="width:4%"></th>
-        </tr>
-      </thead>
-      <tbody id="emailsTbody"></tbody>
-    </table>
-    <div class="dialog-actions" style="justify-content:flex-start">
-      <button id="emailsAdd" class="btn-outline btn-small" type="button">+ Neu</button>
-    </div>
-
-    <hr class="sep" />
-
-    <h4 style="padding:0 1.2rem .2rem 1.2rem">Pro Liegenschaft (bei Rechnung)</h4>
-    <div class="row" style="padding:0 1.2rem .6rem 1.2rem; gap:.6rem; align-items:flex-end; flex-wrap:wrap">
-      <div>
-        <label class="label" for="poObject">Liegenschaft</label>
-        <select id="poObject" class="select" style="min-width:180px"></select>
+      <div class="dialog-actions">
+        <button id="assignAdd" type="button" class="btn-outline">
+          + Leere Zeile
+        </button>
+        <span class="flex-spacer"></span>
+        <button type="button" class="btn-outline"
+                onclick="this.closest('dialog').close()">Abbrechen</button>
+        <button id="assignSave" type="button" class="btn">
+          Speichern
+        </button>
       </div>
-      <div class="grow">
-        <label class="label" for="poRecipients">Empfänger (Komma/Leerzeichen)</label>
-        <input id="poRecipients" class="input slim" placeholder="z. B. yachthafenoberwinter@web.de kontakt@fidelior.de">
+    </div>
+  </div>
+</dialog>
+<!-- Checkboxen verwalten -->
+<dialog id="manageCheckboxesDialog">
+  <div class="dialog">
+    <div class="dialog-body">
+      <div class="dialog-titlebar">
+        <h2>Checkboxen verwalten</h2>
+        <button type="button" class="dialog-close"
+                aria-label="Schließen"
+                onclick="this.closest('dialog').close()">✕</button>
       </div>
-      <div class="grow">
-        <label class="label" for="poSubject">Betreff</label>
-        <input id="poSubject" class="input slim" placeholder="z. B. Kenntnisnahme zur Rechnungsfreigabe – EGYO">
+
+      <p class="muted">
+        Hier legst du fest, welche Checkboxen unter
+        <strong>Dateiablage</strong> und <strong>Versand per E-Mail</strong>
+        angezeigt werden.
+      </p>
+
+      <!-- DATEIABLAGE -->
+      <section style="margin-bottom:1.2rem">
+        <h3>Dateiablage</h3>
+        <p class="muted">Diese Checkboxen steuern, wohin das Dokument gespeichert wird.</p>
+
+        <table class="table">
+          <thead>
+          <tr>
+            <th>Label im Formular</th>
+            <th>Key (intern)</th>
+            <th>Standard aktiv</th>
+            <th></th>
+          </tr>
+          </thead>
+          <tbody id="cbSaveTbody"></tbody>
+        </table>
+
+        <button id="cbSaveAdd" type="button" class="btn-outline btn-small" style="margin-top:.5rem">
+          + Ablage-Checkbox hinzufügen
+        </button>
+      </section>
+
+      <!-- E-MAIL -->
+      <section>
+        <h3>Versand per E-Mail</h3>
+        <p class="muted">
+          Diese Checkboxen steuern zusätzliche E-Mail-Versender (Adressbuch-IDs aus
+          der E-Mail-Verwaltung).
+        </p>
+
+        <table class="table">
+          <thead>
+          <tr>
+            <th>Label im Formular</th>
+            <th>Adressbuch-IDs (Komma)</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+          </thead>
+          <tbody id="cbEmailTbody"></tbody>
+        </table>
+
+        <button id="cbEmailAdd" type="button" class="btn-outline btn-small" style="margin-top:.5rem">
+          + E-Mail-Checkbox hinzufügen
+        </button>
+      </section>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn-outline"
+                onclick="this.closest('dialog').close()">Abbrechen</button>
+        <button id="checkboxesSave" type="button" class="btn">Speichern</button>
       </div>
-      <div class="grow">
-        <label class="label" for="poReplyTo">Reply-To (optional)</label>
-        <input id="poReplyTo" class="input slim" placeholder="z. B. kontakt@fidelior.de">
-      </div>
-      <button id="poAdd" class="btn-outline btn-small" type="button">
-        + Vorlage speichern
-      </button>
-    </div>
-
-    <ul id="poList" class="list" style="padding:0 1.2rem .6rem 1.2rem"></ul>
-
-    <div class="dialog-actions">
-      <button id="emailsSave" class="btn-primary" type="button">Speichern</button>
-    </div>
-
-    <p class="hint" style="padding:0 1.2rem 1rem 1.2rem">Quelle: <code>config/emails.json</code> – lokal/pCloud.</p>
-  </div>
-</dialog>
-<dialog id="manageStampDialog" class="dialog" aria-labelledby="stampTitle">
-  <div class="dialog-body">
-    <div class="dialog-titlebar">
-      <h3 id="stampTitle">Wasserzeichen / Stempel</h3>
-      <button class="dialog-close" data-close="#manageStampDialog" type="button" title="Schließen">×</button>
-    </div>
-
-    <p class="hint" style="padding:0.6rem 1.2rem 0.4rem 1.2rem">
-      Hier kannst du Text und Aufbau des Stempels anpassen.
-    </p>
-
-    <div style="padding:0.4rem 1.2rem 1rem 1.2rem;display:grid;gap:.6rem">
-      <label class="row">
-        <input id="stampEnabled" type="checkbox">
-        <span>Stempel beim Speichern anwenden</span>
-      </label>
-
-      <label class="row" style="display:grid;gap:.35rem">
-        <span>Text in der Mitte:</span>
-        <input id="stampText" class="input" placeholder="z. B. EINGEGANGEN">
-      </label>
-
-      <label class="row">
-        <input id="stampInclDate" type="checkbox">
-        <span>Datum im Stempel anzeigen</span>
-      </label>
-
-      <label class="row">
-        <input id="stampInclObj" type="checkbox">
-        <span>Liegenschaft / Objekt im Stempel anzeigen</span>
-      </label>
-    </div>
-
-    <div class="dialog-actions">
-      <button class="btn-outline" data-close="#manageStampDialog" type="button">Abbrechen</button>
-      <button id="stampSaveBtn" class="btn-primary" type="button">Speichern</button>
     </div>
   </div>
 </dialog>
 
-<!-- Gatekeeper-Dialog: Root fehlt -->
-<dialog id="connectGuardDialog" class="dialog" aria-labelledby="connectGuardTitle">
-  <div class="dialog-body">
-    <div class="dialog-titlebar">
-      <h3 id="connectGuardTitle">Speichern nicht möglich – Ziel nicht verbunden</h3>
-      <button class="dialog-close" data-close="#connectGuardDialog" type="button" title="Schließen">×</button>
-    </div>
-    <p>Bitte zuerst das Speicherziel verbinden:</p>
-    <ul class="list slim">
-      <li>Scopevisio (Root: <code>Arndt</code>)</li>
-      <li>pCloud (Root: <code>DMS BACKUP PCLOUD</code>)</li>
-    </ul>
-    <div class="dialog-actions">
-      <button id="guardConnectBtn" class="btn-primary" type="button">Verbinden</button>
-      <button class="btn-outline" data-close="#connectGuardDialog" type="button">Abbrechen</button>
-    </div>
-  </div>
-</dialog>
-
-<!-- Unterordner-Dialog: nur nach Prüfung -->
-<dialog id="missingFolderDialog" class="dialog" aria-labelledby="missingFolderTitle">
-  <div class="dialog-body">
-    <div class="dialog-titlebar">
-      <h3 id="missingFolderTitle">Unterordner fehlt</h3>
-      <button class="dialog-close" data-close="#missingFolderDialog" type="button" title="Schließen">×</button>
-    </div>
-    <p>Der Unterordner <code id="missingFolderPath">—</code> wurde im verbundenen Speicher nicht gefunden.
-       Möchtest du ihn jetzt anlegen?</p>
-    <div class="dialog-actions">
-      <button id="mfCreateBtn" class="btn-primary" type="button">Anlegen</button>
-      <button class="btn-outline" data-close="#missingFolderDialog" type="button">Abbrechen</button>
-    </div>
-  </div>
-</dialog>
-<!-- Einstellungs-Zentrale -->
-<dialog id="settingsDialog" class="dialog" aria-labelledby="settingsTitle">
-  <div class="dialog-body">
-    <div class="dialog-titlebar">
-      <h3 id="settingsTitle">Einstellungen</h3>
-      <button class="dialog-close" data-close="#settingsDialog" type="button" title="Schließen">×</button>
-    </div>
-
-    <p class="hint" style="margin-bottom:.8rem">
-      Hier kannst du Verbindungen und Verwaltungsdaten bearbeiten.
-    </p>
-
-    <div class="settings-grid" style="display:grid;gap:.6rem;margin-bottom:1rem">
-      <button id="btnSettingsConnections" class="btn-outline" type="button">
-        Verbindungen
-      </button>
-      <button id="btnSettingsEmails" class="btn-outline" type="button">
-        Versand verwalten (E-Mail)
-      </button>
-      <!-- NEU: Stempel-Konfiguration -->
-<button id="btnSettingsStamp" class="btn-outline" type="button">
-  Wasserzeichen / Stempel
-</button>
-      <button id="btnSettingsObjects" class="btn-outline" type="button">
-        Liegenschaften verwalten
-      </button>
-      <button id="btnSettingsTypes" class="btn-outline" type="button">
-        Dokumentarten verwalten
-      </button>
-      <button id="btnSettingsAssignments" class="btn-outline" type="button">
-        Zuordnungsmuster
-      </button>
-    </div>
-
-    <div class="dialog-actions">
-      <button class="btn-primary" data-close="#settingsDialog" type="button">Schließen</button>
-    </div>
-  </div>
-</dialog>
 <datalist id="mailBook"></datalist>
 
 </body>

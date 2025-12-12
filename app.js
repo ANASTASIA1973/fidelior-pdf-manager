@@ -2669,6 +2669,8 @@ async function ensureConfigConnectedOrAsk(){
   async function openEmailsDialog(){
   await ensureConfigConnectedOrAsk();
   const dlg = $("#manageEmailsDialog");
+  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+
   if (!dlg) { toast("E-Mail-Dialog fehlt im HTML.", 2500); return; }
 
   // ---- Laden / Defaults (ohne Markdown-Link!) ----
@@ -3037,17 +3039,146 @@ $("#poAdd")?.addEventListener("click", (e) => {
   if (typeof dlg.showModal === "function") dlg.showModal();
   wireDialogClose?.(dlg);
 }
+async function openCheckboxesDialog(){
+  await ensureConfigConnectedOrAsk();
+  const dlg = $("#manageCheckboxesDialog");
+  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+
+  if (!dlg) { toast("Checkboxen-Dialog fehlt im HTML.", 2500); return; }
+
+  let cfg;
+  try { cfg = await loadJson("checkboxes.json"); }
+  catch { cfg = { saveTargets: [], emailTargets: [] }; }
+
+  const saveList  = Array.isArray(cfg.saveTargets)  ? cfg.saveTargets  : [];
+  const emailList = Array.isArray(cfg.emailTargets) ? cfg.emailTargets : [];
+
+  const tbSave  = $("#cbSaveTbody");
+  const tbEmail = $("#cbEmailTbody");
+  tbSave.innerHTML = "";
+  tbEmail.innerHTML = "";
+
+  const rowSave = (def = { id:"", key:"", label:"", defaultChecked:false }) => {
+    const tr = document.createElement("tr");
+
+    tr.innerHTML = `
+      <td><input class="input slim cb-label" value="${(def.label||"").replaceAll('"','&quot;')}"></td>
+      <td><input class="input slim cb-key"   value="${(def.key||"").replaceAll('"','&quot;')}"></td>
+      <td class="center"><input type="checkbox" class="cb-default" ${def.defaultChecked ? "checked":""}></td>
+      <td class="right"><button type="button" class="btn-outline btn-small cb-del">Löschen</button></td>
+    `;
+
+    // id ist absichtlich NICHT editierbar, aber muss vorhanden sein:
+    tr.dataset.id = def.id || "";
+
+    tr.querySelector(".cb-del").addEventListener("click", () => tr.remove());
+    return tr;
+  };
+
+  const rowEmail = (def = { id:"", label:"", addressBookIds:[], status:null }) => {
+    const tr = document.createElement("tr");
+    const ids = Array.isArray(def.addressBookIds) ? def.addressBookIds.join(", ") : "";
+
+    tr.innerHTML = `
+      <td><input class="input slim cb-label" value="${(def.label||"").replaceAll('"','&quot;')}"></td>
+      <td><input class="input slim cb-ids"   value="${ids.replaceAll('"','&quot;')}"></td>
+      <td>
+        <select class="input slim cb-status">
+          <option value="" ${!def.status ? "selected":""}>–</option>
+          <option value="open"   ${def.status==="open"?"selected":""}>open</option>
+          <option value="review" ${def.status==="review"?"selected":""}>review</option>
+        </select>
+      </td>
+      <td class="right"><button type="button" class="btn-outline btn-small cb-del">Löschen</button></td>
+    `;
+
+    tr.dataset.id = def.id || "";
+    tr.querySelector(".cb-del").addEventListener("click", () => tr.remove());
+    return tr;
+  };
+
+  // render
+  saveList.forEach(def => tbSave.appendChild(rowSave(def)));
+  emailList.forEach(def => tbEmail.appendChild(rowEmail(def)));
+
+  // Add buttons
+  $("#cbSaveAdd")?.addEventListener("click", () => {
+    // neue ID automatisch (stabil, nicht editierbar)
+    const id = "chkCustom_" + Date.now().toString(36);
+    tbSave.appendChild(rowSave({ id, key:"custom_"+Date.now().toString(36), label:"Neue Ablage", defaultChecked:false }));
+  }, { once:false });
+
+  $("#cbEmailAdd")?.addEventListener("click", () => {
+    const id = "mail-custom-" + Date.now().toString(36);
+    tbEmail.appendChild(rowEmail({ id, label:"Neue E-Mail", addressBookIds:[], status:null }));
+  }, { once:false });
+
+  // Save
+  $("#checkboxesSave")?.addEventListener("click", async () => {
+    // SaveTargets einsammeln
+    const outSave = Array.from(tbSave.querySelectorAll("tr")).map(tr => {
+      const id = tr.dataset.id || "";
+      const label = (tr.querySelector(".cb-label")?.value || "").trim();
+      const key   = (tr.querySelector(".cb-key")?.value   || "").trim();
+      const defOn = !!tr.querySelector(".cb-default")?.checked;
+
+      if (!id || !key) throw new Error("Ablage-Checkbox: id/key fehlt.");
+      return { id, key, label, defaultChecked: defOn };
+    });
+
+    // EmailTargets einsammeln
+    const outEmail = Array.from(tbEmail.querySelectorAll("tr")).map(tr => {
+      const id = tr.dataset.id || "";
+      const label = (tr.querySelector(".cb-label")?.value || "").trim();
+      const idsS  = (tr.querySelector(".cb-ids")?.value   || "");
+      const status = (tr.querySelector(".cb-status")?.value || "").trim() || null;
+
+      if (!id) throw new Error("E-Mail-Checkbox: id fehlt.");
+
+      const addressBookIds = idsS.split(",").map(s => s.trim()).filter(Boolean);
+      return { id, label, addressBookIds, status };
+    });
+
+    const out = { saveTargets: outSave, emailTargets: outEmail };
+
+    try {
+      await saveJson("checkboxes.json", out);
+      window.__fdlCheckboxesCfg = out;
+      try { localStorage.setItem("fdlCheckboxesCfg", JSON.stringify(out)); } catch {}
+
+
+      // UI sofort aktualisieren
+      try { await ensureSaveCheckboxes(); } catch {}
+      try { window.__fdlRefreshEmailCheckboxes?.(); } catch {}
+
+      toast("Checkboxen gespeichert.", 2000);
+      dlg.close?.();
+    } catch (e) {
+      console.error(e);
+      toast("Fehler beim Speichern der Checkboxen.", 2500);
+    }
+  });
+
+  if (typeof dlg.showModal === "function") dlg.showModal();
+  wireDialogClose?.(dlg);
+}
 
 async function openStampDialog(){
   await ensureConfigConnectedOrAsk();
   const dlg = $("#manageStampDialog");
+  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+
   if (!dlg) { toast("Stempel-Dialog fehlt im HTML.", 2500); return; }
 
-  const txt   = dlg.querySelector("#stampText");
-  const cbEn  = dlg.querySelector("#stampEnabled");
-  const cbDat = dlg.querySelector("#stampInclDate");
-  const cbObj = dlg.querySelector("#stampInclObj");
-  const btn   = dlg.querySelector("#stampSaveBtn");
+ const txt     = dlg.querySelector("#stampText");
+const cbEn    = dlg.querySelector("#stampEnabled");
+const cbDat   = dlg.querySelector("#stampInclDate");
+const cbObj   = dlg.querySelector("#stampInclObj");
+
+const cbPaid  = dlg.querySelector("#stampPaidEnabled");
+const txtPaid = dlg.querySelector("#stampPaidText");
+
+const btn     = dlg.querySelector("#stampSaveBtn");
 
   let cfg;
   try {
@@ -3065,14 +3196,21 @@ async function openStampDialog(){
   txt.value     = cfg.coreText || "EINGEGANGEN";
   cbDat.checked = cfg.includeDate !== false;
   cbObj.checked = cfg.includeObject !== false;
+  cbPaid.checked = cfg.paidEnabled === true;
+txtPaid.value  = cfg.paidText || "BEZAHLT";
+
 
   btn.onclick = async () => {
-    const out = {
-      enabled:       !!cbEn.checked,
-      coreText:      (txt.value || "EINGEGANGEN").trim() || "EINGEGANGEN",
-      includeDate:   !!cbDat.checked,
-      includeObject: !!cbObj.checked
-    };
+const out = {
+  enabled:       !!cbEn.checked,
+  coreText:      (txt.value || "EINGEGANGEN").trim() || "EINGEGANGEN",
+  includeDate:   !!cbDat.checked,
+  includeObject: !!cbObj.checked,
+
+  paidEnabled:   !!cbPaid.checked,
+  paidText:      (txtPaid.value || "BEZAHLT").trim() || "BEZAHLT"
+};
+
     try {
       await saveJson("stamp.json", out);
       stampCfg = out; // Cache aktualisieren
@@ -3099,6 +3237,8 @@ async function openObjectsDialog(){
   await ensureConfigConnectedOrAsk();
 
   const dlg = $("#manageObjectsDialog");
+  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+
   if (!dlg){
     toast("Objekte-Dialog fehlt.", 2000, "err");
     return;
@@ -3202,7 +3342,10 @@ async function openObjectsDialog(){
   wireDialogClose(dlg);
 }
 
-  async function openTypesDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageTypesDialog"); if(!dlg){ toast("Dokumentarten-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("document_types.json"); }catch{ j={types:[], defaultTypeKey:""}; } const list=j.types||[]; const ul=$("#typesList"); ul.innerHTML=""; const defaultKey=j.defaultTypeKey||"";
+  async function openTypesDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageTypesDialog");
+    if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+
+    if(!dlg){ toast("Dokumentarten-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("document_types.json"); }catch{ j={types:[], defaultTypeKey:""}; } const list=j.types||[]; const ul=$("#typesList"); ul.innerHTML=""; const defaultKey=j.defaultTypeKey||"";
     const addRow=(t={label:"", key:"", isInvoice:false})=>{ const li=document.createElement("li"); li.innerHTML = `
         <div class="row tight">
           <input class="input slim ty-label" placeholder="Label" value="${t.label||""}">
@@ -3221,6 +3364,8 @@ async function openAssignmentsDialog() {
   await ensureConfigConnectedOrAsk();
 
   const dlg = $("#manageAssignmentsDialog");
+  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+
   if (!dlg) { toast("Zuordnungs-Dialog fehlt.", 2000); return; }
 
   // Bestehende Regeln laden
@@ -3561,6 +3706,17 @@ async function openAssignmentsDialog() {
 
   // Zuordnungsmuster
   $("#btnSettingsAssignments")?.addEventListener("click", (e) => {
+      // Checkboxen verwalten
+  $("#btnSettingsCheckboxes")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    dlg.close?.();
+    if (typeof openCheckboxesDialog === "function") {
+      openCheckboxesDialog();
+    } else {
+      toast("Checkboxen-Verwaltung ist nicht verfügbar.", 3000);
+    }
+  });
+
     e.preventDefault();
     dlg.close?.();
     if (typeof openAssignmentsDialog === "function") {
@@ -3569,6 +3725,17 @@ async function openAssignmentsDialog() {
       toast("Zuordnungsmuster sind nicht verfügbar.", 3000);
     }
   });
+    // Checkboxen verwalten
+  $("#btnSettingsCheckboxes")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    dlg.close?.();
+    if (typeof openCheckboxesDialog === "function") {
+      openCheckboxesDialog();
+    } else {
+      toast("Checkboxen-Verwaltung ist nicht verfügbar.", 3000);
+    }
+  });
+
 })();
 
 
@@ -3782,7 +3949,91 @@ function buildEmailPromptDialog(defaults = {}) {
     subj.value = (p.subject || "").trim();
     rep.value  = (p.replyTo || "").trim();
     if (body) body.value = (p.text || "");   // falls später einmal vorbelegt werden soll
-    sec.style.display = "none";
+window.getSelectedEmailTargets = function(){
+  const res = { to: [], cc: [], bcc: [], subject: "", replyTo: "", status: null };
+
+  const book = (window.emailsCfg && Array.isArray(window.emailsCfg.addressBook))
+    ? window.emailsCfg.addressBook
+    : [];
+
+  const host = document.getElementById("emailTargets");
+  if (!host) return res;
+
+  const pushUnique = (arr, v) => {
+    const s = (v || "").trim();
+    if (!s) return;
+    if (!arr.includes(s)) arr.push(s);
+  };
+
+  // Priorität: review > open > null
+  const rank = (st) => st === "review" ? 2 : st === "open" ? 1 : 0;
+  let bestStatus = null;
+
+  host.querySelectorAll("input[type='checkbox']").forEach(cb => {
+    if (!cb.checked) return;
+
+    // Status sammeln (mit Priorität)
+    const st = (cb.dataset.status || "").trim() || null;
+    if (rank(st) > rank(bestStatus)) bestStatus = st;
+
+    // optional: subject/replyTo direkt aus Checkbox (Verwaltung)
+    const subj = (cb.dataset.subject || "").trim();
+    const rep  = (cb.dataset.replyto || "").trim();
+    if (!res.subject && subj) res.subject = subj;
+    if (!res.replyTo && rep)  res.replyTo = rep;
+
+    // addressBookIds -> echte E-Mails
+    const ids = (cb.dataset.addrIds || "").split(",").map(s => s.trim()).filter(Boolean);
+    ids.forEach(id => {
+      const hit = book.find(e =>
+        e && String(e.id || "").toLowerCase() === String(id || "").toLowerCase()
+      );
+      if (hit?.email) pushUnique(res.to, hit.email);
+    });
+  });
+
+  res.status = bestStatus;
+
+  // Falls kein subject direkt gesetzt wurde: aus Status ableiten
+  if (!res.subject) {
+    if (res.status === "open")   res.subject = "NEUE RECHNUNG – ZAHLUNG OFFEN";
+    if (res.status === "review") res.subject = "RECHNUNGSPRÜFUNG ERFORDERLICH";
+  }
+
+  return res;
+};
+
+
+    // Neue Empfängervoreinstellung aus den Versand-Checkboxen
+    try {
+      if (typeof window.getSelectedEmailTargets === "function") {
+        const sel = window.getSelectedEmailTargets() || {};
+        const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean)));
+
+        const toList  = uniq(sel.to);
+        const ccList  = uniq(sel.cc);
+        const bccList = uniq(sel.bcc);
+
+        if (toList.length || ccList.length || bccList.length) {
+          to.value  = toList.join(", ");
+          cc.value  = ccList.join(", ");
+          bcc.value = bccList.join(", ");
+          sec.style.display = "grid";
+          // Betreff/Reply-To aus Checkbox-Verwaltung übernehmen (falls geliefert)
+if (sel.subject && !subj.value.trim()) subj.value = String(sel.subject).trim();
+if (sel.replyTo && rep && !rep.value.trim()) rep.value = String(sel.replyTo).trim();
+
+        } else {
+          sec.style.display = "none";
+        }
+      } else {
+        sec.style.display = "none";
+      }
+    } catch (e) {
+      console.warn("[FDL] getSelectedEmailTargets fehlgeschlagen:", e);
+      sec.style.display = "none";
+    }
+
     note.style.display = "none";
 
     const validate = () => {
@@ -3799,8 +4050,8 @@ function buildEmailPromptDialog(defaults = {}) {
       subj.addEventListener(ev, validate);
     });
     validate();
-    btnOnly.focus();
   };
+
 
   // *** WICHTIG: erster Klick öffnet nur die Felder – KEIN Versand, KEIN close ***
   btnSend.addEventListener("click", (e) => {
@@ -3997,30 +4248,44 @@ function fdlSetupMailTemplates(dlg){
 /* -------------------------------- Speichern ------------------------------ */
 /** Stempelt links vertikal: Datum – EINGEGANGEN – Kürzel (einzeilig, rotiert). */
 // Helper zum Laden / Cachen der Stempel-Konfiguration
+/* -------------------------------- Speichern / Stempel -------------------- */
+
+/** Helper zum Laden / Cachen der Stempel-Konfiguration (inkl. Überweisungsstempel). */
 async function getStampConfig(){
   if (stampCfg) return stampCfg;
 
   try {
-    const cfg = await loadJson("stamp.json");
+    const cfg = await loadJson("stamp.json") || {};
+
     stampCfg = {
+      // Hauptstempel
       enabled:       cfg.enabled !== false,
       coreText:      (cfg.coreText || "EINGEGANGEN").trim() || "EINGEGANGEN",
       includeDate:   cfg.includeDate !== false,
-      includeObject: cfg.includeObject !== false
+      includeObject: cfg.includeObject !== false,
+
+      // Zweiter Stempel (Überweisung) – optional
+      paidEnabled:   cfg.paidEnabled === true,                                 // Standard: AUS, bis in der App eingeschaltet
+      paidText:      (cfg.paidText || "ÜBERWIESEN").trim() || "ÜBERWIESEN"
     };
   } catch {
-    // Fallback: aktuelles Verhalten
+    // Fallback: aktuelles Verhalten + Paid-Stempel aus, Text „ÜBERWIESEN“
     stampCfg = {
       enabled:       true,
       coreText:      "EINGEGANGEN",
       includeDate:   true,
-      includeObject: true
+      includeObject: true,
+      paidEnabled:   false,
+      paidText:      "ÜBERWIESEN"
     };
   }
   return stampCfg;
 }
 
-/* Eingangsstempel: Datum / Text / Objekt (konfigurierbar) */
+/**
+ * Eingangsstempel: Datum / Text / Objekt (konfigurierbar)
+ * + optional zweiter Stempel „ÜBERWIESEN“ o. ä. oben rechts.
+ */
 async function stampPdf(buf){
   if (!window.PDFLib) return buf;
   const { PDFDocument, StandardFonts, rgb, degrees } = PDFLib;
@@ -4029,7 +4294,14 @@ async function stampPdf(buf){
   try {
     cfg = await getStampConfig();
   } catch {
-    cfg = { enabled:true, coreText:"EINGEGANGEN", includeDate:true, includeObject:true };
+    cfg = {
+      enabled:       true,
+      coreText:      "EINGEGANGEN",
+      includeDate:   true,
+      includeObject: true,
+      paidEnabled:   false,
+      paidText:      "ÜBERWIESEN"
+    };
   }
 
   // Stempel global deaktiviert → PDF unverändert zurück
@@ -4042,9 +4314,11 @@ async function stampPdf(buf){
 
     const font = await doc.embedFont(StandardFonts.HelveticaBold);
 
+    // --- Hauptstempel (links vertikal) ------------------------------------
     const dateStr = (recvDateEl?.value || (typeof today === "function"
       ? today()
       : new Date().toLocaleDateString("de-DE")));
+
     const objStr  = (objSel?.value || "—");
 
     const parts = [];
@@ -4054,7 +4328,7 @@ async function stampPdf(buf){
       parts.push(objStr);
     }
 
-    // Kerntext (z.B. "Eingegangen:"), Leerzeichen abschneiden
+    // Kerntext (z. B. "EINGEGANGEN:"), Leerzeichen abschneiden
     const coreText = (cfg.coreText || "EINGEGANGEN").trim() || "EINGEGANGEN";
     parts.push(coreText);
 
@@ -4068,27 +4342,49 @@ async function stampPdf(buf){
       text += needsDash ? " – " + dateStr : " " + dateStr;
     }
 
+    // Position und Stil wie bisher, nur nach innen gedreht
+    const size   = Math.max(10, Math.round(page.getWidth() * 0.018));
+    const margin = 16;
 
+    // Länge des Textes in PDF-Punkten
+    const textLen = font.widthOfTextAtSize(text, size);
 
-// Position und Stil wie bisher, nur nach innen gedreht
-const size = Math.max(10, Math.round(page.getWidth() * 0.018));
-const margin  = 16;
+    // y so wählen, dass der Text oben beginnt, aber im Blatt bleibt:
+    const yPos = page.getHeight() - margin - textLen;
 
-// Länge des Textes in PDF-Punkten
-const textLen = font.widthOfTextAtSize(text, size);
+    page.drawText(text, {
+      x:      margin,
+      y:      yPos,
+      size,
+      font,
+      color:  rgb(0.886, 0, 0.102),     // Rot wie gehabt
+      rotate: degrees(90)               // nach innen lesbar
+    });
 
-// y so wählen, dass der Text oben beginnt, aber im Blatt bleibt:
-const yPos = page.getHeight() - margin - textLen;
+    // --- Zweiter Stempel „Überwiesen“ (oben rechts, horizontal) ----------
+    const paidCheckbox = document.getElementById("chkPaid");
+    const paidActive   = !!(cfg.paidEnabled && paidCheckbox && paidCheckbox.checked);
 
-page.drawText(text, {
-  x: margin,
-  y: yPos,
-  size,
-  font,
-  color: rgb(0.886, 0, 0.102),
-  rotate: degrees(90)   // nach innen lesbar
-});
+    if (paidActive) {
+      const paidText = (cfg.paidText || "ÜBERWIESEN").trim() || "ÜBERWIESEN";
 
+      const paidSize   = Math.max(10, Math.round(page.getWidth() * 0.018));
+      const paidMargin = 20;
+      const paidLen    = font.widthOfTextAtSize(paidText, paidSize);
+
+    const paidX = paidMargin;
+
+      const paidY = page.getHeight() - paidMargin - paidSize;
+
+      page.drawText(paidText, {
+        x:     paidX,
+        y:     paidY,
+        size:  paidSize,
+        font,
+        // dezent graublau
+        color: rgb(0.36, 0.43, 0.56)
+      });
+    }
 
     const out = await doc.save({ useObjectStreams: true });
     return out.buffer || out; // kompatibel bleiben
@@ -4099,6 +4395,7 @@ page.drawText(text, {
 }
 
 let __fdlIsSaving = false;
+
 
 // === SPEICHERN & optionaler E-Mail-Versand (getrennte Buttons) ===
 async function handleSaveFlow(mode = "save_only") {
@@ -4136,6 +4433,14 @@ async function handleSaveFlow(mode = "save_only") {
 
     let preSubject = "";
     let preReply   = "";
+
+        // Status für Betreff/Reply-To aus den Versand-Checkboxen übernehmen
+    try {
+      if (typeof window.__fdlApplyMailStatusFromCheckboxes === "function") {
+        window.__fdlApplyMailStatusFromCheckboxes();
+      }
+    } catch {}
+
 
     try {
       const meta = (typeof computeSubjectAndReply === "function")
@@ -4591,6 +4896,8 @@ async function boot() {
 
   // 1) Zuerst gespeicherte Directory-Handles wiederherstellen
   await restoreBoundHandles();
+    try { await window.__fdlRefreshEmailCheckboxes?.(); } catch {}
+
 
  // 2) Konfigurationen laden (Emails/Assignments optional)
 try { emailsCfg      = await loadJson("emails.json"); }       catch { emailsCfg = null; }
@@ -5026,8 +5333,9 @@ async function pickDirectory(target){
     dlg.style.cssText = 'position:fixed; inset:0; z-index:2000; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.35); padding:20px;';
 
     dlg.innerHTML = `
-      <div style="background:#fff; border-radius:14px; min-width:min(720px,96vw); max-width:96vw; box-shadow:0 18px 40px rgba(0,0,0,.25); overflow:hidden;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #eee">
+<div class="dialog" style="background:#fff; border-radius:14px; width:min(900px,96vw); max-width:96vw; max-height:90vh; box-shadow:0 18px 40px rgba(0,0,0,.25); overflow:hidden;">
+  <div class="dialog-titlebar" style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #eee">
+
           <div style="font-weight:700;font-size:16px">Verbindungs‑Zentrale</div>
           <button id="fdlConnClose" style="border:none;background:transparent;font-size:18px;cursor:pointer" aria-label="Schließen">✕</button>
         </div>
@@ -5039,6 +5347,13 @@ async function pickDirectory(target){
       </div>`;
 
     document.body.appendChild(dlg);
+    try {
+  if (!dlg.__draggable) {
+    makeDialogDraggable(dlg, ".dialog-titlebar");
+    dlg.__draggable = true;
+  }
+} catch {}
+
     $('#fdlConnClose', dlg)?.addEventListener('click', hideConnectionsCenter);
     $('#fdlConnClose2', dlg)?.addEventListener('click', hideConnectionsCenter);
     return dlg;
@@ -5362,6 +5677,8 @@ async function pickDirectory(target){
     document.addEventListener('DOMContentLoaded', boot, { once:true });
   } else {
     boot();
+    document.querySelectorAll("dialog").forEach(d => makeDialogDraggable(d));
+
   }
 })();
 
@@ -5370,19 +5687,17 @@ async function pickDirectory(target){
   const $  = (s, el=document) => el.querySelector(s);
   const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
 
-  // 1) Bereich finden / anlegen
   function getSaveHost(){
-    return $('#saveTargets') || $('#saveBox') || $('#accConnections');
+    return document.querySelector('#saveTargets');
   }
 
-  // 2) Alte runde Tabs "Scopevisio / Lokal" konsequent entfernen (auch falls später eingefügt)
   function killRoundTabs(){
     const host = getSaveHost();
     if (!host) return;
     const removeNow = () => {
       $$('button', host).forEach(btn => {
         const t = (btn.textContent || '').trim().toLowerCase();
-        if (t === 'scopevisio' || t === 'lokal') { try{ btn.remove(); }catch{} }
+        if (t === 'scopevisio' || t === 'lokal') { try { btn.remove(); } catch {} }
       });
     };
     removeNow();
@@ -5390,138 +5705,113 @@ async function pickDirectory(target){
     mo.observe(host, { childList: true, subtree: true });
   }
 
-// 3) Checkboxen sicherstellen (Scopevisio, Scope-BK, pCloud Extra + Backup, Lokal)
-  function ensureSaveCheckboxes(){
+  async function ensureSaveCheckboxes(){
     const host = getSaveHost();
     if (!host) return;
 
-    // Stelle sicher: <fieldset id="saveBox">
-    let box = $('#saveBox', host);
-    if (!box) {
-      box = document.createElement('fieldset');
-      box.id = 'saveBox';
-      box.className = 'save-box';
-      box.style.marginTop = '.8rem';
-      box.innerHTML = '<legend>Speichern in</legend>';
-      host.appendChild(box);
-    }
+    let prefs = {};
+    try { prefs = JSON.parse(localStorage.getItem("fdlTargets") || "{}"); } catch { prefs = {}; }
 
-    const addCheck = (id, label, title, defChecked=false, afterEl=null) => {
-      let wrap = $('#'+id, box)?.closest('label');
-      if (!wrap) {
-        wrap = document.createElement('label');
-        wrap.className = 'chk';
-        wrap.title = title || '';
-        wrap.innerHTML = `<input type="checkbox" id="${id}"><span>${label}</span>`;
-        if (afterEl) afterEl.insertAdjacentElement('afterend', wrap);
-        else box.appendChild(wrap);
-      }
-      const chk = $('#'+id, wrap);
-      // Default nur beim ersten Mal setzen, nicht bei jedem Aufruf wieder überschreiben
-      if (typeof chk.checked === 'boolean' && !chk._fdlInitDone) {
-        chk.checked = defChecked;
-        chk._fdlInitDone = true;
-      }
-      return {wrap, chk};
+    const DEFAULT_CFG = {
+      saveTargets: [
+        { id:"chkScopevisio",   key:"scope",   label:"Scopevisio",                   defaultChecked:true  },
+        { id:"chkPcloudBackup", key:"backup",  label:"pCloud Backup (Sammelordner)", defaultChecked:true  },
+        { id:"chkScopeBk",      key:"scopeBk", label:"Betriebskosten (Scopevisio)",  defaultChecked:false },
+        { id:"chkPcloudExtra",  key:"extras",  label:"Ordner in pCloud",             defaultChecked:false },
+        { id:"chkLocalSave",    key:"local",   label:"Lokal",                        defaultChecked:false }
+      ]
     };
 
-    // --- Scopevisio (Hauptschalter, Default AN) ---
-    const sc = addCheck(
-      'chkScopevisio',
-      'Scopevisio',
-      'Schaltet die Ablage in Scopevisio ein/aus (Verbindung bleibt erhalten).',
-      true
-    );
-sc.wrap.classList.add('chk-main');   // <--- NEU
-    // --- Scopevisio – Betriebskosten (unter Scopevisio eingerückt) ---
-    const scBk = addCheck(
-      'chkScopeBk',
-      'Scopevisio – Betriebskosten',
-      'Legt zusätzlich eine Kopie im Objektordner unter „Betriebskosten/{Jahr}“ ab.',
-      false,
-      sc.wrap
-    );
-   scBk.wrap.classList.add('chk-sub');
-
-    // Verknüpfung: ohne Scopevisio kein Betriebskosten
-    sc.chk.addEventListener('change', () => {
-      if (!sc.chk.checked) {
-        const bk = document.getElementById('chkScopeBk');
-        if (bk) bk.checked = false;
+    // NICHT verbinden erzwingen – nur versuchen zu laden
+    let cfg = null;
+    try {
+      cfg = await loadJson("checkboxes.json");
+      if (cfg && typeof cfg === "object") {
+        window.__fdlCheckboxesCfg = cfg;
+        try { localStorage.setItem("fdlCheckboxesCfg", JSON.stringify(cfg)); } catch {}
+      } else {
+        cfg = null;
       }
-    });
-    scBk.chk.addEventListener('change', () => {
-      if (scBk.chk.checked && !sc.chk.checked) {
-        sc.chk.checked = true;
-      }
-    });
-
-    // --- pCloud – zusätzliche Ablageziele (Hauptzeile) ---
-    const pcExtra = addCheck(
-      'chkPcloudExtra',
-      'pCloud – zusätzliche Ablageziele',
-      'Speichert in strukturierte pCloud-Ordner (OBJEKTE/VERWALTUNG/…).',
-      false
-    );
- pcExtra.wrap.classList.add('chk-main');   // <--- NEU
-    // --- pCloud (Backup) eingerückt darunter, Default AN ---
-    const pc = addCheck(
-      'chkPcloudBackup',
-      'pCloud (Backup)',
-      'Sichert zusätzlich in den pCloud-Sammelordner (DMS BACKUP PCLOUD).',
-      true,
-      pcExtra.wrap
-    );
-    pc.wrap.classList.add('chk-sub');
-    pc.chk.addEventListener('change', () => updateBackupInfoText());
-
-    // Status-Text neben pCloud (Backup)
-    if (!$('#pcBackupStatus', pc.wrap)) {
-      const info = document.createElement('span');
-      info.id = 'pcBackupStatus';
-      info.style.marginLeft = '6px';
-      info.style.fontSize   = '12px';
-      info.style.color      = '#666';
-      pc.wrap.appendChild(info);
+    } catch {
+      cfg = null;
     }
 
-    // --- Lokal (eigene Zeile) ---
-    const loc = addCheck(
-      'chkLocalSave',
-      'Lokal',
-      'Speichert zusätzlich lokal auf diesem Gerät',
-      false
-    );
-    loc.wrap.classList.add('chk-main');      // <--- NEU
-
-  }
-
-  // 4) Backup-Status neben der Checkbox aktualisieren (Root + Checkbox)
-  function updateBackupInfoText(){
-    const info = $('#pcBackupStatus');
-    if (!info) return;
-
-    const rootOk  = !!window.pcloudRootHandle;
-    const chk     = document.getElementById('chkPcloudBackup');
-    const enabled = !!chk?.checked;
-
-    if (!rootOk) {
-      info.textContent = 'Backup aus (pCloud-Root nicht verbunden)';
-      info.style.color = '#9b7700';
-    } else if (!enabled) {
-      info.textContent = 'Backup aus (deaktiviert)';
-      info.style.color = '#9b7700';
-    } else {
-      info.textContent = 'Backup aktiv';
-      info.style.color = '#2c6a00';
+    if (!cfg) {
+      try {
+        const cached = JSON.parse(localStorage.getItem("fdlCheckboxesCfg") || "null");
+        if (cached && typeof cached === "object") cfg = cached;
+      } catch {}
     }
+    if (!cfg) cfg = DEFAULT_CFG;
+
+    const list = Array.isArray(cfg.saveTargets) ? cfg.saveTargets : DEFAULT_CFG.saveTargets;
+
+    // erst jetzt leeren
+    host.textContent = "";
+
+    const mkRow = (def) => {
+      const row = document.createElement("label");
+      row.className = "chk";
+      if (def.title) row.title = def.title;
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.id = def.id || ("chk-" + Math.random().toString(36).slice(2));
+      row.appendChild(cb);
+
+      const span = document.createElement("span");
+      span.textContent = def.label || def.id || cb.id;
+      row.appendChild(span);
+
+      const key = def.key;
+      if (key && typeof prefs[key] === "boolean") cb.checked = !!prefs[key];
+      else cb.checked = !!def.defaultChecked;
+
+      if (cb.id === "chkPcloudBackup") {
+        const info = document.createElement("span");
+        info.id = "pcBackupStatus";
+        info.className = "muted";
+        info.style.marginLeft = ".4rem";
+        row.appendChild(info);
+      }
+
+      cb.addEventListener("change", () => {
+        if (!key) return;
+        try {
+          prefs[key] = !!cb.checked;
+          localStorage.setItem("fdlTargets", JSON.stringify(prefs));
+        } catch {}
+      });
+
+      return row;
+    };
+
+    list.forEach(def => host.appendChild(mkRow(def)));
   }
 
+  window.ensureSaveCheckboxes = ensureSaveCheckboxes;
 
-  // 5) Alles zusammen booten
-  function bootSaveSection(){
+function updateBackupInfoText(){
+  const info = document.getElementById('pcBackupStatus');
+  if (!info) return;
+
+  const rootOk = !!window.pcloudRootHandle;
+
+  // Nur warnen, wenn Root fehlt – sonst Text komplett ausblenden
+  if (!rootOk) {
+    info.textContent = 'Backup aus (pCloud-Root nicht verbunden)';
+    info.style.display = '';
+    info.style.color = '#9b7700';
+  } else {
+    info.textContent = '';
+    info.style.display = 'none';
+  }
+}
+
+
+  async function bootSaveSection(){
     killRoundTabs();
-    ensureSaveCheckboxes();
+    await ensureSaveCheckboxes();
     updateBackupInfoText();
   }
 
@@ -5531,170 +5821,181 @@ sc.wrap.classList.add('chk-main');   // <--- NEU
     bootSaveSection();
   }
 
-  // 6) Wenn sich Verbindungen ändern (nach Picker/Schließen), Status sofort nachziehen
   const prevRefresh = window.fdlRefreshConnectionsUI;
   window.fdlRefreshConnectionsUI = function(){
     try { prevRefresh?.(); } catch {}
     try { updateBackupInfoText(); } catch {}
   };
 })();
-/* ===== HARD CLEANUP: alte Pills/Checkboxen entfernen, nur neue 4 Schalter lassen ===== */
-(() => {
-  const $  = (s, el=document) => el.querySelector(s);
-  const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
-
-  // IDs der ALTEN Checkboxen (die weg sollen)
-  const OLD_IDS = ['chkScope', 'chkPcloudExtras', 'chkLocal'];
-
-  function removeNode(n){ if (n && n.parentNode) try{ n.parentNode.removeChild(n); }catch{} }
-
-  function killLegacyOnce(){
-    const host = $('#accConnections') || document;
-
-    // 1) Grüne Status-Pills und alte Verbinden-Zeilen weg
-    $$('#accConnections .chips, #accConnections .conn-compact').forEach(removeNode);
-
-    // 2) Alte Checkboxen (über IDs) samt Labels entfernen
-    OLD_IDS.forEach(id => {
-      const oldInput = document.getElementById(id);
-      if (oldInput){
-        // komplettes Label entfernen (runde Pill)
-        const wrap = oldInput.closest('label');
-        removeNode(wrap || oldInput);
-      }
-    });
-
-    // 3) Eventuelle runde Doppel-Buttons „Scopevisio“ / „Lokal“ entfernen
-    //    (falls als Buttons oder Labels ohne ID gerendert)
-    $$('button, label.chk', host).forEach(el => {
-      const t = (el.textContent || '').trim().toLowerCase();
-      const hasNewScope = !!document.getElementById('chkScopevisio');
-      const hasNewLocal = !!document.getElementById('chkLocalSave');
-      if (
-        (t === 'scopevisio'  && hasNewScope  && !el.querySelector('#chkScopevisio')) ||
-        (t === 'lokal'       && hasNewLocal  && !el.querySelector('#chkLocalSave'))
-      ){
-        removeNode(el);
-      }
-    });
-
-    // 4) Doppelte „pCloud – zusätzliche Ablageziele“ entfernen, alte gegen neue abgleichen
-    $$('label.chk', host).forEach(el => {
-      const t = (el.textContent || '').toLowerCase();
-      if (t.includes('zusätzliche ablageziele') && !el.querySelector('#chkPcloudExtra')){
-        // Wenn es nicht unser neuer #chkPcloudExtra ist, löschen
-        removeNode(el);
-      }
-    });
-  }
-
-  function bootCleanup(){
-    // einmal sofort
-    killLegacyOnce();
-
-    // und falls die UI später noch Elemente nachlädt: weiter sauber halten
-    const acc = $('#accConnections') || document.body;
-    const mo = new MutationObserver(() => killLegacyOnce());
-    mo.observe(acc, { childList: true, subtree: true });
-
-    // zur Sicherheit nach kleinem Delay nochmal
-    setTimeout(killLegacyOnce, 150);
-    setTimeout(killLegacyOnce, 600);
-  }
-
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', bootCleanup, { once:true });
-  } else {
-    bootCleanup();
-  }
-})();
 
 
-/* ===== Vorschau aus der echten Ziel-Logik (resolveTargets) aufbauen ===== */
+/* ================= TEIL 4 (NEU): Versand per E-Mail – Checkboxen aus checkboxes.json ============== */
 (() => {
   const $ = (s, el=document) => el.querySelector(s);
 
-  // Lies neue Flags (mit Fallback über flag())
-  function getFlags(){
-    return {
-      scope  : flag("chkScopevisio","chkScope"),
-      extra  : flag("chkPcloudExtra","chkPcloudExtras"),
-      local  : flag("chkLocalSave","chkLocal"),
-      backup : !!document.getElementById("chkPcloudBackup")?.checked
-    };
+async function loadCheckboxCfg(){
+  const DEFAULTS = { saveTargets: [], emailTargets: [] };
+
+  // 1) RAM
+  if (window.__fdlCheckboxesCfg && typeof window.__fdlCheckboxesCfg === "object") {
+    return window.__fdlCheckboxesCfg;
   }
 
-  // Baue die Textzeile aus resolveTargets()-Ergebnis
-  function buildPreviewText(){
-    if (typeof window.resolveTargets !== "function") return "";
-    // Viele deiner Implementationen lesen DOM-Flags selbst; wir rufen einfach so auf:
-    const targets = window.resolveTargets();
-    if (!Array.isArray(targets) || !targets.length) return "—";
+  // 2) localStorage (wichtig: vor loadJson)
+  try {
+    const cached = JSON.parse(localStorage.getItem("fdlCheckboxesCfg") || "null");
+    if (cached && typeof cached === "object") {
+      window.__fdlCheckboxesCfg = cached;      // <<< wichtig!
+      return cached;
+    }
+  } catch {}
 
-    // Jeder Eintrag hat typischerweise display/label/path – wir nehmen, was da ist:
-    const pickLabel = t => t?.display || t?.label || t?.path || "";
-    return targets.map(pickLabel).filter(Boolean).join("  +  ");
+  // 3) Datei (geht nur, wenn config verbunden ist)
+  try {
+    const cfg = await loadJson("checkboxes.json");
+    if (cfg && typeof cfg === "object") {
+      window.__fdlCheckboxesCfg = cfg;
+      try { localStorage.setItem("fdlCheckboxesCfg", JSON.stringify(cfg)); } catch {}
+      return cfg;
+    }
+  } catch {}
+
+  return DEFAULTS;
+}
+
+async function renderEmailCheckboxesFromCfg(){
+  const host = $("#emailTargets");
+  if (!host) return;
+
+  const cfg  = await loadCheckboxCfg();
+  const list = Array.isArray(cfg.emailTargets) ? cfg.emailTargets : [];
+
+  // ✅ WICHTIG: NICHT LEER RENDERN, wenn nichts geladen werden konnte
+  if (!list.length) return;
+
+  host.textContent = "";
+
+    list.forEach(def => {
+      const row = document.createElement("label");
+      row.className = "chk";
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.id = def.id || ("mail-custom-" + Math.random().toString(36).slice(2));
+      cb.checked = !!def.defaultChecked;
+
+      if (Array.isArray(def.addressBookIds)) cb.dataset.addrIds = def.addressBookIds.join(",");
+      if (def.status) cb.dataset.status = String(def.status);
+      if (def.subject) cb.dataset.subject = String(def.subject);
+if (def.replyTo) cb.dataset.replyto = String(def.replyTo);
+
+
+      row.appendChild(cb);
+
+      const span = document.createElement("span");
+      span.textContent = def.label || cb.id;
+      row.appendChild(span);
+
+      host.appendChild(row);
+    });
   }
 
- function writePreview(){
-  const el = document.getElementById("targetPreview");
-  if (!el) return;
-  const s = buildPreviewText();
-  if (s) el.textContent = s;
-}
-
-// ---- Drosselung: nur 1× pro Frame neu berechnen ----
-let _previewScheduled = false;
-function schedulePreview(){
-  if (_previewScheduled) return;
-  _previewScheduled = true;
-  requestAnimationFrame(() => {
-    _previewScheduled = false;
-    writePreview();
-  });
-}
-
-// Sofortige Aktualisierung bei allen relevanten Änderungen
-function wire(){
-  [
-    "#chkScopevisio","#chkPcloudBackup","#chkPcloudExtra","#chkLocalSave",
-    "#objectSelect","#genericSubfolder","#docTypeSelect",
-    "#invoiceDate","#receivedDate"
-  ].forEach(sel => {
-    const el = document.querySelector(sel);
-    if (!el) return;
-    el.addEventListener("change", schedulePreview);
-    el.addEventListener("input",  schedulePreview);
-  });
-
-  // Wenn Verbindungen gesetzt/entfernt werden → neu rechnen
-  const prev = window.fdlRefreshConnectionsUI;
-  window.fdlRefreshConnectionsUI = function(){
-    try { prev?.(); } catch {}
-    schedulePreview();
+  window.__fdlRefreshEmailCheckboxes = async function(){
+    try { await renderEmailCheckboxesFromCfg(); } catch (e) { console.error(e); }
   };
 
-  // ❌ Keine MutationObserver mehr (verursachte Endlosschleifen)
-}
-
-  
-  function boot(){
-  wire();
-
-  if (typeof setupPcloudTargetGuards === "function") {
-    setupPcloudTargetGuards();
+  if (document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", () => {
+      renderEmailCheckboxesFromCfg();
+    }, { once:true });
+  } else {
+    renderEmailCheckboxesFromCfg();
   }
-  schedulePreview();
-
-  setTimeout(schedulePreview, 120);
-  setTimeout(schedulePreview, 400);
-}
-
-if (document.readyState === "loading"){
-  document.addEventListener("DOMContentLoaded", boot, { once:true });
-} else {
-  boot();
-}
-
 })();
+// ===== Boot: E-Mail-Konfig beim Start laden (damit Checkboxen sofort funktionieren) =====
+(async function bootEmailsCfg(){
+  try {
+    // nur laden, wenn noch nichts da ist
+    if (!window.emailsCfg || !Array.isArray(window.emailsCfg.addressBook)) {
+      await ensureConfigConnectedOrAsk();
+      const cfg = await loadJson("emails.json");
+      window.emailsCfg = cfg;
+      emailsCfg = cfg;
+    }
+  } catch (e) {
+    // still: App soll ohne E-Mail-Konfig weiterlaufen
+  }
 
+  // danach: E-Mail-Checkboxen neu rendern (Mapping über addressBookIds)
+  try { await window.__fdlRefreshEmailCheckboxes?.(); } catch {}
+})();
+function makeDialogDraggable(dialogEl, handleSel = ".dialog-titlebar"){
+  const handle = dialogEl.querySelector(handleSel);
+  const box    = dialogEl.querySelector(".dialog") || dialogEl;
+  if (!handle || !box) return;
+
+  let dragging = false, startX=0, startY=0, startL=0, startT=0;
+
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+  handle.style.cursor = "grab";
+  handle.style.userSelect = "none";
+
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button, a, input, select, textarea, label")) return;
+
+    const r = box.getBoundingClientRect();
+
+    box.style.position = "fixed";
+    box.style.margin = "0";
+    box.style.left = r.left + "px";
+    box.style.top  = r.top  + "px";
+    box.style.transform = "none"; // wichtig, falls irgendwo centering per transform aktiv war
+
+    dragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startL = r.left;
+    startT = r.top;
+
+    handle.style.cursor = "grabbing";
+    handle.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  });
+
+  handle.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+
+    const w = box.offsetWidth;
+    const h = box.offsetHeight;
+
+    const PAD = 12;
+
+    const rawMaxL = window.innerWidth  - w - PAD;
+    const rawMaxT = window.innerHeight - h - PAD;
+
+    // Wenn Fenster größer als Viewport: min wird negativ erlaubt → kein "Festkleben"
+    const minL = Math.min(PAD, rawMaxL);
+    const maxL = Math.max(PAD, rawMaxL);
+    const minT = Math.min(PAD, rawMaxT);
+    const maxT = Math.max(PAD, rawMaxT);
+
+    const nextL = clamp(startL + dx, minL, maxL);
+    const nextT = clamp(startT + dy, minT, maxT);
+
+    box.style.left = nextL + "px";
+    box.style.top  = nextT + "px";
+  });
+
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    handle.style.cursor = "grab";
+  };
+
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+}
