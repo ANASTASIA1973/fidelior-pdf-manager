@@ -1327,11 +1327,7 @@ dialog .dialog-body section .dialog-actions{
   width: 130px; /* Standard */
   text-align: center;
 }
-#manageCheckboxesDialog .cb-folder .row.tight{
-  flex-wrap: nowrap !important;
-  gap: .5rem;
-  min-width: 0;
-}
+ 
 #manageCheckboxesDialog .cb-folder .cb-bindstate{
   font-size: 12px;
   white-space: nowrap;
@@ -1341,389 +1337,168 @@ dialog .dialog-body section .dialog-actions{
 }
 
 
+/* ===== Checkboxen verwalten: fixe Ziele erklären (nicht sperren) ===== */
+#manageCheckboxesDialog tr.is-fixed .cb-bindstate{
+  font-style: italic;
+}
 
-/* === PATCH: Checkboxen verwalten kompakt + kein horizontaler Scroll === */
+
+#manageCheckboxesDialog tr.is-fixed td:nth-child(2) input{
+  opacity:.85;
+}
+/* === FORCE: Checkboxen verwalten – kompakt & sauber (fix) === */
 #manageCheckboxesDialog > .dialog{
   width: min(920px, calc(100vw - 24px)) !important;
   max-width: min(920px, calc(100vw - 24px)) !important;
 }
 
-#manageCheckboxesDialog .dialog-body{
-  overflow-x: hidden !important;
-}
-
 #manageCheckboxesDialog table.table{
-  width: 100% !important;
-  table-layout: fixed !important;
-}
-
-/* Spaltenbreiten so, dass es NICHT überläuft (5 Spalten) */
-#manageCheckboxesDialog .table th:nth-child(1),
-#manageCheckboxesDialog .table td:nth-child(1){ width: 34% !important; }
-
-#manageCheckboxesDialog .table th:nth-child(2),
-#manageCheckboxesDialog .table td:nth-child(2){ width: 18% !important; }
-
-#manageCheckboxesDialog .table th:nth-child(3),
-#manageCheckboxesDialog .table td:nth-child(3){ width: 28% !important; text-align:left !important; }
-
-#manageCheckboxesDialog .table th:nth-child(4),
-#manageCheckboxesDialog .table td:nth-child(4){ width: 12% !important; text-align:center !important; }
-
-#manageCheckboxesDialog .table th:nth-child(5),
-#manageCheckboxesDialog .table td:nth-child(5){ width: 8% !important; text-align:right !important; }
-
-/* Zellen dürfen schrumpfen */
-#manageCheckboxesDialog .table th,
-#manageCheckboxesDialog .table td{
-  padding: .42rem .5rem !important;
-  vertical-align: middle;
-  overflow: hidden;
-}
-
-/* Inputs kompakter */
-#manageCheckboxesDialog .table td input[type="text"]{
-  padding: .45rem .6rem !important;
-  height: 34px !important;
-  font-size: 14px !important;
-}
-
-/* Buttons in der Ordnerzelle: umbrechen statt horizontal drücken */
-#manageCheckboxesDialog .cb-folder .row.tight{
-  flex-wrap: wrap !important; /* war nowrap -> erzeugt Scroll */
-  gap: .35rem .45rem !important;
-}
-
-/* Bind-State: wenn nötig kürzen */
-#manageCheckboxesDialog .cb-folder .cb-bindstate{
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: .85;
-}
-
-/* Delete/Action Button kleiner, damit er nicht sprengt */
-#manageCheckboxesDialog .table td:last-child .btn,
-#manageCheckboxesDialog .table td:last-child .btn-outline{
-  padding: .35rem .55rem !important;
-  min-width: 0 !important;
-  white-space: nowrap;
-}
-
-/* Auf schmaleren Screens: Tabelle horizontal scrollen vermeiden -> Zeilen stacken */
-@media (max-width: 820px){
-  #manageCheckboxesDialog table.table,
-  #manageCheckboxesDialog thead{ display:none !important; }
-
-  #manageCheckboxesDialog tbody tr{
-    display: grid !important;
-    grid-template-columns: 1fr 1fr;
-    gap: .5rem .6rem;
-    padding: .6rem .5rem;
-    border: 1px solid var(--border,#ebe7e5);
-    border-radius: 12px;
-    margin-bottom: .6rem;
-    background: var(--surface,#fff);
-  }
-
-  #manageCheckboxesDialog tbody td{
-    width: auto !important;
-    padding: 0 !important;
-    overflow: visible;
-  }
-
-  #manageCheckboxesDialog tbody td:nth-child(3){ grid-column: 1 / -1; } /* Ordner */
-  #manageCheckboxesDialog tbody td:nth-child(5){ justify-self: end; }   /* Löschen */
-}
-
-
-
-
-/* === FINAL: Checkboxen verwalten – professionell & kompakt (override) === */
-#manageCheckboxesDialog > .dialog{
-  width: min(880px, calc(100vw - 32px)) !important;
-  max-width: min(880px, calc(100vw - 32px)) !important;
-}
-#manageCheckboxesDialog .dialog-body{
-  padding: 14px 16px 16px !important;
-  overflow-x: hidden !important;
-}
-#manageCheckboxesDialog .dialog-title,
-#manageCheckboxesDialog h2{
-  font-size: 20px !important;
-  line-height: 1.25 !important;
-  margin: 0 0 10px !important;
-}
-#manageCheckboxesDialog .dialog-body > p{
-  margin: 6px 0 12px !important;
-  color: var(--muted) !important;
-}
-
-#manageCheckboxesDialog table.table{
+  display: table !important;
   width: 100% !important;
   table-layout: fixed !important;
   border-collapse: separate !important;
-  border-spacing: 0 10px !important;
+  border-spacing: 0 8px !important;
 }
+
 #manageCheckboxesDialog table.table thead th{
-  font-size: 13px !important;
-  color: var(--muted) !important;
-  font-weight: 700 !important;
   padding: 0 8px 6px !important;
+  font-size: 13px !important;
 }
-#manageCheckboxesDialog table.table tbody tr{
-  background: var(--surface) !important;
-}
+
 #manageCheckboxesDialog table.table tbody td{
   padding: 6px 8px !important;
   vertical-align: middle !important;
 }
 
-/* Spalten (5): Label, Key, Ordner, Standard, Aktion */
+/* 5 Spalten: Label | Key | Ordner | Standard | Aktion */
 #manageCheckboxesDialog table.table th:nth-child(1),
-#manageCheckboxesDialog table.table td:nth-child(1){ width: 36% !important; }
+#manageCheckboxesDialog table.table td:nth-child(1){ width: 38% !important; }
+
 #manageCheckboxesDialog table.table th:nth-child(2),
 #manageCheckboxesDialog table.table td:nth-child(2){ width: 18% !important; }
+
 #manageCheckboxesDialog table.table th:nth-child(3),
-#manageCheckboxesDialog table.table td:nth-child(3){ width: 28% !important; }
+#manageCheckboxesDialog table.table td:nth-child(3){ width: 26% !important; }
+
 #manageCheckboxesDialog table.table th:nth-child(4),
 #manageCheckboxesDialog table.table td:nth-child(4){ width: 10% !important; text-align:center !important; }
+
 #manageCheckboxesDialog table.table th:nth-child(5),
 #manageCheckboxesDialog table.table td:nth-child(5){ width: 8% !important; text-align:right !important; }
 
-/* Inputs: einheitlich, kompakt */
-#manageCheckboxesDialog table.table input[type="text"]{
-  width: 100% !important;
-  height: 34px !important;
-  padding: 6px 10px !important;
-  border-radius: 12px !important;
-}
-
-/* Ordner-Zelle (Button + X + Status) sauber auf einer Linie */
+/* Ordner-Zelle: Button + X + Status eng */
 #manageCheckboxesDialog .cb-folder .row.tight{
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
+  display:flex !important;
+  align-items:center !important;
+  gap: 6px !important;
   flex-wrap: nowrap !important;
-  min-width: 0 !important;
-}
-#manageCheckboxesDialog .cb-folder .row.tight > *{
-  min-width: 0 !important;
 }
 #manageCheckboxesDialog .cb-folder .cb-bindstate,
 #manageCheckboxesDialog .cb-folder .ord-status{
   font-size: 12px !important;
-  color: var(--muted) !important;
   white-space: nowrap !important;
+  opacity: .85;
 }
 
-/* Aktions-Buttons: nicht "schwimmen", gleiche Höhe */
-#manageCheckboxesDialog table.table td:nth-child(5) .btn,
-#manageCheckboxesDialog table.table td:nth-child(5) button{
-  height: 32px !important;
-  padding: 0 10px !important;
-  border-radius: 999px !important;
+
+/* ===== Checkboxen verwalten: kurzer Hilfetext ===== */
+#manageCheckboxesDialog .cb-help{
+  margin: .65rem 0 1rem;
+  padding: .75rem .9rem;
+  border: 1px solid #eadfff;
+  background: #f8f5ff;
+  border-radius: 14px;
+}
+#manageCheckboxesDialog .cb-help__title{
+  font-weight: 600;
+  color: var(--primary, #5B1B70);
+  margin-bottom: .25rem;
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+}
+#manageCheckboxesDialog .cb-help__title::before{
+  content:"ℹ";
+  width: 20px;
+  height: 20px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+  background:#efe8f7;
+  color: var(--primary, #5B1B70);
+  font-size: 13px;
+}
+#manageCheckboxesDialog .cb-help__text{
+  color: var(--muted, #6A6666);
+  font-size: 13px;
+  line-height: 1.45;
+}
+#manageCheckboxesDialog .cb-help__text > div + div{
+  margin-top: .2rem;
+}
+/* ============================
+   FIX: E-Mail-Prompt (#fdlEmailPrompt) nicht transparent
+   ============================ */
+#fdlEmailPrompt{
+  border: 0;
+  padding: 0;
+  background: transparent; /* der Kasten kommt vom <form> */
+  max-width: calc(100vw - 24px);
 }
 
-/* Mobile: statt Quetschen -> Karten */
-@media (max-width: 860px){
-  #manageCheckboxesDialog table.table,
-  #manageCheckboxesDialog thead,
-  #manageCheckboxesDialog tbody,
-  #manageCheckboxesDialog th,
-  #manageCheckboxesDialog td,
-  #manageCheckboxesDialog tr{ display:block !important; }
-
-  #manageCheckboxesDialog table.table thead{ display:none !important; }
-  #manageCheckboxesDialog table.table tbody tr{
-    border: 1px solid var(--border) !important;
-    border-radius: 14px !important;
-    padding: 10px !important;
-    margin-bottom: 10px !important;
-  }
-  #manageCheckboxesDialog table.table tbody td{
-    padding: 6px 0 !important;
-    text-align: left !important;
-  }
-  #manageCheckboxesDialog table.table tbody td:nth-child(4){
-    text-align: left !important;
-  }
-  #manageCheckboxesDialog table.table tbody td:nth-child(5){
-    text-align: left !important;
-  }
+#fdlEmailPrompt::backdrop{
+  background: rgba(0,0,0,.35);
 }
 
-/* === FINAL: Checkboxen verwalten – professionell & kompakt (override) === */
-#manageCheckboxesDialog > .dialog{
-  width: min(880px, calc(100vw - 32px)) !important;
-  max-width: min(880px, calc(100vw - 32px)) !important;
-}
-#manageCheckboxesDialog .dialog-body{
-  padding: 14px 16px 16px !important;
-  overflow-x: hidden !important;
-}
-#manageCheckboxesDialog .dialog-title,
-#manageCheckboxesDialog h2{
-  font-size: 20px !important;
-  line-height: 1.2 !important;
-  margin: 0 0 10px !important;
-}
-#manageCheckboxesDialog p{
-  margin: 6px 0 10px !important;
-}
-#manageCheckboxesDialog table.table{
-  width: 100% !important;
-  table-layout: fixed !important;
-  border-collapse: separate !important;
-  border-spacing: 0 10px !important;
-}
-#manageCheckboxesDialog table.table thead th{
-  font-size: 12px !important;
-  letter-spacing: .02em !important;
-  color: var(--muted) !important;
-  text-transform: none !important;
-  padding: 0 8px 4px !important;
-  border: 0 !important;
-}
-#manageCheckboxesDialog table.table tbody td{
-  padding: 0 8px !important;
-  border: 0 !important;
-}
-/* Spaltenbreiten (5 Spalten) */
-#manageCheckboxesDialog table.table th:nth-child(1),
-#manageCheckboxesDialog table.table td:nth-child(1){ width: 34% !important; }
-#manageCheckboxesDialog table.table th:nth-child(2),
-#manageCheckboxesDialog table.table td:nth-child(2){ width: 18% !important; }
-#manageCheckboxesDialog table.table th:nth-child(3),
-#manageCheckboxesDialog table.table td:nth-child(3){ width: 28% !important; }
-#manageCheckboxesDialog table.table th:nth-child(4),
-#manageCheckboxesDialog table.table td:nth-child(4){ width: 12% !important; text-align:center !important; }
-#manageCheckboxesDialog table.table th:nth-child(5),
-#manageCheckboxesDialog table.table td:nth-child(5){ width: 8% !important; text-align:right !important; }
-
-/* Zellen wirken wie "Cards" durch Input-Styling (ohne echte Card-Wrapper) */
-#manageCheckboxesDialog table.table input[type="text"]{
-  height: 34px !important;
-  padding: 0 12px !important;
-  border-radius: 10px !important;
-  border: 1px solid var(--border) !important;
-  background: #fff !important;
-  box-sizing: border-box !important;
-}
-#manageCheckboxesDialog table.table input[type="text"]:focus{
-  outline: none !important;
-  border-color: var(--accent) !important;
-  box-shadow: 0 0 0 3px rgba(201,166,224,.25) !important;
+/* Der echte "Dialog-Kasten" ist hier das <form> */
+#fdlEmailPrompt > form{
+  background: var(--surface, #fff);
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(0,0,0,.22);
+  overflow: hidden; /* rund + sauber */
 }
 
-#manageCheckboxesDialog table.table td:nth-child(3){
-  vertical-align: middle !important;
+/* Optional: Inhalte minimal aufräumen */
+#fdlEmailPrompt input,
+#fdlEmailPrompt textarea{
+  background: #fff;
 }
-#manageCheckboxesDialog .cb-folder .row.tight{
-  display: flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  flex-wrap: wrap !important;
+/* =========================================================
+   Dialog-Header: X immer rechts (alle Dialoge)
+   ========================================================= */
+dialog .dialog-titlebar{
+  display:flex !important;
+  align-items:center !important;
+  justify-content:space-between !important;
+  gap:.8rem !important;
 }
-#manageCheckboxesDialog .cb-folder .cb-bindstate,
-#manageCheckboxesDialog .cb-folder .ord-status{
-  font-size: 12px !important;
-  color: var(--muted) !important;
-  white-space: nowrap !important;
+dialog .dialog-titlebar h2{
+  margin:0 !important;
+  min-width:0 !important;
 }
-
-/* Buttons in der Tabelle kompakter */
-#manageCheckboxesDialog table.table .btn,
-#manageCheckboxesDialog table.table button{
-  padding: 7px 10px !important;
-  height: 34px !important;
-  border-radius: 10px !important;
-  font-size: 13px !important;
-}
-#manageCheckboxesDialog table.table td:nth-child(5) .btn,
-#manageCheckboxesDialog table.table td:nth-child(5) button{
-  padding: 7px 12px !important;
+dialog .dialog-close{
+  margin-left:auto !important;
+  flex:0 0 auto !important;
 }
 
-/* Checkbox "Standard aktiv" sauber zentriert */
-#manageCheckboxesDialog table.table td:nth-child(4) input[type="checkbox"]{
-  transform: scale(1.05) !important;
-  margin: 0 auto !important;
-  display: inline-block !important;
+/* =========================================================
+   Settings-Dialog: Pfeil direkt hinter dem Text (nicht rechts außen)
+   ========================================================= */
+#settingsDialog .list .btn.slim{
+  display:inline-flex !important;
+  justify-content:flex-start !important;   /* statt space-between */
+  gap:.35rem !important;
 }
 
-/* Tabellenzeilen als saubere "Karten" */
-#manageCheckboxesDialog table.table tbody tr{
-  background: var(--surface) !important;
-  box-shadow: 0 1px 3px rgba(0,0,0,.06) !important;
-}
-#manageCheckboxesDialog table.table tbody tr td{
-  padding: 10px 8px !important;
-}
-#manageCheckboxesDialog table.table tbody tr td:first-child{
-  border-top-left-radius: 12px !important;
-  border-bottom-left-radius: 12px !important;
-}
-#manageCheckboxesDialog table.table tbody tr td:last-child{
-  border-top-right-radius: 12px !important;
-  border-bottom-right-radius: 12px !important;
+/* Pfeil bleibt als ::after, aber sitzt direkt hinter dem Text */
+#settingsDialog .list .btn.slim::after{
+  margin-left:.15rem !important;
+  opacity:.7;
 }
 
-/* Überschriften/Absätze enger */
-#manageCheckboxesDialog h3{
-  margin: 12px 0 6px !important;
-  font-size: 16px !important;
-}
-#manageCheckboxesDialog section{
-  margin-bottom: 14px !important;
-}
-/* === Versand-Dialog (fdlEmailPrompt) professionell + korrekt scrollen === */
-dialog#fdlEmailPrompt{
-  background: var(--surface, #fff) !important;
-  color: var(--text, #111) !important;
-
-  width: min(760px, calc(100vw - 28px)) !important;
-  max-width: calc(100vw - 28px) !important;
-  max-height: calc(100vh - 28px) !important;
-
-  margin: auto !important;
-  border: 0 !important;
-  border-radius: 16px !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-
-  box-shadow: 0 18px 60px rgba(0,0,0,.28) !important;
-}
-
-dialog#fdlEmailPrompt::backdrop{
-  background: rgba(0,0,0,.55) !important;
-}
-
-/* Form soll nicht „riesig“ werden (inline min-width/max-width neutralisieren) */
-dialog#fdlEmailPrompt form{
-  width: 100% !important;
-  min-width: 0 !important;
-  max-width: none !important;
-  max-height: calc(100vh - 28px) !important;
-  display: flex !important;
-  flex-direction: column !important;
-}
-
-/* Nur der Mittelteil scrollt (Header+Footer bleiben stehen) */
-dialog#fdlEmailPrompt form > div:nth-of-type(2){
-  overflow: auto !important;
-}
-
-/* Felder sauber */
-dialog#fdlEmailPrompt input,
-dialog#fdlEmailPrompt textarea,
-dialog#fdlEmailPrompt select{
-  width: 100% !important;
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-}
-dialog#fdlEmailPrompt textarea{
-  resize: vertical !important;
-  min-height: 110px !important;
+/* Optional: falls irgendwo noch echte "›" im Text stehen,
+   verhindert doppelte Pfeile (nur wenn vorhanden) */
+#settingsDialog .list .btn.slim{
+  letter-spacing: 0 !important;
 }

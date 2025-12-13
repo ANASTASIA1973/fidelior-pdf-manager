@@ -192,6 +192,33 @@ async function idbDel(key) {
 }
 }
 
+
+// ===== Ziel-Overrides (Fixe Ziele können optional auf einen frei gewählten Ordner umgebogen werden) =====
+// Technisch nutzen wir denselben Handle-Speicher wie bei Custom-Zielen: IndexedDB-Key "customTarget:<checkboxId>".
+// Für fixe Ziele interpretieren wir diesen Handle als OVERRIDE des Standardpfads.
+const FDL_FIXED_TARGET_IDS = ["chkScopevisio","chkScopeBk","chkPcloudExtra","chkPcloudBackup"];
+
+window.__fdlOverrideHandles = window.__fdlOverrideHandles || {};
+
+// lädt Override-Handles einmal (und kann später erneut aufgerufen werden)
+async function refreshOverrideCache(){
+  const out = {};
+  for (const id of FDL_FIXED_TARGET_IDS){
+    try { out[id] = await idbGet("customTarget:" + id); }
+    catch { out[id] = null; }
+  }
+  window.__fdlOverrideHandles = out;
+  return out;
+}
+
+function getOverrideHandleSync(id){
+  try { return (window.__fdlOverrideHandles && window.__fdlOverrideHandles[id]) || null; }
+  catch { return null; }
+}
+
+// initial (non-blocking)
+try { setTimeout(() => { refreshOverrideCache().catch(()=>{}); }, 0); } catch {}
+
 // Speichern der verbundenen Handles
 async function saveBoundHandles() {
   try {
@@ -1562,6 +1589,12 @@ async function updateSubfolderOptions({ silent = false } = {}) {
   const lists = [];
   const scopeRoot  = window.scopeRootHandle  || scopeRootHandle;
   const pcloudRoot = window.pcloudRootHandle || pcloudRootHandle;
+  // Overrides (fixe Ziele können optional auf freien Ordner zeigen)
+  const ovScope   = getOverrideHandleSync("chkScopevisio");
+  const ovScopeBk = getOverrideHandleSync("chkScopeBk");
+  const ovPclEx   = getOverrideHandleSync("chkPcloudExtra");
+  const ovPclBk   = getOverrideHandleSync("chkPcloudBackup");
+
   if (scopeRoot)             lists.push(listChildFolders(scopeRoot,  scopeBase));
   if (pcloudRoot && pclBase) lists.push(listChildFolders(pcloudRoot, pclBase));
 
@@ -1590,6 +1623,8 @@ async function updateSubfolderOptions({ silent = false } = {}) {
 
 // ---- Zielordner-Übersicht (global) ----
 // Zeigt nur, was wirklich aktiv & auflösbar ist. Nutzt resolveTargets() als einzige Wahrheit.
+// ---- Zielordner-Übersicht (global) ----
+// Zeigt nur, was wirklich aktiv & auflösbar ist. Nutzt resolveTargets() als einzige Wahrheit.
 function renderTargetSummary(){
   const el = (typeof targetPrev !== "undefined" && targetPrev) ? targetPrev : document.querySelector("#targetPreview");
   if (!el) return;
@@ -1604,7 +1639,7 @@ function renderTargetSummary(){
     lines.push(`<strong>Scopevisio:</strong> ${t.scope.seg.join(" \\ ")}`);
   }
 
-  // Scopevisio – Abrechnungsbelege (separate Zeile)
+  // Scopevisio – Abrechnungsbelege (falls vorhanden)
   if (t?.scopeBk?.root && Array.isArray(t.scopeBk.seg) && t.scopeBk.seg.length){
     lines.push(`<strong>Scopevisio – Abrechnungsbelege:</strong> ${t.scopeBk.seg.join(" \\ ")}`);
   }
@@ -1624,11 +1659,17 @@ function renderTargetSummary(){
     lines.push(`<strong>Lokal:</strong> (wird beim Speichern abgefragt)`);
   }
 
-
-
-
-  // Custom-Ziele (nicht-feste Ablage-Checkboxen) – Anzeige als Namenliste
+  // ===== Custom-Ziele (Zusatzordner) =====
   try{
+    // lokale Escape-Funktion (kein dependency auf escapeHtml)
+    const esc = (s) => String(s ?? "")
+      .replace(/&/g,"&amp;")
+      .replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;")
+      .replace(/'/g,"&#39;");
+
+    // fixe System-Checkboxen ausschließen (ID-Varianten)
     const fixedIds = new Set([
       "chkScopevisio","chkScope",
       "chkPcloudBackup",
@@ -1637,28 +1678,20 @@ function renderTargetSummary(){
       "chkLocalSave","chkLocal"
     ]);
 
-    const esc = (s) => String(s ?? "")
-      .replace(/&/g,"&amp;")
-      .replace(/</g,"&lt;")
-      .replace(/>/g,"&gt;")
-      .replace(/"/g,"&quot;")
-      .replace(/'/g,"&#039;");
-
     const customNames = Array.from(document.querySelectorAll('#saveTargets input[type="checkbox"]:checked'))
       .filter(cb => cb && cb.id && !fixedIds.has(cb.id))
       .map(cb => {
         const label = cb.closest("label")?.querySelector("span")?.textContent?.trim();
-        return label || cb.id;
+        return label || cb.dataset.label || cb.id;
       })
       .filter(Boolean);
 
     if (customNames.length){
-      lines.push(`<strong>Zusatzordner:</strong> ${customNames.map(esc).join(", ")}`);
+      lines.push('<strong>Zusatzordner:</strong> ' + customNames.map(esc).join(", "));
     }
   } catch(e){
     console.warn("Custom target summary failed:", e);
   }
-
 
   // Wenn nichts anzeigbar ist → präzise Gründe (neue ODER alte Checkbox-IDs)
   if (!lines.length){
@@ -1701,9 +1734,7 @@ function refreshPreview(){
     fileNamePrev.textContent = hasDoc ? computeFileNameAuto() : "-";
   }
 
-  const el = (typeof targetPrev !== "undefined" && targetPrev)
-    ? targetPrev
-    : (document.querySelector("#targetPreview") || document.querySelector("#targetPrev"));
+  const el = (typeof targetPrev !== "undefined" && targetPrev) ? targetPrev : document.querySelector("#targetPrev");
   if (!el) return;
 
   if (!hasDoc){
@@ -1721,9 +1752,6 @@ function refreshPreview(){
     try { refreshPreview(); }
     catch(e){ console.warn("refreshPreview failed", e); }
   }
-  // Auch dynamische Custom-Checkboxen (z.B. Bank) triggern die Vorschau
-  const saveHost = document.querySelector("#saveTargets");
-  if (saveHost) saveHost.addEventListener("change", schedule);
 
    const ids = [
     "#chkScope", "#chkScopevisio",
@@ -1870,6 +1898,8 @@ function resolveTargets(){
 // --- Vorprüfung der Ziele und Rechte ---
 // Prüft nur die aktivierten Ziele, schreibt aber noch nichts.
 async function preflightTargets(){
+  // Override-Handles sicher einlesen (Fix-Ziele können umgebogen sein)
+  try { await refreshOverrideCache(); } catch {}
   const t = resolveTargets();
 
   // Flags: neue ODER alte Checkbox-IDs
@@ -3148,7 +3178,7 @@ async function openCheckboxesDialog(){
 
       <td class="cb-folder">
         <div class="row tight" style="flex-wrap:nowrap">
-          <button type="button" class="btn-outline btn-small cb-pick">Ordner wählen…</button>
+          <button type="button" class="btn-outline btn-small cb-pick">Override…</button>
           <button type="button" class="btn-outline btn-small cb-clear" title="Ordner-Bindung entfernen" disabled>✕</button>
           <span class="muted cb-bindstate" style="white-space:nowrap">kein Ordner</span>
         </div>
@@ -3171,14 +3201,14 @@ async function openCheckboxesDialog(){
       try{
         const h = await idbGet(bindKey);
         if (h) {
-          bindStateEl.textContent = "Ordner gesetzt";
+          bindStateEl.textContent = isFixed ? "Override aktiv" : "Ordner gesetzt";
           btnClear.disabled = false;
         } else {
-          bindStateEl.textContent = "kein Ordner";
+          bindStateEl.textContent = isFixed ? "automatisch" : "kein Ordner";
           btnClear.disabled = true;
         }
       } catch {
-        bindStateEl.textContent = "kein Ordner";
+        bindStateEl.textContent = isFixed ? "automatisch" : "kein Ordner";
         btnClear.disabled = true;
       }
     }
@@ -3188,6 +3218,7 @@ async function openCheckboxesDialog(){
         const h = await window.showDirectoryPicker({ mode:"readwrite" });
         await idbSet(bindKey, h);
         await refreshBindState();
+        try { await refreshOverrideCache(); } catch {}
         toast("Ordner gespeichert.", 1600);
       } catch (e) {
         // Abbruch ist ok
@@ -3202,6 +3233,7 @@ async function openCheckboxesDialog(){
       try{
         await idbDel(bindKey);
         await refreshBindState();
+        try { await refreshOverrideCache(); } catch {}
         toast("Ordner-Bindung entfernt.", 1600);
       } catch (e) {
         console.error(e);
@@ -3211,6 +3243,7 @@ async function openCheckboxesDialog(){
 
     // initial
     refreshBindState();
+    try { refreshOverrideCache().catch(()=>{}); } catch {}
 
     tr.querySelector(".cb-del").addEventListener("click", async () => {
       try { await idbDel(bindKey); } catch {}
@@ -3265,6 +3298,7 @@ async function openCheckboxesDialog(){
         const h = await window.showDirectoryPicker({ mode:"readwrite" });
         await idbSet(bindKey, h);
         await refreshBindState();
+        try { await refreshOverrideCache(); } catch {}
         toast("Ordner gespeichert.", 1600);
       } catch (e) {
         // Abbruch ist ok
@@ -3279,6 +3313,7 @@ async function openCheckboxesDialog(){
       try{
         await idbDel(bindKey);
         await refreshBindState();
+        try { await refreshOverrideCache(); } catch {}
         toast("Ordner-Bindung entfernt.", 1600);
       } catch (e) {
         console.error(e);
@@ -4057,59 +4092,7 @@ function buildEmailPromptDialog(defaults = {}) {
   const bcc  = dlg.querySelector("#fdlMailBcc");
   const subj = dlg.querySelector("#fdlMailSubj");
   const rep  = dlg.querySelector("#fdlMailReply");
-  const body = dlg.querySelector("#fdlMailBody");
-
-  // ===== Prefill: per Liegenschaft (emails.json) + Status-Regeln (Fidelior) =====
-  try {
-    const code = (objSel?.value || "").trim();
-    const isInv = (typeof isInvoice === "function") ? !!isInvoice() : true;
-
-    // Status aus den angehakten E-Mail-Checkboxen im Formular lesen (falls vorhanden)
-    let status = null;
-    try {
-      const st = Array.from(document.querySelectorAll('#emailTargets input[type="checkbox"]:checked'))
-        .map(cb => (cb?.dataset?.status || "").trim())
-        .filter(Boolean);
-      status = st[0] || null;
-    } catch {}
-
-    const perInv = (isInv && code) ? (emailsCfg?.perObject?.[code]?.invoice || null) : null;
-    const fideliorDef = (isInv && (code === "FIDELIOR")) ? (emailsCfg?.defaults?.invoice?.Fidelior || {}) : {};
-    const subjByStatus = (fideliorDef?.subjectByStatus || {});
-    const replyByStatus = (fideliorDef?.replyToByStatus || {});
-
-    // TO
-    if (to && !to.value.trim()) {
-      const list = []
-        .concat(perInv?.to || [])
-        .concat(perInv?.emails || [])
-        .concat(fideliorDef?.to || [])
-        .concat(fideliorDef?.emails || []);
-      const first = list.map(normEmailToken).find(a => EMAIL_RE.test(a));
-      if (first) to.value = first;
-    }
-
-    // SUBJECT
-    if (subj && !subj.value.trim()) {
-      let s = "";
-      if (status && subjByStatus && subjByStatus[status]) s = subjByStatus[status];
-      else if (perInv?.subject) s = perInv.subject;
-      else if (fideliorDef?.subject) s = fideliorDef.subject;
-      if (s) subj.value = s;
-    }
-
-    // REPLY-TO
-    if (rep && !rep.value.trim()) {
-      let r = "";
-      if (status && replyByStatus && replyByStatus[status]) r = replyByStatus[status];
-      else if (perInv?.replyTo) r = perInv.replyTo;
-      else r = emailsCfg?.defaults?.replyTo || "documents@fidelior.de";
-      if (r) rep.value = r;
-    }
-  } catch(e) {
-    console.warn("[FDL] Prefill Versanddialog fehlgeschlagen:", e);
-  }
-      // NEU
+  const body = dlg.querySelector("#fdlMailBody");      // NEU
   const att  = dlg.querySelector("#fdlMailAttachment");
   const sec  = dlg.querySelector("#fdlEmailSection");
   const note = dlg.querySelector("#fdlGentleNote");
@@ -4757,17 +4740,19 @@ async function handleSaveFlow(mode = "save_only") {
     const okCustom   = [];
 
     async function writeSafe(root, seg, bytes, name) {
-      if (!root || !seg || !seg.length) return;
-      try {
-        await ensureDirPath(root, seg);
-      } catch (e) {
-        console.warn("ensureDirPath fehlgeschlagen:", e);
+      if (!root || !Array.isArray(seg)) return;
+      if (seg.length) {
+        try {
+          await ensureDirPath(root, seg);
+        } catch (e) {
+          console.warn("ensureDirPath fehlgeschlagen:", e);
+        }
       }
       await writeFileTo(root, seg, bytes, name, { unique: true });
     }
 
     // Scope – Hauptablage
-    if (t?.scope?.root && t.scope.seg?.length) {
+    if (t?.scope?.root && Array.isArray(t.scope.seg)) {
       try {
         await writeSafe(t.scope.root, t.scope.seg, stampedBytes, safeName);
         okScope = true;
@@ -4777,7 +4762,7 @@ async function handleSaveFlow(mode = "save_only") {
     }
 
     // Scope – Betriebskosten
-    if (t?.scopeBk?.root && t.scopeBk.seg?.length) {
+    if (t?.scopeBk?.root && Array.isArray(t.scopeBk.seg)) {
       try {
         await writeSafe(t.scopeBk.root, t.scopeBk.seg, stampedBytes, safeName);
         okScopeBk = true;
@@ -4787,7 +4772,7 @@ async function handleSaveFlow(mode = "save_only") {
     }
 
     // pCloud – Objektpfad
-    if (t?.pcloud?.root && t.pcloud.seg?.length) {
+    if (t?.pcloud?.root && Array.isArray(t.pcloud.seg)) {
       try {
         await writeSafe(t.pcloud.root, t.pcloud.seg, stampedBytes, safeName);
         okPcl = true;
@@ -4797,7 +4782,7 @@ async function handleSaveFlow(mode = "save_only") {
     }
 
     // pCloud – Sammelordner
-    if (t?.pcloudBucket?.root && t.pcloudBucket.seg?.length) {
+    if (t?.pcloudBucket?.root && Array.isArray(t.pcloudBucket.seg)) {
       try {
         await writeSafe(t.pcloudBucket.root, t.pcloudBucket.seg, stampedBytes, safeName);
         okPclBucket = true;
