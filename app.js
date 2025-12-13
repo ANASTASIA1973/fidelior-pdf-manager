@@ -196,7 +196,7 @@ async function idbDel(key) {
 // ===== Ziel-Overrides (Fixe Ziele können optional auf einen frei gewählten Ordner umgebogen werden) =====
 // Technisch nutzen wir denselben Handle-Speicher wie bei Custom-Zielen: IndexedDB-Key "customTarget:<checkboxId>".
 // Für fixe Ziele interpretieren wir diesen Handle als OVERRIDE des Standardpfads.
-const FDL_FIXED_TARGET_IDS = ["chkScopevisio","chkScopeBk","chkPcloudExtra","chkPcloudBackup"];
+const FDL_FIXED_TARGET_IDS = ["chkScopevisio","chkScope","chkScopeBk","chkPcloudExtra","chkPcloudExtras","chkPcloudBackup","chkLocalSave","chkLocal"];
 
 window.__fdlOverrideHandles = window.__fdlOverrideHandles || {};
 
@@ -1623,8 +1623,6 @@ async function updateSubfolderOptions({ silent = false } = {}) {
 
 // ---- Zielordner-Übersicht (global) ----
 // Zeigt nur, was wirklich aktiv & auflösbar ist. Nutzt resolveTargets() als einzige Wahrheit.
-// ---- Zielordner-Übersicht (global) ----
-// Zeigt nur, was wirklich aktiv & auflösbar ist. Nutzt resolveTargets() als einzige Wahrheit.
 function renderTargetSummary(){
   const el = (typeof targetPrev !== "undefined" && targetPrev) ? targetPrev : document.querySelector("#targetPreview");
   if (!el) return;
@@ -1639,7 +1637,7 @@ function renderTargetSummary(){
     lines.push(`<strong>Scopevisio:</strong> ${t.scope.seg.join(" \\ ")}`);
   }
 
-  // Scopevisio – Abrechnungsbelege (falls vorhanden)
+  // Scopevisio – Abrechnungsbelege (separate Zeile)
   if (t?.scopeBk?.root && Array.isArray(t.scopeBk.seg) && t.scopeBk.seg.length){
     lines.push(`<strong>Scopevisio – Abrechnungsbelege:</strong> ${t.scopeBk.seg.join(" \\ ")}`);
   }
@@ -1659,39 +1657,43 @@ function renderTargetSummary(){
     lines.push(`<strong>Lokal:</strong> (wird beim Speichern abgefragt)`);
   }
 
-  // ===== Custom-Ziele (Zusatzordner) =====
-  try{
-    // lokale Escape-Funktion (kein dependency auf escapeHtml)
-    const esc = (s) => String(s ?? "")
-      .replace(/&/g,"&amp;")
-      .replace(/</g,"&lt;")
-      .replace(/>/g,"&gt;")
-      .replace(/"/g,"&quot;")
-      .replace(/'/g,"&#39;");
 
-    // fixe System-Checkboxen ausschließen (ID-Varianten)
-    const fixedIds = new Set([
-      "chkScopevisio","chkScope",
-      "chkPcloudBackup",
-      "chkScopeBk",
-      "chkPcloudExtra","chkPcloudExtras",
-      "chkLocalSave","chkLocal"
-    ]);
 
-    const customNames = Array.from(document.querySelectorAll('#saveTargets input[type="checkbox"]:checked'))
-      .filter(cb => cb && cb.id && !fixedIds.has(cb.id))
-      .map(cb => {
-        const label = cb.closest("label")?.querySelector("span")?.textContent?.trim();
-        return label || cb.dataset.label || cb.id;
-      })
-      .filter(Boolean);
 
-    if (customNames.length){
-      lines.push('<strong>Zusatzordner:</strong> ' + customNames.map(esc).join(", "));
-    }
-  } catch(e){
-    console.warn("Custom target summary failed:", e);
+// ===== Custom-Ziele (Zusatzordner) =====
+try{
+  // lokale Escape-Funktion (keine Abhängigkeit von escapeHtml)
+  const esc = (s) => String(s ?? "")
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&#39;");
+
+  // fixe System-Checkboxen ausschließen (ID-Varianten)
+  const fixedIds = new Set([
+    "chkScopevisio","chkScope",
+    "chkPcloudBackup",
+    "chkScopeBk",
+    "chkPcloudExtra","chkPcloudExtras",
+    "chkLocalSave","chkLocal"
+  ]);
+
+  const customNames = Array.from(document.querySelectorAll('#saveTargets input[type="checkbox"]:checked'))
+    .filter(cb => cb && cb.id && !fixedIds.has(cb.id))
+    .map(cb => {
+      const label = cb.closest("label")?.querySelector("span")?.textContent?.trim();
+      return label || cb.dataset.label || cb.id;
+    })
+    .filter(Boolean);
+
+  if (customNames.length){
+    lines.push('<strong>Zusatzordner:</strong> ' + customNames.map(esc).join(", "));
   }
+} catch(e){
+  console.warn("Custom target summary failed:", e);
+}
+
 
   // Wenn nichts anzeigbar ist → präzise Gründe (neue ODER alte Checkbox-IDs)
   if (!lines.length){
@@ -1769,14 +1771,18 @@ function refreshPreview(){
       el.addEventListener("change", schedule);
       el.addEventListener("input",  schedule);
     });
-  }
+
 
     // Delegation: auch dynamische Checkboxen (Custom) sollen sofort die Preview aktualisieren
     const st = document.getElementById("saveTargets");
-    if (st) st.addEventListener("change", (ev) => {
-      const t = ev.target;
-      if (t && t.matches && t.matches('input[type="checkbox"]')) schedule();
-    });
+    if (st && !st.__fdlPreviewBound){
+      st.__fdlPreviewBound = "1";
+      st.addEventListener("change", (ev) => {
+        const t = ev.target;
+        if (t && t.matches && t.matches('input[type="checkbox"]')) schedule();
+      });
+    }
+  }
 
 
   if (document.readyState === "loading"){
@@ -3178,7 +3184,7 @@ async function openCheckboxesDialog(){
 
       <td class="cb-folder">
         <div class="row tight" style="flex-wrap:nowrap">
-          <button type="button" class="btn-outline btn-small cb-pick">Override…</button>
+          <button type="button" class="btn-outline btn-small cb-pick">Ordner…</button>
           <button type="button" class="btn-outline btn-small cb-clear" title="Ordner-Bindung entfernen" disabled>✕</button>
           <span class="muted cb-bindstate" style="white-space:nowrap">kein Ordner</span>
         </div>
@@ -3191,27 +3197,52 @@ async function openCheckboxesDialog(){
     // id ist absichtlich NICHT editierbar, aber muss vorhanden sein:
     tr.dataset.id = def.id || "";
 
+    // Systemziele (fix) vs. Eigene Ablagen (custom)
+    const fixedKeys = new Set(["scope","backup","scopeBk","extras","local"]);
+    const fixedIds  = new Set(["chkScopevisio","chkScope","chkScopeBk","chkPcloudBackup","chkPcloudExtra","chkPcloudExtras","chkLocalSave","chkLocal"]);
+    const isFixed = fixedIds.has(tr.dataset.id) || fixedKeys.has(String(def.key||"").trim());
+    if (isFixed) tr.classList.add("is-fixed");
+
     // Ordner-Bindung (optional): pro Checkbox-ID ein DirectoryHandle in IndexedDB speichern
     const bindKey = "customTarget:" + (tr.dataset.id || "");
     const bindStateEl = tr.querySelector(".cb-bindstate");
     const btnPick  = tr.querySelector(".cb-pick");
     const btnClear = tr.querySelector(".cb-clear");
 
+    // Button-Text passend zum Typ (Systemziel vs. eigene Ablage)
+    if (btnPick) btnPick.textContent = isFixed ? "Override…" : "Ordner…";
+const btnDel   = tr.querySelector(".cb-del");
+const inpLabel = tr.querySelector(".cb-label");
+const inpKey   = tr.querySelector(".cb-key");
+
+// UI je Typ
+btnPick.textContent = isFixed ? "Override…" : "Ordner…";
+btnPick.title = isFixed
+  ? "Standardpfad dieses Systemziels optional auf einen anderen Ordner umleiten"
+  : "Ordner für diese eigene Ablage auswählen";
+
+// Systemziele dürfen nicht gelöscht/umbenannt werden
+if (isFixed){
+  if (btnDel){ btnDel.disabled = true; btnDel.style.visibility = "hidden"; }
+  if (inpKey){ inpKey.readOnly = true; inpKey.setAttribute("aria-readonly","true"); inpKey.classList.add("is-readonly"); }
+  if (inpLabel){ inpLabel.readOnly = true; inpLabel.setAttribute("aria-readonly","true"); inpLabel.classList.add("is-readonly"); }
+}
+
     async function refreshBindState(){
-      try{
-        const h = await idbGet(bindKey);
-        if (h) {
-          bindStateEl.textContent = isFixed ? "Override aktiv" : "Ordner gesetzt";
-          btnClear.disabled = false;
-        } else {
-          bindStateEl.textContent = isFixed ? "automatisch" : "kein Ordner";
-          btnClear.disabled = true;
-        }
-      } catch {
-        bindStateEl.textContent = isFixed ? "automatisch" : "kein Ordner";
-        btnClear.disabled = true;
-      }
+  try{
+    const h = await idbGet(bindKey);
+    if (h) {
+      bindStateEl.textContent = isFixed ? "Override aktiv" : "Ordner gesetzt";
+      btnClear.disabled = false;
+    } else {
+      bindStateEl.textContent = isFixed ? "Standardpfad" : "kein Ordner";
+      btnClear.disabled = true;
     }
+  } catch {
+    bindStateEl.textContent = isFixed ? "Standardpfad" : "kein Ordner";
+    btnClear.disabled = true;
+  }
+}
 
     btnPick?.addEventListener("click", async () => {
       try{
@@ -3219,7 +3250,7 @@ async function openCheckboxesDialog(){
         await idbSet(bindKey, h);
         await refreshBindState();
         try { await refreshOverrideCache(); } catch {}
-        toast("Ordner gespeichert.", 1600);
+        toast(isFixed ? "Override gespeichert." : "Ordner gespeichert.", 1600);
       } catch (e) {
         // Abbruch ist ok
         if (e?.name !== "AbortError") {
@@ -3234,7 +3265,7 @@ async function openCheckboxesDialog(){
         await idbDel(bindKey);
         await refreshBindState();
         try { await refreshOverrideCache(); } catch {}
-        toast("Ordner-Bindung entfernt.", 1600);
+        toast(isFixed ? "Override entfernt." : "Ordner-Bindung entfernt.", 1600);
       } catch (e) {
         console.error(e);
         toast("Konnte Ordner-Bindung nicht entfernen.", 2200);
@@ -3277,6 +3308,9 @@ async function openCheckboxesDialog(){
     const btnPick  = tr.querySelector(".cb-pick");
     const btnClear = tr.querySelector(".cb-clear");
 
+    // Button-Text passend zum Typ (Systemziel vs. eigene Ablage)
+    if (btnPick) btnPick.textContent = isFixed ? "Override…" : "Ordner…";
+
     async function refreshBindState(){
       try{
         const h = await idbGet(bindKey);
@@ -3299,7 +3333,7 @@ async function openCheckboxesDialog(){
         await idbSet(bindKey, h);
         await refreshBindState();
         try { await refreshOverrideCache(); } catch {}
-        toast("Ordner gespeichert.", 1600);
+        toast(isFixed ? "Override gespeichert." : "Ordner gespeichert.", 1600);
       } catch (e) {
         // Abbruch ist ok
         if (e?.name !== "AbortError") {
@@ -3314,7 +3348,7 @@ async function openCheckboxesDialog(){
         await idbDel(bindKey);
         await refreshBindState();
         try { await refreshOverrideCache(); } catch {}
-        toast("Ordner-Bindung entfernt.", 1600);
+        toast(isFixed ? "Override entfernt." : "Ordner-Bindung entfernt.", 1600);
       } catch (e) {
         console.error(e);
         toast("Konnte Ordner-Bindung nicht entfernen.", 2200);
@@ -3380,6 +3414,16 @@ async function openCheckboxesDialog(){
       await saveJson("checkboxes.json", out);
       window.__fdlCheckboxesCfg = out;
       try { localStorage.setItem("fdlCheckboxesCfg", JSON.stringify(out)); } catch {}
+
+// Voreinstellungen sofort auf die Hauptansicht anwenden
+try{
+  const defaults = {};
+  for (const def of outSave){
+    defaults[String(def.id)] = !!def.defaultChecked;
+  }
+  localStorage.setItem("fdlTargets", JSON.stringify(defaults));
+} catch {}
+
 
 
       // UI sofort aktualisieren
