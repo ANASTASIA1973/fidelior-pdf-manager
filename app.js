@@ -179,6 +179,17 @@ async function idbGet(key) {
   });
   db.close();
   return val;
+
+async function idbDel(key) {
+  const db = await idbOpen();
+  await new Promise((res, rej) => {
+    const tx = db.transaction(FDL_IDB_STORE, "readwrite");
+    tx.objectStore(FDL_IDB_STORE).delete(key);
+    tx.oncomplete = () => res();
+    tx.onerror = () => rej(tx.error);
+  });
+  db.close();
+}
 }
 
 // Speichern der verbundenen Handles
@@ -1614,6 +1625,26 @@ function renderTargetSummary(){
   }
 
 
+
+
+  // Custom-Ziele (nicht-feste Ablage-Checkboxen) – Anzeige als Namenliste
+  try{
+    const fixedIds = new Set(["chkScopevisio","chkPcloudBackup","chkScopeBk","chkPcloudExtra","chkLocalSave"]);
+
+    const customNames = Array.from(document.querySelectorAll('#saveTargets input[type="checkbox"]:checked'))
+      .filter(cb => cb && cb.id && !fixedIds.has(cb.id))
+      .map(cb => {
+        const label = cb.closest("label")?.querySelector("span")?.textContent?.trim();
+        return label || cb.id;
+      })
+      .filter(Boolean);
+
+    if (customNames.length){
+      lines.push(`<strong>Zusatzordner:</strong> ${customNames.map(escapeHtml).join(", ")}`);
+    }
+  } catch(e){ /* ignore */ }
+
+
   // Wenn nichts anzeigbar ist → präzise Gründe (neue ODER alte Checkbox-IDs)
   if (!lines.length){
     const hints = [];
@@ -1691,6 +1722,14 @@ function refreshPreview(){
       el.addEventListener("input",  schedule);
     });
   }
+
+    // Delegation: auch dynamische Checkboxen (Custom) sollen sofort die Preview aktualisieren
+    const st = document.getElementById("saveTargets");
+    if (st) st.addEventListener("change", (ev) => {
+      const t = ev.target;
+      if (t && t.matches && t.matches('input[type="checkbox"]')) schedule();
+    });
+
 
   if (document.readyState === "loading"){
     document.addEventListener("DOMContentLoaded", attach, { once:true });
@@ -1820,7 +1859,29 @@ async function preflightTargets(){
   const wantBackup = !!document.getElementById("chkPcloudBackup")?.checked;
 
   // Mindestens ein Ziel aktiv?
-  const anyOn = wantScope || wantExtras || wantLocal || wantBackup;
+  let anyOn = wantScope || wantExtras || wantLocal || wantBackup;
+
+  // Custom-Ziele (Checkboxen mit gebundenem Ordner) zählen auch als Speichziel
+  if (!anyOn) {
+    try {
+      const cfg = (window.__fdlCheckboxesCfg && typeof window.__fdlCheckboxesCfg === "object")
+        ? window.__fdlCheckboxesCfg
+        : (JSON.parse(localStorage.getItem("fdlCheckboxesCfg") || "null") || null);
+
+      const defs = Array.isArray(cfg?.saveTargets) ? cfg.saveTargets : [];
+      for (const def of defs) {
+        const id = String(def?.id || "").trim();
+        if (!id) continue;
+        const el = document.getElementById(id);
+        if (!el || !el.checked) continue;
+        const h = await idbGet("customTarget:" + id);
+        if (h) { anyOn = true; break; }
+      }
+    } catch (e) {
+      console.warn("custom target check failed:", e);
+    }
+  }
+
   if (!anyOn) {
     return { ok:false, reason: "Kein Speicherziel aktiv." };
   }
@@ -3064,6 +3125,15 @@ async function openCheckboxesDialog(){
     tr.innerHTML = `
       <td><input class="input slim cb-label" value="${(def.label||"").replaceAll('"','&quot;')}"></td>
       <td><input class="input slim cb-key"   value="${(def.key||"").replaceAll('"','&quot;')}"></td>
+
+      <td class="cb-folder">
+        <div class="row tight" style="flex-wrap:nowrap">
+          <button type="button" class="btn-outline btn-small cb-pick">Ordner wählen…</button>
+          <button type="button" class="btn-outline btn-small cb-clear" title="Ordner-Bindung entfernen" disabled>✕</button>
+          <span class="muted cb-bindstate" style="white-space:nowrap">kein Ordner</span>
+        </div>
+      </td>
+
       <td class="center"><input type="checkbox" class="cb-default" ${def.defaultChecked ? "checked":""}></td>
       <td class="right"><button type="button" class="btn-outline btn-small cb-del">Löschen</button></td>
     `;
@@ -3071,7 +3141,62 @@ async function openCheckboxesDialog(){
     // id ist absichtlich NICHT editierbar, aber muss vorhanden sein:
     tr.dataset.id = def.id || "";
 
-    tr.querySelector(".cb-del").addEventListener("click", () => tr.remove());
+    // Ordner-Bindung (optional): pro Checkbox-ID ein DirectoryHandle in IndexedDB speichern
+    const bindKey = "customTarget:" + (tr.dataset.id || "");
+    const bindStateEl = tr.querySelector(".cb-bindstate");
+    const btnPick  = tr.querySelector(".cb-pick");
+    const btnClear = tr.querySelector(".cb-clear");
+
+    async function refreshBindState(){
+      try{
+        const h = await idbGet(bindKey);
+        if (h) {
+          bindStateEl.textContent = "Ordner gesetzt";
+          btnClear.disabled = false;
+        } else {
+          bindStateEl.textContent = "kein Ordner";
+          btnClear.disabled = true;
+        }
+      } catch {
+        bindStateEl.textContent = "kein Ordner";
+        btnClear.disabled = true;
+      }
+    }
+
+    btnPick?.addEventListener("click", async () => {
+      try{
+        const h = await window.showDirectoryPicker({ mode:"readwrite" });
+        await idbSet(bindKey, h);
+        await refreshBindState();
+        toast("Ordner gespeichert.", 1600);
+      } catch (e) {
+        // Abbruch ist ok
+        if (e?.name !== "AbortError") {
+          console.error(e);
+          toast("Ordner konnte nicht gespeichert werden.", 2200);
+        }
+      }
+    });
+
+    btnClear?.addEventListener("click", async () => {
+      try{
+        await idbDel(bindKey);
+        await refreshBindState();
+        toast("Ordner-Bindung entfernt.", 1600);
+      } catch (e) {
+        console.error(e);
+        toast("Konnte Ordner-Bindung nicht entfernen.", 2200);
+      }
+    });
+
+    // initial
+    refreshBindState();
+
+    tr.querySelector(".cb-del").addEventListener("click", async () => {
+      try { await idbDel(bindKey); } catch {}
+      tr.remove();
+    });
+
     return tr;
   };
 
@@ -3093,7 +3218,62 @@ async function openCheckboxesDialog(){
     `;
 
     tr.dataset.id = def.id || "";
-    tr.querySelector(".cb-del").addEventListener("click", () => tr.remove());
+    // Ordner-Bindung (optional): pro Checkbox-ID ein DirectoryHandle in IndexedDB speichern
+    const bindKey = "customTarget:" + (tr.dataset.id || "");
+    const bindStateEl = tr.querySelector(".cb-bindstate");
+    const btnPick  = tr.querySelector(".cb-pick");
+    const btnClear = tr.querySelector(".cb-clear");
+
+    async function refreshBindState(){
+      try{
+        const h = await idbGet(bindKey);
+        if (h) {
+          bindStateEl.textContent = "Ordner gesetzt";
+          btnClear.disabled = false;
+        } else {
+          bindStateEl.textContent = "kein Ordner";
+          btnClear.disabled = true;
+        }
+      } catch {
+        bindStateEl.textContent = "kein Ordner";
+        btnClear.disabled = true;
+      }
+    }
+
+    btnPick?.addEventListener("click", async () => {
+      try{
+        const h = await window.showDirectoryPicker({ mode:"readwrite" });
+        await idbSet(bindKey, h);
+        await refreshBindState();
+        toast("Ordner gespeichert.", 1600);
+      } catch (e) {
+        // Abbruch ist ok
+        if (e?.name !== "AbortError") {
+          console.error(e);
+          toast("Ordner konnte nicht gespeichert werden.", 2200);
+        }
+      }
+    });
+
+    btnClear?.addEventListener("click", async () => {
+      try{
+        await idbDel(bindKey);
+        await refreshBindState();
+        toast("Ordner-Bindung entfernt.", 1600);
+      } catch (e) {
+        console.error(e);
+        toast("Konnte Ordner-Bindung nicht entfernen.", 2200);
+      }
+    });
+
+    // initial
+    refreshBindState();
+
+    tr.querySelector(".cb-del").addEventListener("click", async () => {
+      try { await idbDel(bindKey); } catch {}
+      tr.remove();
+    });
+
     return tr;
   };
 
@@ -4502,6 +4682,7 @@ async function handleSaveFlow(mode = "save_only") {
     let okPclBucket  = false;
     let okLocal      = false;
     const errs       = {};
+    const okCustom   = [];
 
     async function writeSafe(root, seg, bytes, name) {
       if (!root || !seg || !seg.length) return;
@@ -4553,6 +4734,38 @@ async function handleSaveFlow(mode = "save_only") {
       }
     }
 
+    // ---------------- Custom-Ziele (einmalig gewählte Ordner) ----------------
+    // Idee: In "Checkboxen verwalten" kann jede Ablage-Checkbox optional an einen Ordner gebunden werden.
+    // Der Ordner-Handle liegt in IndexedDB unter "customTarget:<checkboxId>".
+    try {
+      const cfg = (window.__fdlCheckboxesCfg && typeof window.__fdlCheckboxesCfg === "object")
+        ? window.__fdlCheckboxesCfg
+        : (JSON.parse(localStorage.getItem("fdlCheckboxesCfg") || "null") || null);
+
+      const defs = Array.isArray(cfg?.saveTargets) ? cfg.saveTargets : [];
+      for (const def of defs) {
+        const id = String(def?.id || "").trim();
+        if (!id) continue;
+
+        // nur wenn Checkbox existiert und angehakt ist
+        const cbEl = document.getElementById(id);
+        if (!cbEl || !cbEl.checked) continue;
+
+        const bindKey = "customTarget:" + id;
+        const h = await idbGet(bindKey);
+        if (!h) continue; // keine Bindung gesetzt
+
+        try {
+          await writeFileTo(h, [], stampedBytes, safeName, { unique:true });
+          okCustom.push(def.label || id);
+        } catch (e) {
+          errs["custom:"+id] = e?.message || String(e);
+        }
+      }
+    } catch (e) {
+      console.warn("custom targets failed:", e);
+    }
+
     // Lokal (optional)
     const wantLocal = (typeof flag === "function")
       ? flag("chkLocalSave", "chkLocal")
@@ -4598,6 +4811,7 @@ async function handleSaveFlow(mode = "save_only") {
       okPcl       ? "pCloud"                       : null,
       okPclBucket ? "pCloud (Sammelordner)"        : null,
       okLocal     ? "Lokal"                        : null
+      ,(okCustom.length ? ("Zusatzordner: " + okCustom.join(", ")) : null)
     ].filter(Boolean);
 
     if (successTargets.length === 0) {
