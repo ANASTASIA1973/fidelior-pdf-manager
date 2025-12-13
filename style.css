@@ -1678,3 +1678,52 @@ dialog .dialog-body section .dialog-actions{
 #manageCheckboxesDialog section{
   margin-bottom: 14px !important;
 }
+/* === Versand-Dialog (fdlEmailPrompt) professionell + korrekt scrollen === */
+dialog#fdlEmailPrompt{
+  background: var(--surface, #fff) !important;
+  color: var(--text, #111) !important;
+
+  width: min(760px, calc(100vw - 28px)) !important;
+  max-width: calc(100vw - 28px) !important;
+  max-height: calc(100vh - 28px) !important;
+
+  margin: auto !important;
+  border: 0 !important;
+  border-radius: 16px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+
+  box-shadow: 0 18px 60px rgba(0,0,0,.28) !important;
+}
+
+dialog#fdlEmailPrompt::backdrop{
+  background: rgba(0,0,0,.55) !important;
+}
+
+/* Form soll nicht „riesig“ werden (inline min-width/max-width neutralisieren) */
+dialog#fdlEmailPrompt form{
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  max-height: calc(100vh - 28px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+/* Nur der Mittelteil scrollt (Header+Footer bleiben stehen) */
+dialog#fdlEmailPrompt form > div:nth-of-type(2){
+  overflow: auto !important;
+}
+
+/* Felder sauber */
+dialog#fdlEmailPrompt input,
+dialog#fdlEmailPrompt textarea,
+dialog#fdlEmailPrompt select{
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+dialog#fdlEmailPrompt textarea{
+  resize: vertical !important;
+  min-height: 110px !important;
+}
