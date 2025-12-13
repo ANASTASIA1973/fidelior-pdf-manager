@@ -1502,3 +1502,32 @@ dialog .dialog-close{
 #settingsDialog .list .btn.slim{
   letter-spacing: 0 !important;
 }
+/* ===== PDF.js Text-Layer (Markieren & Kopieren) =========================== */
+.pdf-page { position: relative; }
+
+.pdf-page canvas{
+  position: relative;
+  z-index: 1;
+}
+
+.pdf-page .textLayer{
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: auto;
+
+  /* Text unsichtbar, aber selektierbar */
+  color: transparent;
+  user-select: text;
+  -webkit-user-select: text;
+
+  /* optional: bessere Markierung/Scroll-Verhalten */
+  overflow: hidden;
+}
+
+/* pdf.js setzt Spans absolut – das unterstützt Selektion */
+.pdf-page .textLayer span{
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0 0;
+}

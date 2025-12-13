@@ -478,6 +478,303 @@ function __on(id){ return document.getElementById(id)?.checked === true; }
 async function ensureTargetsReady(){
   return true;
 }
+/* ===================== Ctrl+Enter: Markieren → Übernehmen + OCR ===================== */
+
+/*
+  Verhalten:
+  - Wenn Text markiert ist: Ctrl+Enter übernimmt wie bisher (Normalizer pro Feld)
+  - Wenn NICHTS markiert ist: Ctrl+Enter startet OCR-Auswahl (Rechteck ziehen)
+*/
+
+let __fdlActiveField = "invoiceNo";
+
+/* --- OCR State --- */
+let __fdlOcrMode = false;
+let __fdlOcrStart = null;
+let __fdlOcrOverlay = null;
+let __fdlOcrBoxEl = null;
+
+/* Fokus merkt sich das Ziel-Feld */
+[
+  ["invoiceNo",    invNoEl],
+  ["amountInput",  amountEl],
+  ["invoiceDate",  invDateEl],
+  ["receivedDate", recvDateEl],
+  ["senderInput",  senderEl],      // <- WICHTIG: Absender unterstützen
+].forEach(([id, el]) => {
+  el?.addEventListener("focus", () => { __fdlActiveField = id; });
+});
+
+/* Normalizer je Feld */
+function __fdlNormalizeForField(fieldId, raw){
+  let t = String(raw || "").trim();
+  if (!t) return "";
+
+  if (fieldId === "amountInput"){
+    const m = t.match(/-?\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|-?\d+(?:,\d{2})/);
+    const hit = (m ? m[0] : t);
+    return formatAmountDisplay(hit);
+  }
+
+  if (fieldId === "invoiceDate" || fieldId === "receivedDate"){
+    const dmy = t.match(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/);
+    if (dmy){
+      const dd = String(+dmy[1]).padStart(2,"0");
+      const mm = String(+dmy[2]).padStart(2,"0");
+      const yy = dmy[3].length === 2 ? ("20" + dmy[3]) : dmy[3];
+      return `${dd}.${mm}.${yy}`;
+    }
+    const iso = t.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+    if (iso) return `${iso[3]}.${iso[2]}.${iso[1]}`;
+    return t;
+  }
+
+  if (fieldId === "invoiceNo"){
+    t = t.replace(/\b(Rechnungs?(nummer|nr|no)\.?|Invoice\s*(No|Nr|Number)?|RG-?Nr\.?|RN\.?)\b\s*[:#-]?\s*/i, "");
+    if (t.length > 40) t = t.slice(0, 40).trim();
+    return t;
+  }
+
+  if (fieldId === "senderInput"){
+    // Absender: harte Zeilenumbrüche glätten, nicht zu lang
+    t = t.replace(/\s+/g, " ").trim();
+    if (t.length > 60) t = t.slice(0, 60).trim();
+    return t;
+  }
+
+  return t;
+}
+
+function __fdlApplyToField(fieldId, value){
+  if (!value) return false;
+
+  if (fieldId === "invoiceNo" && invNoEl){
+    invNoEl.value = value;
+    invNoEl.dataset.userTyped = "1";
+    invNoEl.classList.remove("auto");
+    refreshPreview();
+    return true;
+  }
+
+  if (fieldId === "amountInput" && amountEl){
+    amountEl.value = value;
+    amountEl.dataset.raw = value;
+    amountEl.dataset.userTyped = "1";
+    amountEl.classList.remove("auto");
+    if (typeof updateAmountRequiredUI === "function") updateAmountRequiredUI();
+    refreshPreview();
+    return true;
+  }
+
+  if (fieldId === "invoiceDate" && invDateEl){
+    invDateEl.value = value;
+    invDateEl.dataset.userTyped = "1";
+    invDateEl.classList.remove("auto");
+    refreshPreview();
+    return true;
+  }
+
+  if (fieldId === "receivedDate" && recvDateEl){
+    recvDateEl.value = value;
+    recvDateEl.dataset.userTyped = "1";
+    recvDateEl.classList.remove("auto");
+    refreshPreview();
+    return true;
+  }
+
+  if (fieldId === "senderInput" && senderEl){
+    senderEl.value = value;
+    senderEl.dataset.userTyped = "1";
+    senderEl.classList.remove("auto");
+    refreshPreview();
+    return true;
+  }
+
+  return false;
+}
+
+function __fdlTakeSelectionIntoActiveField(){
+  const sel = window.getSelection?.();
+  const raw = sel ? sel.toString() : "";
+  const cleaned = __fdlNormalizeForField(__fdlActiveField, raw);
+
+  if (!cleaned){
+    toast("Kein Text markiert.", 2000);
+    return false;
+  }
+
+  const ok = __fdlApplyToField(__fdlActiveField, cleaned);
+  if (ok) toast("Übernommen ✓", 1200);
+  else toast("Konnte nicht übernehmen (kein Feld aktiv).", 2200);
+  return ok;
+}
+
+/* ===== OCR Auswahl ===== */
+
+function __fdlGetFirstPageCanvas(){
+  // Wir nehmen bewusst die erste Seite (dein RenderAll hängt pro Seite ein Canvas in .pdf-page)
+  return document.querySelector("#pdfViewer .pdf-page canvas");
+}
+
+function __fdlCleanupOcrOverlay(){
+  try { __fdlOcrOverlay?.remove(); } catch {}
+  __fdlOcrOverlay = null;
+  __fdlOcrBoxEl = null;
+  __fdlOcrStart = null;
+  __fdlOcrMode = false;
+}
+
+function startOcrSelection(){
+  if (__fdlOcrMode) return;
+
+  // Tesseract vorhanden?
+  if (!window.Tesseract){
+    toast("OCR nicht geladen (Tesseract fehlt).", 3000);
+    return;
+  }
+
+  const viewer = document.getElementById("pdfViewer");
+  const sc = document.getElementById("previewScroll") || viewer;
+  if (!viewer || !sc){
+    toast("Kein Preview gefunden.", 2500);
+    return;
+  }
+
+  __fdlOcrMode = true;
+  toast("OCR: Bereich ziehen…", 2000);
+
+  // Overlay relativ zum Scroll-Container
+  const host = sc;
+  const hostRect = host.getBoundingClientRect();
+
+  const overlay = document.createElement("div");
+  overlay.style.position = "fixed";
+  overlay.style.left = hostRect.left + "px";
+  overlay.style.top  = hostRect.top  + "px";
+  overlay.style.width  = hostRect.width + "px";
+  overlay.style.height = hostRect.height + "px";
+  overlay.style.zIndex = "9999";
+  overlay.style.cursor = "crosshair";
+  overlay.style.background = "rgba(0,0,0,0.03)";
+
+  const box = document.createElement("div");
+  box.style.position = "absolute";
+  box.style.border = "2px dashed #5B1B70";
+  box.style.background = "rgba(91,27,112,0.06)";
+  overlay.appendChild(box);
+
+  document.body.appendChild(overlay);
+  __fdlOcrOverlay = overlay;
+  __fdlOcrBoxEl = box;
+
+  overlay.addEventListener("mousedown", (e) => {
+    __fdlOcrStart = { x: e.offsetX, y: e.offsetY };
+    box.style.left = __fdlOcrStart.x + "px";
+    box.style.top  = __fdlOcrStart.y + "px";
+    box.style.width = "0px";
+    box.style.height = "0px";
+  });
+
+  overlay.addEventListener("mousemove", (e) => {
+    if (!__fdlOcrStart) return;
+    const x1 = __fdlOcrStart.x, y1 = __fdlOcrStart.y;
+    const x2 = e.offsetX,        y2 = e.offsetY;
+
+    const left = Math.min(x1, x2);
+    const top  = Math.min(y1, y2);
+    const w    = Math.abs(x2 - x1);
+    const h    = Math.abs(y2 - y1);
+
+    box.style.left = left + "px";
+    box.style.top  = top  + "px";
+    box.style.width  = w + "px";
+    box.style.height = h + "px";
+  });
+
+  overlay.addEventListener("mouseup", async () => {
+    const rect = box.getBoundingClientRect();
+    __fdlCleanupOcrOverlay();
+    await runOcrOnRect(rect);
+  });
+
+  // ESC bricht OCR ab
+  const onEsc = (ev) => {
+    if (ev.key === "Escape"){
+      document.removeEventListener("keydown", onEsc, true);
+      __fdlCleanupOcrOverlay();
+      toast("OCR abgebrochen.", 1500);
+    }
+  };
+  document.addEventListener("keydown", onEsc, true);
+}
+
+async function runOcrOnRect(rect){
+  try {
+    const canvas = __fdlGetFirstPageCanvas();
+    if (!canvas) { toast("OCR: Kein Canvas gefunden.", 2500); return; }
+
+    const cRect = canvas.getBoundingClientRect();
+
+    // OCR-Rect (Screen) -> Canvas-Coords
+    const scaleX = canvas.width  / cRect.width;
+    const scaleY = canvas.height / cRect.height;
+
+    const sx = Math.max(0, (rect.left - cRect.left) * scaleX);
+    const sy = Math.max(0, (rect.top  - cRect.top)  * scaleY);
+    const sw = Math.max(1, rect.width  * scaleX);
+    const sh = Math.max(1, rect.height * scaleY);
+
+    const crop = document.createElement("canvas");
+    crop.width  = Math.floor(sw);
+    crop.height = Math.floor(sh);
+
+    const ctx = crop.getContext("2d");
+    ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+
+    toast("OCR läuft…", 2500);
+
+    const res = await Tesseract.recognize(crop, "deu+eng");
+    const text = String(res?.data?.text || "").trim();
+
+    if (!text){
+      toast("OCR: kein Text erkannt.", 2500);
+      return;
+    }
+
+    const cleaned = __fdlNormalizeForField(__fdlActiveField, text);
+    __fdlApplyToField(__fdlActiveField, cleaned);
+    toast("OCR übernommen ✓", 1500);
+
+  } catch (e) {
+    console.error(e);
+    toast("OCR fehlgeschlagen.", 2500);
+  }
+}
+
+/* Shortcut: Ctrl+Enter / Cmd+Enter
+   - wenn Text markiert: übernehmen
+   - sonst: OCR-Bereich starten
+*/
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (e.key !== "Enter") return;
+
+  // In Inputs/Textareas nicht kaputt machen
+  const t = (document.activeElement?.tagName || "").toLowerCase();
+  if (["textarea"].includes(t)) return;
+
+  e.preventDefault();
+
+  const sel = window.getSelection?.();
+  const raw = sel ? sel.toString().trim() : "";
+
+  if (raw){
+    __fdlTakeSelectionIntoActiveField();
+  } else {
+    startOcrSelection();
+  }
+});
+
 
 /* ----------------------------- Mail State (clean) ------------------------- */
 const Mail = {
@@ -719,7 +1016,7 @@ function attachMailUI(){
   }
 
 
-  senderEl?.addEventListener("input", ()=>{ refreshPreview(); });
+  
   recvDateEl?.addEventListener("input", ()=>{ refreshPreview(); });
   invDateEl?.addEventListener("input",  ()=>{ refreshPreview(); });
 
@@ -741,23 +1038,74 @@ function attachMailUI(){
     el.style.fontSize = Math.max(10, Math.round((viewport?.width||600)*0.022)) + "px";
     el.textContent=txt; pageWrap.appendChild(el);
   }
-  async function renderAll(){
-    const pdfViewer = $("#pdfViewer"); if (!pdfViewer || !pdfDoc) return; const myToken = ++zoomToken; cancelRenders();
-    const frag = document.createDocumentFragment();
-    for (let i = 1; i <= pdfDoc.numPages; i++){
-      if (myToken !== zoomToken) return; const page = await pdfDoc.getPage(i); if (myToken !== zoomToken) return;
-      const viewport = page.getViewport({ scale: zoom }); const wrap = document.createElement("div");
-      wrap.className = "pdf-page"; wrap.style.width = viewport.width + "px"; wrap.style.position = "relative";
-      const canvas = document.createElement("canvas"); wrap.appendChild(canvas);
-      const ctx = fitCanvas(canvas, viewport); const task = page.render({ canvasContext: ctx, viewport }); renderTasks.push(task);
-await task.promise;
-await new Promise(r => setTimeout(r, 0)); // Event-Loop freigeben
-wmPreview(wrap, viewport, i);
-frag.appendChild(wrap);
+async function renderAll(){
+  const pdfViewer = $("#pdfViewer");
+  if (!pdfViewer || !pdfDoc) return;
 
+  const myToken = ++zoomToken;
+  cancelRenders();
+
+  const frag = document.createDocumentFragment();
+
+  for (let i = 1; i <= pdfDoc.numPages; i++){
+    if (myToken !== zoomToken) return;
+
+    const page = await pdfDoc.getPage(i);
+    if (myToken !== zoomToken) return;
+
+    const viewport = page.getViewport({ scale: zoom });
+
+    const wrap = document.createElement("div");
+    wrap.className = "pdf-page";
+    wrap.style.width = viewport.width + "px";
+    wrap.style.position = "relative";
+
+    // 1) Canvas (wie bisher)
+    const canvas = document.createElement("canvas");
+    wrap.appendChild(canvas);
+
+    const ctx  = fitCanvas(canvas, viewport);
+    const task = page.render({ canvasContext: ctx, viewport });
+    renderTasks.push(task);
+    await task.promise;
+
+    // 2) Text-Layer (NEU: damit Markieren möglich ist)
+    try{
+      const textLayer = document.createElement("div");
+      textLayer.className = "textLayer";
+      textLayer.style.width  = viewport.width + "px";
+      textLayer.style.height = viewport.height + "px";
+      wrap.appendChild(textLayer);
+
+      const textContent = await page.getTextContent({ normalizeWhitespace:true, disableCombineTextItems:false });
+
+      // pdf.js Render-Helper
+      if (window.pdfjsLib?.renderTextLayer) {
+        const tlTask = pdfjsLib.renderTextLayer({
+          textContent,
+          container: textLayer,
+          viewport,
+          textDivs: []
+        });
+        // je nach pdf.js-Version: promise oder dannable
+        if (tlTask?.promise) await tlTask.promise;
+        else if (tlTask?.then) await tlTask;
+      }
+    } catch (e){
+      console.debug("textLayer failed (ok):", e);
     }
-    pdfViewer.replaceChildren(frag); $("#previewPlaceholder")?.setAttribute("style","display:none");
+
+    // 3) Wasserzeichen wie bisher (bleibt sichtbar über allem)
+    await new Promise(r => setTimeout(r, 0));
+    wmPreview(wrap, viewport, i);
+
+    frag.appendChild(wrap);
   }
+
+  pdfViewer.replaceChildren(frag);
+  $("#previewPlaceholder")?.setAttribute("style","display:none");
+}
+
 
   /* ---------------------------- Upload & Zoom ------------------------------ */
 
