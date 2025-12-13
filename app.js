@@ -1629,7 +1629,20 @@ function renderTargetSummary(){
 
   // Custom-Ziele (nicht-feste Ablage-Checkboxen) – Anzeige als Namenliste
   try{
-    const fixedIds = new Set(["chkScopevisio","chkPcloudBackup","chkScopeBk","chkPcloudExtra","chkLocalSave"]);
+    const fixedIds = new Set([
+      "chkScopevisio","chkScope",
+      "chkPcloudBackup",
+      "chkScopeBk",
+      "chkPcloudExtra","chkPcloudExtras",
+      "chkLocalSave","chkLocal"
+    ]);
+
+    const esc = (s) => String(s ?? "")
+      .replace(/&/g,"&amp;")
+      .replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;")
+      .replace(/'/g,"&#039;");
 
     const customNames = Array.from(document.querySelectorAll('#saveTargets input[type="checkbox"]:checked'))
       .filter(cb => cb && cb.id && !fixedIds.has(cb.id))
@@ -1640,9 +1653,11 @@ function renderTargetSummary(){
       .filter(Boolean);
 
     if (customNames.length){
-      lines.push(`<strong>Zusatzordner:</strong> ${customNames.map(escapeHtml).join(", ")}`);
+      lines.push(`<strong>Zusatzordner:</strong> ${customNames.map(esc).join(", ")}`);
     }
-  } catch(e){ /* ignore */ }
+  } catch(e){
+    console.warn("Custom target summary failed:", e);
+  }
 
 
   // Wenn nichts anzeigbar ist → präzise Gründe (neue ODER alte Checkbox-IDs)
@@ -1686,7 +1701,9 @@ function refreshPreview(){
     fileNamePrev.textContent = hasDoc ? computeFileNameAuto() : "-";
   }
 
-  const el = (typeof targetPrev !== "undefined" && targetPrev) ? targetPrev : document.querySelector("#targetPrev");
+  const el = (typeof targetPrev !== "undefined" && targetPrev)
+    ? targetPrev
+    : (document.querySelector("#targetPreview") || document.querySelector("#targetPrev"));
   if (!el) return;
 
   if (!hasDoc){
@@ -1704,6 +1721,9 @@ function refreshPreview(){
     try { refreshPreview(); }
     catch(e){ console.warn("refreshPreview failed", e); }
   }
+  // Auch dynamische Custom-Checkboxen (z.B. Bank) triggern die Vorschau
+  const saveHost = document.querySelector("#saveTargets");
+  if (saveHost) saveHost.addEventListener("change", schedule);
 
    const ids = [
     "#chkScope", "#chkScopevisio",
@@ -4037,7 +4057,59 @@ function buildEmailPromptDialog(defaults = {}) {
   const bcc  = dlg.querySelector("#fdlMailBcc");
   const subj = dlg.querySelector("#fdlMailSubj");
   const rep  = dlg.querySelector("#fdlMailReply");
-  const body = dlg.querySelector("#fdlMailBody");      // NEU
+  const body = dlg.querySelector("#fdlMailBody");
+
+  // ===== Prefill: per Liegenschaft (emails.json) + Status-Regeln (Fidelior) =====
+  try {
+    const code = (objSel?.value || "").trim();
+    const isInv = (typeof isInvoice === "function") ? !!isInvoice() : true;
+
+    // Status aus den angehakten E-Mail-Checkboxen im Formular lesen (falls vorhanden)
+    let status = null;
+    try {
+      const st = Array.from(document.querySelectorAll('#emailTargets input[type="checkbox"]:checked'))
+        .map(cb => (cb?.dataset?.status || "").trim())
+        .filter(Boolean);
+      status = st[0] || null;
+    } catch {}
+
+    const perInv = (isInv && code) ? (emailsCfg?.perObject?.[code]?.invoice || null) : null;
+    const fideliorDef = (isInv && (code === "FIDELIOR")) ? (emailsCfg?.defaults?.invoice?.Fidelior || {}) : {};
+    const subjByStatus = (fideliorDef?.subjectByStatus || {});
+    const replyByStatus = (fideliorDef?.replyToByStatus || {});
+
+    // TO
+    if (to && !to.value.trim()) {
+      const list = []
+        .concat(perInv?.to || [])
+        .concat(perInv?.emails || [])
+        .concat(fideliorDef?.to || [])
+        .concat(fideliorDef?.emails || []);
+      const first = list.map(normEmailToken).find(a => EMAIL_RE.test(a));
+      if (first) to.value = first;
+    }
+
+    // SUBJECT
+    if (subj && !subj.value.trim()) {
+      let s = "";
+      if (status && subjByStatus && subjByStatus[status]) s = subjByStatus[status];
+      else if (perInv?.subject) s = perInv.subject;
+      else if (fideliorDef?.subject) s = fideliorDef.subject;
+      if (s) subj.value = s;
+    }
+
+    // REPLY-TO
+    if (rep && !rep.value.trim()) {
+      let r = "";
+      if (status && replyByStatus && replyByStatus[status]) r = replyByStatus[status];
+      else if (perInv?.replyTo) r = perInv.replyTo;
+      else r = emailsCfg?.defaults?.replyTo || "documents@fidelior.de";
+      if (r) rep.value = r;
+    }
+  } catch(e) {
+    console.warn("[FDL] Prefill Versanddialog fehlgeschlagen:", e);
+  }
+      // NEU
   const att  = dlg.querySelector("#fdlMailAttachment");
   const sec  = dlg.querySelector("#fdlEmailSection");
   const note = dlg.querySelector("#fdlGentleNote");
