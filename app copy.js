@@ -2397,10 +2397,6 @@ async function verifyPcloudRootOrWarn() {
 // Sorgt dafür, dass die pCloud-Checkboxen nur aktiv bleiben,
 // wenn der Root erreichbar ist
 function setupPcloudTargetGuards() {
-    // nur einmal pro Seite initialisieren (verhindert doppelte Listener)
-  if (window.__fdl_pcloudGuardsDone) return;
-  window.__fdl_pcloudGuardsDone = true;
-
   const ids = ["chkPcloudBackup", "chkPcloudExtra", "chkPcloudExtras"];
 
   ids.forEach(id => {
@@ -5287,16 +5283,6 @@ try { assignmentsCfg = await loadJson("assignments.json"); }  catch { assignment
   }
   applyPrefs(prefs);
   renderTargetSummary();
-  ["chkScope","chkScopevisio","chkScopeBk"].forEach(id => {
-  const cb = document.getElementById(id);
-  if (!cb) return;
-  cb.addEventListener("change", async (ev) => {
-    if (!ev.target.checked) return;
-    const ok = await verifyScopeRootOrWarn();
-    if (!ok) ev.target.checked = false;
-  });
-});
-
 
    // Änderungen speichern (localStorage), damit die Wahl erhalten bleibt
   [
@@ -5440,7 +5426,6 @@ function repaintInboxList(){
     } catch (e) {
       console.warn("paintConnectionsCompact() failed:", e);
     }
-
   }
   // Zähler nachziehen
   if (typeof updateCounters === "function") {
@@ -6148,20 +6133,6 @@ function updateBackupInfoText(){
     await ensureSaveCheckboxes();
     updateBackupInfoText();
   }
-  try { setupPcloudTargetGuards(); } catch(e){ console.warn("setupPcloudTargetGuards failed:", e); }
-
-try {
-  ["chkScope","chkScopevisio","chkScopeBk"].forEach(id => {
-    const cb = document.getElementById(id);
-    if (!cb) return;
-    cb.addEventListener("change", async (ev) => {
-      if (!ev.target.checked) return;
-      const ok = await verifyScopeRootOrWarn();
-      if (!ok) ev.target.checked = false;
-    });
-  });
-} catch(e){ console.warn("scope guards failed:", e); }
-
 
   if (document.readyState === 'loading'){
     document.addEventListener('DOMContentLoaded', bootSaveSection, { once:true });
