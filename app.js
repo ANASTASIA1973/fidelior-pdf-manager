@@ -2364,35 +2364,47 @@ async function writeFileTo(rootHandle, segments, bytes, fileName, opts = {}) {
 }
 
 // Kurzer Check, ob pCloud-Root + FIDELIOR erreichbar sind
-async function verifyPcloudRootOrWarn() {
+async function verifyPcloudRootOrWarn(){
   const root =
     window.pcloudRootHandle ||
     (typeof pcloudRootHandle !== "undefined" ? pcloudRootHandle : null);
 
-  // Noch gar kein Root verbunden
   if (!root) {
     toast(
       "pCloud ist nicht verbunden.<br>" +
-      "<small>Bitte pCloud öffnen (Laufwerk P: prüfen) und ggf. in der Verbindungs-Zentrale erneut verbinden.</small>",
-      8000
-    );
-    return false;
-  }
-
-  try {
-    // Test: gibt es unter dem Root den Ordner „FIDELIOR“?
-    await root.getDirectoryHandle("FIDELIOR", { create: false });
-    return true;
-  } catch (e) {
-    console.warn("[verifyPcloudRootOrWarn] FIDELIOR nicht erreichbar:", e);
-    toast(
-      "pCloud-Ordner „FIDELIOR“ ist nicht erreichbar.<br>" +
-      "<small>Bitte pCloud öffnen (Laufwerk P: prüfen) und ggf. in der Verbindungs-Zentrale erneut verbinden.</small>",
+      "<small>Bitte pCloud Drive öffnen und in der Verbindungs-Zentrale den pCloud-Root wählen.</small>",
       9000
     );
     return false;
   }
+
+  // Reachability-Test: einmal einen typischen Ordner/Eintrag abfragen
+  // (wenn pCloud nicht eingeloggt/offline ist, werfen getDirectoryHandle/values oft Fehler)
+  const candidates = ["FIDELIOR", "OBJEKTE", "PRIVAT", "DMS BACKUP PCLOUD", "SOFTWARE", "config"];
+
+  for (const name of candidates) {
+    try {
+      await root.getDirectoryHandle(name, { create: false });
+      return true; // erreichbar
+    } catch (e) {
+      // weiterprobieren
+    }
+  }
+
+  // fallback: einmal root iterieren (manche Setups erlauben das eher)
+  try {
+    for await (const _ of root.values()) { break; }
+    return true;
+  } catch (e) {
+    toast(
+      "pCloud-Root ist nicht erreichbar.<br>" +
+      "<small>Bitte pCloud Drive öffnen, einloggen und danach erneut versuchen. Falls nötig: in der Verbindungs-Zentrale neu verbinden.</small>",
+      10000
+    );
+    return false;
+  }
 }
+
 
 // Sorgt dafür, dass die pCloud-Checkboxen nur aktiv bleiben,
 // wenn der Root erreichbar ist
