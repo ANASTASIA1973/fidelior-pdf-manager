@@ -468,3 +468,24 @@ dialog .dialog{
   min-width: 420px;
   min-height: 260px;
 }
+.pay-status{ margin-bottom:.6rem; }
+
+.pay-status__title{
+  font-weight: 700;
+  color: var(--primary);
+  font-size: .95rem;
+  margin: 0 0 .25rem 0;
+}
+
+.pay-status__row{
+  display:flex;
+  align-items:center;
+  gap:.5rem;
+  padding:.15rem 0;
+}
+/* innerhalb <details> – Zahlungsstatus soll nicht am Rand kleben */
+details .pay-status{
+  margin-top: 1rem;
+  padding-top: .75rem;
+  border-top: 1px solid var(--border);
+}

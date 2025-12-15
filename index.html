@@ -146,13 +146,17 @@
         <details class="acc" id="accConnections" open>
           <summary class="acc-sum">Speicherziele und Zähler</summary>
 
-          <!-- Zahlungsstatus -->
-          <label class="chk" style="margin-bottom:.6rem">
-            <input type="checkbox" id="chkPaid">
-            <span id="paidLabel">Überwiesen?</span>
-          </label>
+       <!-- Zahlungsstatus -->
+<div class="pay-status">
+  <div class="pay-status__title">Zahlungsstatus</div>
 
-          <hr class="sep" />
+  <label class="chk pay-status__row">
+    <input type="checkbox" id="chkPaid">
+    <span id="paidLabel">Bezahlt</span>
+  </label>
+</div>
+
+<hr class="sep" />
 
           <!-- DATEIABLAGE -->
           <h2>Dateiablage</h2>
