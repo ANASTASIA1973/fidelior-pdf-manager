@@ -1,35 +1,10 @@
 {
   "saveTargets": [
-    {
-      "id": "chkScopevisio",
-      "key": "scope",
-      "label": "Scopevisio",
-      "defaultChecked": true
-    },
-    {
-      "id": "chkPcloudBackup",
-      "key": "backup",
-      "label": "pCloud Backup (Sammelordner)",
-      "defaultChecked": true
-    },
-    {
-      "id": "chkScopeBk",
-      "key": "scopeBk",
-      "label": "Betriebskosten (Scopevisio)",
-      "defaultChecked": false
-    },
-    {
-      "id": "chkPcloudExtras",
-      "key": "extras",
-      "label": "Ordner in pCloud",
-      "defaultChecked": false
-    },
-    {
-      "id": "chkLocalSave",
-      "key": "local",
-      "label": "Lokal",
-      "defaultChecked": false
-    }
+    { "id": "chkScopevisio",   "key": "scope",   "label": "Scopevisio",                  "defaultChecked": true  },
+    { "id": "chkPcloudBackup", "key": "backup",  "label": "pCloud Backup (Sammelordner)", "defaultChecked": true  },
+    { "id": "chkScopeBk",      "key": "scopeBk", "label": "Betriebskosten (Scopevisio)", "defaultChecked": false },
+    { "id": "chkPcloudExtras", "key": "extras",  "label": "Ordner in pCloud",            "defaultChecked": false },
+    { "id": "chkLocalSave",    "key": "local",   "label": "Lokal",                       "defaultChecked": false }
   ],
   "emailTargets": [
     {
@@ -39,39 +14,26 @@
       "status": null
     },
     {
-      "id": "mail-payable",
+      "id": "mail-payable-open",
       "addressBookIds": ["payable"],
       "label": "Fidelior Zahlung",
-      "status": "open"
+      "status": "open",
+      "subject": "NEUE RECHNUNG – ZAHLUNG OFFEN",
+      "replyTo": "documents@fidelior.de"
     },
     {
       "id": "mail-review",
       "addressBookIds": ["kontakt"],
       "label": "Fidelior Prüfung",
-      "status": "review"
+      "status": "review",
+      "subject": "RECHNUNGSPRÜFUNG ERFORDERLICH",
+      "replyTo": "documents@fidelior.de"
     },
     {
       "id": "mail-sevdesk",
       "addressBookIds": ["sevdesk"],
       "label": "Sevdesk Autobox",
       "status": null
-    },
-    {
-  "id": "mail-payable",
-  "addressBookIds": ["payable"],
-  "label": "Fidelior Zahlung",
-  "status": "open",
-  "subject": "NEUE RECHNUNG – ZAHLUNG OFFEN",
-  "replyTo": "documents@fidelior.de"
-},
-{
-  "id": "mail-review",
-  "addressBookIds": ["kontakt"],
-  "label": "Fidelior Prüfung",
-  "status": "review",
-  "subject": "RECHNUNGSPRÜFUNG ERFORDERLICH",
-  "replyTo": "documents@fidelior.de"
-}
-
+    }
   ]
 }

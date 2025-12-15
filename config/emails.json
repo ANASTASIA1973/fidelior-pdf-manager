@@ -16,8 +16,8 @@
           "review": "Rechnungsprüfung erforderlich"
         },
         "replyToByStatus": {
-          "open":   "payable@fidelior.de",
-          "review": "kontakt@fidelior.de"
+           "open":   "NEUE RECHNUNG – ZAHLUNG OFFEN",
+  "review": "RECHNUNGSPRÜFUNG ERFORDERLICH"
         },
         "toByStatus": {
           "open":   ["payable", "sevdesk"],
