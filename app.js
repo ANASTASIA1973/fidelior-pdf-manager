@@ -3154,7 +3154,11 @@ async function ensureConfigConnectedOrAsk(){
   async function openEmailsDialog(){
   await ensureConfigConnectedOrAsk();
   const dlg = $("#manageEmailsDialog");
-  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+  if (dlg && !dlg.__draggable && typeof makeDialogDraggable === "function") {
+  makeDialogDraggable(dlg);
+  dlg.__draggable = true;
+}
+
 
   if (!dlg) { toast("E-Mail-Dialog fehlt im HTML.", 2500); return; }
 
@@ -3527,7 +3531,11 @@ $("#poAdd")?.addEventListener("click", (e) => {
 async function openCheckboxesDialog(){
   await ensureConfigConnectedOrAsk();
   const dlg = $("#manageCheckboxesDialog");
-  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+ if (dlg && !dlg.__draggable && typeof makeDialogDraggable === "function") {
+  makeDialogDraggable(dlg);
+  dlg.__draggable = true;
+}
+
 
   if (!dlg) { toast("Checkboxen-Dialog fehlt im HTML.", 2500); return; }
 
@@ -3597,6 +3605,8 @@ if (isFixed){
 }
 
     async function refreshBindState(){
+        if (!bindStateEl || !btnClear) return;
+
   try{
     const h = await idbGet(bindKey);
     if (h) {
@@ -3680,6 +3690,8 @@ if (isFixed){
     if (btnPick) btnPick.textContent = isFixed ? "Override…" : "Ordner…";
 
     async function refreshBindState(){
+        if (!bindStateEl || !btnClear) return;
+
       try{
         const h = await idbGet(bindKey);
         if (h) {
@@ -3813,7 +3825,11 @@ try{
 async function openStampDialog(){
   await ensureConfigConnectedOrAsk();
   const dlg = $("#manageStampDialog");
-  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+ if (dlg && !dlg.__draggable && typeof makeDialogDraggable === "function") {
+  makeDialogDraggable(dlg);
+  dlg.__draggable = true;
+}
+
 
   if (!dlg) { toast("Stempel-Dialog fehlt im HTML.", 2500); return; }
 
@@ -3884,7 +3900,11 @@ async function openObjectsDialog(){
   await ensureConfigConnectedOrAsk();
 
   const dlg = $("#manageObjectsDialog");
-  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+  if (dlg && !dlg.__draggable && typeof makeDialogDraggable === "function") {
+  makeDialogDraggable(dlg);
+  dlg.__draggable = true;
+}
+
 
   if (!dlg){
     toast("Objekte-Dialog fehlt.", 2000, "err");
@@ -3990,7 +4010,11 @@ async function openObjectsDialog(){
 }
 
   async function openTypesDialog(){ await ensureConfigConnectedOrAsk(); const dlg=$("#manageTypesDialog");
-    if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+   if (dlg && !dlg.__draggable && typeof makeDialogDraggable === "function") {
+  makeDialogDraggable(dlg);
+  dlg.__draggable = true;
+}
+
 
     if(!dlg){ toast("Dokumentarten-Dialog fehlt.",2000); return; } let j; try{ j = await loadJson("document_types.json"); }catch{ j={types:[], defaultTypeKey:""}; } const list=j.types||[]; const ul=$("#typesList"); ul.innerHTML=""; const defaultKey=j.defaultTypeKey||"";
     const addRow=(t={label:"", key:"", isInvoice:false})=>{ const li=document.createElement("li"); li.innerHTML = `
@@ -4011,7 +4035,11 @@ async function openAssignmentsDialog() {
   await ensureConfigConnectedOrAsk();
 
   const dlg = $("#manageAssignmentsDialog");
-  if (!dlg.__draggable) { makeDialogDraggable(dlg); dlg.__draggable = true; }
+  if (dlg && !dlg.__draggable && typeof makeDialogDraggable === "function") {
+  makeDialogDraggable(dlg);
+  dlg.__draggable = true;
+}
+
 
   if (!dlg) { toast("Zuordnungs-Dialog fehlt.", 2000); return; }
 
@@ -4353,16 +4381,7 @@ async function openAssignmentsDialog() {
 
   // Zuordnungsmuster
   $("#btnSettingsAssignments")?.addEventListener("click", (e) => {
-      // Checkboxen verwalten
-  $("#btnSettingsCheckboxes")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    dlg.close?.();
-    if (typeof openCheckboxesDialog === "function") {
-      openCheckboxesDialog();
-    } else {
-      toast("Checkboxen-Verwaltung ist nicht verfügbar.", 3000);
-    }
-  });
+     
 
     e.preventDefault();
     dlg.close?.();
@@ -5577,9 +5596,22 @@ async function boot() {
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   }
 
-  // 1) Zuerst gespeicherte Directory-Handles wiederherstellen
-  await restoreBoundHandles();
-    try { await window.__fdlRefreshEmailCheckboxes?.(); } catch {}
+// 1) Zuerst gespeicherte Directory-Handles wiederherstellen
+await restoreBoundHandles();
+
+// --- ALIAS: Bearbeitet-Handle vereinheitlichen (alt <-> neu) ---
+try {
+  if (window.bearbeitetRootHandle && !window.processedRootHandle) {
+    window.processedRootHandle = window.bearbeitetRootHandle;
+  }
+  if (window.processedRootHandle && !window.bearbeitetRootHandle) {
+    window.bearbeitetRootHandle = window.processedRootHandle;
+  }
+} catch {}
+
+try { await window.__fdlRefreshEmailCheckboxes?.(); } catch {}
+
+
 
 
  // 2) Konfigurationen laden (Emails/Assignments optional)
@@ -5977,10 +6009,9 @@ const TARGETS = [
 {
   key: "bearbeitetRoot",
   label: "Bearbeitet – Zielordner",
-  varName: "bearbeitetRootHandle",
-  hint:
-    "Im Explorer: Scopevisio Documents → Arndt → den Ordner „Bearbeitet“ auswählen (hier landen fertige Belege nach dem Speichern)."
+  varName: "processedRootHandle",
 }
+
 
 ];
 
@@ -6041,12 +6072,13 @@ async function pickDirectory(target){
       </div>`;
 
     document.body.appendChild(dlg);
-    try {
-  if (!dlg.__draggable) {
-    makeDialogDraggable(dlg, ".dialog-titlebar");
+try {
+  if (dlg && !dlg.__draggable && typeof window.makeDialogDraggable === "function") {
+    window.makeDialogDraggable(dlg, ".dialog-titlebar");
     dlg.__draggable = true;
   }
 } catch {}
+
 
     $('#fdlConnClose', dlg)?.addEventListener('click', hideConnectionsCenter);
     $('#fdlConnClose2', dlg)?.addEventListener('click', hideConnectionsCenter);
@@ -6120,6 +6152,8 @@ async function pickDirectory(target){
 
   // ---------- Verbinden‑Button neben „Speichern“
   function ensureLauncherBtn(){
+    
+  return; // Launcher-Button deaktiviert (Verbindungen nur über Verwaltung)
     if ($('#fdlConnBtn')) return;
     const saveBtn = $('#saveBtn');
     const host = saveBtn?.parentElement || document.body;
@@ -6149,7 +6183,8 @@ async function pickDirectory(target){
     { varName: 'pcloudConfigDir',      key: 'pcloudConfig'   },
     { varName: 'scopeRootHandle',      key: 'scopeRoot'      },
     { varName: 'inboxRootHandle',      key: 'inboxRoot'      },
-    { varName: 'bearbeitetRootHandle', key: 'bearbeitetRoot' },
+    { varName: 'processedRootHandle', key: 'bearbeitetRoot' },
+
   ];
 
   // ---- IndexedDB Mini-Helper ----
@@ -6273,29 +6308,30 @@ async function pickDirectory(target){
   }
 })();
 
-
 /* ==================================================================================
-   NEUAUFBAU — TEIL 2 (NEU): Präziser Ein‑Banner
-   • Ersetzt die alte Teil‑2‑Version vollständig.
+   NEUAUFBAU — TEIL 2 (NEU): Präziser Ein-Banner (mit Config-Check per Datei-Load)
    • Zeigt NUR das, was tatsächlich fehlt.
-   • Backup hängt NUR am pCloud‑Root (Config = Verwaltung, unabhängig).
-   • Aktualisiert sich beim Laden, nach jedem Verbinden und beim Fokuswechsel zum Tab.
-   • Additiv: Unter Teil 1 ans Ende deiner app.js einfügen. Die alte Teil‑2‑Datei vorher entfernen.
+   • Backup hängt NUR am pCloud-Root (Config = Verwaltung, unabhängig).
+   • Prüft "Config verbunden" nicht nur über Handle-Flags, sondern versucht zuerst
+     wirklich aus /config zu lesen (checkboxes.json als Smoke-Test).
+   • Aktualisiert sich beim Laden, nach jedem Verbinden und beim Fokuswechsel.
+   • Die alte Teil-2-Version vollständig entfernen und diesen Block einsetzen.
    ================================================================================== */
 (() => {
-  const $ = (s, el=document) => el.querySelector(s);
+  const $ = (s, el = document) => el.querySelector(s);
 
-  /* ---------------- Banner: genau & einzig ---------------- */
-  function ensureOneBanner(){
-    // alte Banner (frühere IDs) entfernen, damit es wirklich nur einen gibt
-    $('#fdlConnWarn')?.remove();
-    $('#fdlDualWarn')?.remove();
-    $('#fdlOneWarn')?.remove();
+  // --- Banner DOM (genau eins) ---
+  function ensureOneBanner() {
+    // alte Banner-IDs weg (Altlasten)
+    $("#fdlConnWarn")?.remove();
+    $("#fdlDualWarn")?.remove();
+    $("#fdlOneWarn")?.remove();
 
-    let bar = $('#fdlWarnOne');
+    let bar = $("#fdlWarnOne");
     if (bar) return bar;
-    bar = document.createElement('div');
-    bar.id = 'fdlWarnOne';
+
+    bar = document.createElement("div");
+    bar.id = "fdlWarnOne";
     bar.style.cssText = `
       position: sticky; top: 0; z-index: 9999; display: none;
       background: #fff7cc; color: #5c4d00; border: 1px solid #f0e2a0;
@@ -6305,74 +6341,128 @@ async function pickDirectory(target){
     return bar;
   }
 
-  function isSet(h){
-    // robust: akzeptiert auch spezielle Handle‑Objekte
-    return !!(h && typeof h === 'object');
+  // --- Robust Handle Check ---
+  function isSet(h) {
+    return !!(h && typeof h === "object");
   }
 
-  function computeMissing(){
-    const pcRootOk = isSet(window.pcloudRootHandle);     // entscheidet über Backup
-    const pcCfgOk  = isSet(window.configDirHandle || window.pcloudConfigDir);
-    const scopeOk  = isSet(window.scopeRootHandle);      // Pflichtziel
-    const inboxOk  = isSet(window.inboxRootHandle);      // Quelle
-    const bearbOk  = isSet(window.bearbeitetRootHandle); // Ziel
+  // --- Config-Read: versucht zuerst wirklich aus /config zu lesen ---
+  // Wir nutzen checkboxes.json als "Smoke Test", weil es bei dir existiert und UI-relevant ist.
+  async function canReadConfig() {
+    // 1) Wenn cfg schon im RAM liegt, ist Verwaltung praktisch nutzbar
+    if (window.__fdlCheckboxesCfg && typeof window.__fdlCheckboxesCfg === "object") return true;
+
+    // 2) Wenn ein configDirHandle existiert und loadJson unterstützt /config Pfad,
+    //    versuchen wir eine echte Read-Operation.
+    //    (Wichtig: wir erzwingen hier NICHT verbinden, nur testen.)
+    const hasLoadJson = (typeof loadJson === "function");
+    if (!hasLoadJson) {
+      // Falls loadJson nicht existiert, bleibt nur "Handle vorhanden?"
+      return isSet(window.configDirHandle || window.pcloudConfigDir);
+    }
+
+    try {
+      // Erst config/..., dann fallback root (falls dein Setup so arbeitet)
+      const paths = ["config/checkboxes.json", "checkboxes.json"];
+      for (const p of paths) {
+        try {
+          const cfg = await loadJson(p);
+          if (cfg && typeof cfg === "object") {
+            // Cache in RAM, damit andere Stellen es auch sehen
+            window.__fdlCheckboxesCfg = cfg;
+            try { localStorage.setItem("fdlCheckboxesCfg", JSON.stringify(cfg)); } catch {}
+            return true;
+          }
+        } catch {}
+      }
+    } catch {}
+
+    return false;
+  }
+
+  // --- Missing-Logik (asynchron, weil Config-Read) ---
+  async function computeMissing() {
+    const pcRootOk = isSet(window.pcloudRootHandle); // entscheidet über Backup
+    const scopeOk  = isSet(window.scopeRootHandle);  // Pflichtziel
+    const inboxOk  = isSet(window.inboxRootHandle);  // Quelle
+    const bearbOk = isSet(window.processedRootHandle);
+
+
+    // Verwaltung: zuerst "wirklich lesen" versuchen
+    const pcCfgOk = await canReadConfig();
 
     const msgs = [];
-    if (!pcRootOk) msgs.push('Backup‑Ziel (pCloud‑Root) nicht verbunden – Datei wird ohne Backup gespeichert.');
-    if (!pcCfgOk)  msgs.push('Verwaltungsdaten (pCloud‑Config) nicht verbunden – Verwalten/Empfänger/Liegenschaften/Dokumenttypen sind deaktiviert.');
-    if (!scopeOk)  msgs.push('Scopevisio‑Root nicht verbunden – Speichern nach Scopevisio nicht möglich.');
-    if (!inboxOk)  msgs.push('Inbox‑Ordner nicht verbunden – Quelle fehlt.');
-    if (!bearbOk)  msgs.push('Bearbeitet‑Zielordner nicht verbunden – Verschieben nach Bearbeitet deaktiviert.');
+    if (!pcRootOk) msgs.push("Backup-Ziel (pCloud-Root) nicht verbunden – Datei wird ohne Backup gespeichert.");
+    if (!pcCfgOk)  msgs.push("Verwaltungsdaten (pCloud-Config) nicht verbunden/lesbar – Verwalten/Empfänger/Liegenschaften/Dokumenttypen sind deaktiviert.");
+    if (!scopeOk)  msgs.push("Scopevisio-Root nicht verbunden – Speichern nach Scopevisio nicht möglich.");
+    if (!inboxOk)  msgs.push("Inbox-Ordner nicht verbunden – Quelle fehlt.");
+    if (!bearbOk)  msgs.push("Bearbeitet-Zielordner nicht verbunden – Verschieben nach Bearbeitet deaktiviert.");
 
-    return { msgs, pcRootOk };
+    return { msgs };
   }
 
-  function updateBanner(){
-    const bar = ensureOneBanner();
-    const { msgs } = computeMissing();
+  // --- Banner Update (mit Race-Guard) ---
+  let _bannerSeq = 0;
 
-    if (!msgs.length){
-      bar.style.display = 'none';
-      bar.innerHTML = '';
+  async function updateBanner() {
+    const seq = ++_bannerSeq;
+    const bar = ensureOneBanner();
+
+    const { msgs } = await computeMissing();
+    if (seq !== _bannerSeq) return; // falls mehrere Updates parallel laufen
+
+    if (!msgs.length) {
+      bar.style.display = "none";
+      bar.innerHTML = "";
       return;
     }
 
     bar.innerHTML = `
-      <b>⚠️ ${msgs.join(' ')}</b>
-      <button id="fdlWarnConnect" style="margin-left:8px;padding:4px 8px;border-radius:8px;border:1px solid #d5c77a;background:#fff2a8;cursor:pointer">Verbinden…</button>
+      <b>⚠️ ${msgs.join(" ")}</b>
+      <button id="fdlWarnConnect"
+        style="margin-left:8px;padding:4px 8px;border-radius:8px;border:1px solid #d5c77a;background:#fff2a8;cursor:pointer">
+        Verbinden…
+      </button>
     `;
-    $('#fdlWarnConnect')?.addEventListener('click', () => window.openConnectionsCenter?.());
-    bar.style.display = 'block';
+
+    $("#fdlWarnConnect")?.addEventListener("click", () => {
+      try { window.openConnectionsCenter?.(); } catch {}
+    });
+
+    bar.style.display = "block";
   }
 
-  /* --------------- Öffentliche Hooks --------------- */
-  // Von Teil 1 nach Verbindungsänderung aufrufbar
+  // --- Hooks: nach jeder Verbindungsänderung aktualisieren ---
   const prevRefresh = window.fdlRefreshConnectionsUI;
-  window.fdlRefreshConnectionsUI = function(){
+  window.fdlRefreshConnectionsUI = function () {
     try { prevRefresh?.(); } catch {}
     try { updateBanner(); } catch {}
   };
 
-  // Für andere Stellen verfügbar
+  // öffentlich verfügbar
   window.fdlUpdateConnBanner = updateBanner;
 
-  /* --------------- Initialisierung --------------- */
-  function boot(){
+  // --- Init ---
+  function boot() {
     updateBanner();
-    // falls die Handles kurz nach DOMLoad gesetzt werden: leichte Nachinitialisierung
-    setTimeout(updateBanner, 200);
-    setTimeout(updateBanner, 800);
+
+    // Falls Handles etwas später gesetzt werden:
+    setTimeout(() => { try { updateBanner(); } catch {} }, 200);
+    setTimeout(() => { try { updateBanner(); } catch {} }, 800);
   }
 
-  // Bei Fokuswechsel (z. B. nach Picker) erneut prüfen
-  window.addEventListener('focus', () => { try { updateBanner(); } catch {} });
+  // Fokuswechsel (z. B. nach Picker) → erneut prüfen
+  window.addEventListener("focus", () => { try { updateBanner(); } catch {} });
 
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', boot, { once:true });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
   } else {
     boot();
-    document.querySelectorAll("dialog").forEach(d => makeDialogDraggable(d));
-
+    try {
+      document.querySelectorAll("dialog").forEach(d => {
+        if (typeof makeDialogDraggable === "function") makeDialogDraggable(d);
+      });
+    } catch {}
   }
 })();
 
@@ -6411,31 +6501,45 @@ async function pickDirectory(target){
         { id:"chkScopevisio",   key:"scope",   label:"Scopevisio",                   defaultChecked:true  },
         { id:"chkPcloudBackup", key:"backup",  label:"pCloud Backup (Sammelordner)", defaultChecked:true  },
         { id:"chkScopeBk",      key:"scopeBk", label:"Betriebskosten (Scopevisio)",  defaultChecked:false },
-        { id:"chkPcloudExtra",  key:"extras",  label:"Ordner in pCloud",             defaultChecked:false },
+        { id:"chkPcloudExtras", key:"extras", label:"Ordner in pCloud", defaultChecked:false },
         { id:"chkLocalSave",    key:"local",   label:"Lokal",                        defaultChecked:false }
       ]
     };
-
     // NICHT verbinden erzwingen – nur versuchen zu laden
+    // Reihenfolge: RAM → localStorage → Datei (config/… dann fallback) → Default
     let cfg = null;
-    try {
-      cfg = await loadJson("checkboxes.json");
-      if (cfg && typeof cfg === "object") {
-        window.__fdlCheckboxesCfg = cfg;
-        try { localStorage.setItem("fdlCheckboxesCfg", JSON.stringify(cfg)); } catch {}
-      } else {
-        cfg = null;
-      }
-    } catch {
-      cfg = null;
+
+    // 1) RAM
+    if (window.__fdlCheckboxesCfg && typeof window.__fdlCheckboxesCfg === "object") {
+      cfg = window.__fdlCheckboxesCfg;
     }
 
+    // 2) localStorage
     if (!cfg) {
       try {
         const cached = JSON.parse(localStorage.getItem("fdlCheckboxesCfg") || "null");
         if (cached && typeof cached === "object") cfg = cached;
       } catch {}
     }
+
+// 3) Datei (erst /config, dann fallback) – nur wenn loadJson existiert
+if (!cfg && typeof loadJson === "function") {
+  const tryPaths = ["config/checkboxes.json", "checkboxes.json"];
+  for (const p of tryPaths) {
+    try {
+      const loaded = await loadJson(p);
+      if (loaded && typeof loaded === "object") {
+        cfg = loaded;
+        window.__fdlCheckboxesCfg = loaded;
+        try { localStorage.setItem("fdlCheckboxesCfg", JSON.stringify(loaded)); } catch {}
+        break;
+      }
+    } catch {}
+  }
+}
+
+
+    // 4) Default
     if (!cfg) cfg = DEFAULT_CFG;
 
     const list = Array.isArray(cfg.saveTargets) ? cfg.saveTargets : DEFAULT_CFG.saveTargets;
@@ -6461,7 +6565,7 @@ async function pickDirectory(target){
       if (key && typeof prefs[key] === "boolean") cb.checked = !!prefs[key];
       else cb.checked = !!def.defaultChecked;
 
-      if (cb.id === "chkPcloudBackup") {
+     if (key === "backup") {
         const info = document.createElement("span");
         info.id = "pcBackupStatus";
         info.className = "muted";
@@ -6503,12 +6607,13 @@ function updateBackupInfoText(){
 }
 
 
-  async function bootSaveSection(){
-    killRoundTabs();
-    await ensureSaveCheckboxes();
-    updateBackupInfoText();
-  }
-  try { setupPcloudTargetGuards(); } catch(e){ console.warn("setupPcloudTargetGuards failed:", e); }
+async function bootSaveSection(){
+  try { await ensureSaveCheckboxes(); } catch(e){ console.warn("ensureSaveCheckboxes failed:", e); }
+  try { updateBackupInfoText(); } catch(e){ console.warn("updateBackupInfoText failed:", e); }
+}
+
+
+  try { window.setupPcloudTargetGuards?.(); } catch(e){ console.warn("setupPcloudTargetGuards failed:", e); }
 
 try {
   ["chkScope","chkScopevisio","chkScopeBk"].forEach(id => {
@@ -6530,73 +6635,94 @@ try {
   }
 
   const prevRefresh = window.fdlRefreshConnectionsUI;
-  window.fdlRefreshConnectionsUI = function(){
-    try { prevRefresh?.(); } catch {}
-    try { updateBackupInfoText(); } catch {}
-  };
+window.fdlRefreshConnectionsUI = function(){
+  try { prevRefresh?.(); } catch {}
+  try { ensureSaveCheckboxes(); } catch {}
+  try { updateBackupInfoText(); } catch {}
+  try { window.__fdlRefreshEmailCheckboxes?.(); } catch {}
+  try { window.fdlUpdateConnBanner?.(); } catch {}
+};
+
+
 })();
 
 
-/* ================= TEIL 4 (NEU): Versand per E-Mail – Checkboxen aus checkboxes.json ============== */
+/* ================= TEIL 4: Versand per E-Mail – Checkboxen aus checkboxes.json ==================== */
 (() => {
-  const $ = (s, el=document) => el.querySelector(s);
+  const $ = (s, el = document) => el.querySelector(s);
 
-async function loadCheckboxCfg(){
-  const DEFAULTS = { saveTargets: [], emailTargets: [] };
-
-  // 1) RAM
-  if (window.__fdlCheckboxesCfg && typeof window.__fdlCheckboxesCfg === "object") {
-    return window.__fdlCheckboxesCfg;
+  function isObj(v){
+    return !!(v && typeof v === "object" && !Array.isArray(v));
   }
 
-  // 2) localStorage (wichtig: vor loadJson)
-  try {
-    const cached = JSON.parse(localStorage.getItem("fdlCheckboxesCfg") || "null");
-    if (cached && typeof cached === "object") {
-      window.__fdlCheckboxesCfg = cached;      // <<< wichtig!
-      return cached;
-    }
-  } catch {}
+  async function loadCheckboxCfg(){
+    const DEFAULTS = { saveTargets: [], emailTargets: [] };
 
-  // 3) Datei (geht nur, wenn config verbunden ist)
-  try {
-    const cfg = await loadJson("checkboxes.json");
-    if (cfg && typeof cfg === "object") {
-      window.__fdlCheckboxesCfg = cfg;
-      try { localStorage.setItem("fdlCheckboxesCfg", JSON.stringify(cfg)); } catch {}
-      return cfg;
-    }
-  } catch {}
+    // 1) RAM
+    if (isObj(window.__fdlCheckboxesCfg)) return window.__fdlCheckboxesCfg;
 
-  return DEFAULTS;
+    // 2) localStorage
+    try {
+      const cached = JSON.parse(localStorage.getItem("fdlCheckboxesCfg") || "null");
+      if (isObj(cached)) {
+        window.__fdlCheckboxesCfg = cached;
+        return cached;
+      }
+    } catch {}
+
+ // 3) Datei: erst /config, dann Root-Fallback – nur wenn loadJson existiert
+if (typeof loadJson === "function") {
+  const tryPaths = ["config/checkboxes.json", "checkboxes.json"];
+  for (const p of tryPaths){
+    try {
+      const cfg = await loadJson(p);
+      if (isObj(cfg)) {
+        window.__fdlCheckboxesCfg = cfg;
+        try { localStorage.setItem("fdlCheckboxesCfg", JSON.stringify(cfg)); } catch {}
+        return cfg;
+      }
+    } catch {}
+  }
 }
 
-async function renderEmailCheckboxesFromCfg(){
-  const host = $("#emailTargets");
-  if (!host) return;
 
-  const cfg  = await loadCheckboxCfg();
-  const list = Array.isArray(cfg.emailTargets) ? cfg.emailTargets : [];
+    return DEFAULTS;
+  }
 
-  // ✅ WICHTIG: NICHT LEER RENDERN, wenn nichts geladen werden konnte
-  if (!list.length) return;
+  function normalizeEmailTargets(cfg){
+    const list = (cfg && Array.isArray(cfg.emailTargets)) ? cfg.emailTargets : [];
+    // nur valide Einträge
+    return list.filter(t => t && typeof t === "object");
+  }
 
-  host.textContent = "";
+  async function renderEmailCheckboxesFromCfg(){
+    const host = $("#emailTargets");
+    if (!host) return;
+
+    const cfg = await loadCheckboxCfg();
+    const list = normalizeEmailTargets(cfg);
+
+    // NICHT leer-rendern, wenn nichts geladen werden konnte
+    if (!list.length) return;
+
+    host.textContent = "";
 
     list.forEach(def => {
       const row = document.createElement("label");
       row.className = "chk";
+      if (def.title) row.title = String(def.title);
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.id = def.id || ("mail-custom-" + Math.random().toString(36).slice(2));
       cb.checked = !!def.defaultChecked;
 
-      if (Array.isArray(def.addressBookIds)) cb.dataset.addrIds = def.addressBookIds.join(",");
-      if (def.status) cb.dataset.status = String(def.status);
-      if (def.subject) cb.dataset.subject = String(def.subject);
-if (def.replyTo) cb.dataset.replyto = String(def.replyTo);
-
+      if (Array.isArray(def.addressBookIds) && def.addressBookIds.length) {
+        cb.dataset.addrIds = def.addressBookIds.join(",");
+      }
+      if (def.status != null)  cb.dataset.status  = String(def.status);
+      if (def.subject != null) cb.dataset.subject = String(def.subject);
+      if (def.replyTo != null) cb.dataset.replyto = String(def.replyTo);
 
       row.appendChild(cb);
 
@@ -6608,102 +6734,36 @@ if (def.replyTo) cb.dataset.replyto = String(def.replyTo);
     });
   }
 
+  // öffentlich, damit andere Stellen (z. B. nach Verbindungen) neu rendern können
   window.__fdlRefreshEmailCheckboxes = async function(){
     try { await renderEmailCheckboxesFromCfg(); } catch (e) { console.error(e); }
   };
 
+  // Initial render
   if (document.readyState === "loading"){
     document.addEventListener("DOMContentLoaded", () => {
       renderEmailCheckboxesFromCfg();
-    }, { once:true });
+    }, { once: true });
   } else {
     renderEmailCheckboxesFromCfg();
   }
 })();
-// ===== Boot: E-Mail-Konfig beim Start laden (damit Checkboxen sofort funktionieren) =====
+// ===== Boot: E-Mail-Adressbuch (emails.json) laden =====
 (async function bootEmailsCfg(){
   try {
-    // nur laden, wenn noch nichts da ist
     if (!window.emailsCfg || !Array.isArray(window.emailsCfg.addressBook)) {
-      await ensureConfigConnectedOrAsk();
-      const cfg = await loadJson("emails.json");
-      window.emailsCfg = cfg;
-      emailsCfg = cfg;
+      try { await ensureConfigConnectedOrAsk?.(); } catch {}
+
+      let cfg = null;
+      try { cfg = await loadJson("config/emails.json"); }
+      catch { cfg = await loadJson("emails.json"); }
+
+      if (cfg && typeof cfg === "object") window.emailsCfg = cfg;
     }
   } catch (e) {
-    // still: App soll ohne E-Mail-Konfig weiterlaufen
+    // still
   }
 
-  // danach: E-Mail-Checkboxen neu rendern (Mapping über addressBookIds)
+  // danach: Email-Checkboxen neu rendern (falls Labels/Mapping erst jetzt verfügbar sind)
   try { await window.__fdlRefreshEmailCheckboxes?.(); } catch {}
 })();
-function makeDialogDraggable(dialogEl, handleSel = ".dialog-titlebar"){
-  const handle = dialogEl.querySelector(handleSel);
-  const box    = dialogEl.querySelector(".dialog") || dialogEl;
-  if (!handle || !box) return;
-
-  let dragging = false, startX=0, startY=0, startL=0, startT=0;
-
-  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-
-  handle.style.cursor = "grab";
-  handle.style.userSelect = "none";
-
-  handle.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("button, a, input, select, textarea, label")) return;
-
-    const r = box.getBoundingClientRect();
-
-    box.style.position = "fixed";
-    box.style.margin = "0";
-    box.style.left = r.left + "px";
-    box.style.top  = r.top  + "px";
-    box.style.transform = "none"; // wichtig, falls irgendwo centering per transform aktiv war
-
-    dragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    startL = r.left;
-    startT = r.top;
-
-    handle.style.cursor = "grabbing";
-    handle.setPointerCapture?.(e.pointerId);
-    e.preventDefault();
-  });
-
-  handle.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-
-    const w = box.offsetWidth;
-    const h = box.offsetHeight;
-
-    const PAD = 12;
-
-    const rawMaxL = window.innerWidth  - w - PAD;
-    const rawMaxT = window.innerHeight - h - PAD;
-
-    // Wenn Fenster größer als Viewport: min wird negativ erlaubt → kein "Festkleben"
-    const minL = Math.min(PAD, rawMaxL);
-    const maxL = Math.max(PAD, rawMaxL);
-    const minT = Math.min(PAD, rawMaxT);
-    const maxT = Math.max(PAD, rawMaxT);
-
-    const nextL = clamp(startL + dx, minL, maxL);
-    const nextT = clamp(startT + dy, minT, maxT);
-
-    box.style.left = nextL + "px";
-    box.style.top  = nextT + "px";
-  });
-
-  const endDrag = () => {
-    if (!dragging) return;
-    dragging = false;
-    handle.style.cursor = "grab";
-  };
-
-  handle.addEventListener("pointerup", endDrag);
-  handle.addEventListener("pointercancel", endDrag);
-}
