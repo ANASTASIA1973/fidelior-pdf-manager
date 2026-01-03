@@ -3330,10 +3330,10 @@ let poEditState = null;  // merkt, ob wir eine bestehende Vorlage bearbeiten
   try {
     const o = await loadJson("objects.json");
     poObjSel.innerHTML =
-      '<option value="">(Liegenschaft wählen)</option>' +
+      '<option value="">Liegenschaft wählen</option>' +
       (o.objects || []).map(x => '<option value="'+ (x.code||"") +'">' + (x.displayName||x.code||"") + '</option>').join("");
   } catch {
-    poObjSel.innerHTML = '<option value="">(Liegenschaft wählen)</option>';
+    poObjSel.innerHTML = '<option value="">Liegenschaft wählen</option>';
   }
 
   let poRules = structuredClone(json.perObject || {});
@@ -5600,7 +5600,7 @@ async function loadObjects(){
 
     // 3) Dropdown neu aufbauen
     objSel.innerHTML = "";
-    objSel.appendChild(new Option("(Liegenschaft wählen)", ""));
+    objSel.appendChild(new Option("Liegenschaft wählen", ""));
 
     list.forEach(o => {
       const text  = o.displayName || o.code || o.scopevisioName || "";
@@ -5615,7 +5615,7 @@ async function loadObjects(){
   } catch (e){
     // Fallback, falls die Datei nicht gelesen werden konnte
     objSel.innerHTML = `
-      <option value="">(Liegenschaft wählen)</option>
+      <option value="">Liegenschaft wählen</option>
       <option value="PRIVAT">PRIVAT</option>
       <option value="FIDELIOR">FIDELIOR</option>
       <option value="ARNDTCIE">ARNDT & CIE</option>`;
