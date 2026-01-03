@@ -23,11 +23,12 @@
   --focus-ring:0 0 0 3px rgba(91,27,112,.18);
   --focus-inset:inset 0 0 0 3px rgba(91,27,112,.14);
 
-  /* Type */
-  --fs-body:clamp(12.5px,0.98vw,14px);
-  --fs-h1:clamp(20px,1.8vw,24px);
-  --fs-h2:clamp(15px,1.25vw,18px);
-  --fs-small:clamp(11.5px,0.9vw,12.5px);
+  /* Type (small + consistent) */
+  --fs-body: 12.5px;
+  --fs-small: 11.5px;
+  --fs-h2: 13px;
+  --fs-h1: 16px;
+
   --font-ui:Inter,"Segoe UI",Roboto,system-ui,Arial,sans-serif;
 
   /* Misc */

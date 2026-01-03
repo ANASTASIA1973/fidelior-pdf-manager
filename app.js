@@ -4454,69 +4454,147 @@ function buildEmailPromptDialog(defaults = {}) {
     }
   }
 
-  dlg.innerHTML = `
-    <form method="dialog" style="min-width:520px;max-width:680px">
-      <div style="padding:18px 20px;border-bottom:1px solid var(--line,#E2E8F0);display:flex;justify-content:space-between;align-items:center">
-        <strong style="font-size:16px">E-Mail versenden?</strong>
-        <button class="dlg-close" value="cancel" aria-label="Schließen" style="font-size:20px;line-height:1;border:none;background:none;cursor:pointer">×</button>
-      </div>
+dlg.innerHTML = `
+  <div class="dialog"
+       style="background:#fff;
+              border-radius:14px;
+              width:min(680px,96vw);
+              max-height:90vh;
+              display:flex;
+              flex-direction:column;
+              overflow:hidden">
 
-      <div style="padding:16px 20px;display:grid;gap:12px">
-        <p style="margin:0 0 8px 0">Die Rechnung wird gespeichert. Möchten Sie sie zusätzlich per E-Mail verschicken?</p>
+    <!-- Header -->
+    <div style="padding:18px 20px;
+                border-bottom:1px solid var(--line,#E2E8F0);
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                flex:0 0 auto">
+      <strong style="font-size:15px">E-Mail-Versand</strong>
+    <button class="dlg-close"
+        type="button"
+        aria-label="Schließen"
+        data-close
+        style="font-size:20px;
+               line-height:1;
+               border:none;
+               background:none;
+               cursor:pointer">
+  ×
+</button>
 
-        <div id="fdlEmailSection" style="display:none;gap:10px">
-          <label class="row" style="display:grid;gap:6px">
-            <span>Empfänger:</span>
-            <input id="fdlMailTo" class="input slim" list="mailBook" placeholder="name@firma.de">
-          </label>
+    </div>
 
-          <details id="fdlAdv" style="margin-top:4px">
-            <summary style="cursor:pointer">Weitere Felder (CC/BCC, Reply-To)</summary>
-            <div style="display:grid;gap:10px;margin-top:8px">
-              <label class="row" style="display:grid;gap:6px">
-                <span>CC:</span>
-                <input id="fdlMailCc" class="input slim" placeholder="optional" list="mailBook">
-              </label>
-              <label class="row" style="display:grid;gap:6px">
-                <span>BCC:</span>
-                <input id="fdlMailBcc" class="input slim" placeholder="optional" list="mailBook">
-              </label>
-              <label class="row" style="display:grid;gap:6px">
-                <span>Reply-To:</span>
-                <input id="fdlMailReply" class="input slim" placeholder="z. B. documents@fidelior.de">
-              </label>
-            </div>
-          </details>
+    <!-- SCROLL-CONTAINER -->
+    <div class="dialog-body"
+         style="padding:16px 20px;
+                display:grid;
+                gap:12px;
+                overflow:auto;
+                flex:1 1 auto">
 
-          <label class="row" style="display:grid;gap:6px">
-            <span>Betreff:</span>
-            <input id="fdlMailSubj" class="input slim" placeholder="Betreff">
-          </label>
+      <p style="margin:0 0 8px 0">
+        Das Dokument wird gespeichert. Optional kann ein E-Mail-Versand durchgeführt werden.
+      </p>
 
-          <!-- NEU: optionale Freitext-Nachricht -->
-          <label class="row" style="display:grid;gap:6px">
-            <span>Nachricht (optional):</span>
-            <textarea id="fdlMailBody" class="input" rows="3"
-              placeholder="Kurze Nachricht an den Empfänger"></textarea>
-          </label>
+      <div id="fdlEmailSection" style="display:none;gap:10px">
 
-          <div style="font-size:12px;color:#55637A;margin-top:2px">
-            Anhang: <code id="fdlMailAttachment">dokument.pdf</code>
+        <label class="row" style="display:grid;gap:6px">
+          <span>Empfänger:</span>
+          <input id="fdlMailTo"
+                 class="input slim"
+                 list="mailBook"
+                 placeholder="name@firma.de">
+        </label>
+
+        <details id="fdlAdv" style="margin-top:4px">
+          <summary style="cursor:pointer">
+            Weitere Felder (CC/BCC, Reply-To)
+          </summary>
+          <div style="display:grid;gap:10px;margin-top:8px">
+            <label class="row" style="display:grid;gap:6px">
+              <span>CC:</span>
+              <input id="fdlMailCc"
+                     class="input slim"
+                     placeholder="optional"
+                     list="mailBook">
+            </label>
+            <label class="row" style="display:grid;gap:6px">
+              <span>BCC:</span>
+              <input id="fdlMailBcc"
+                     class="input slim"
+                     placeholder="optional"
+                     list="mailBook">
+            </label>
+            <label class="row" style="display:grid;gap:6px">
+              <span>Reply-To:</span>
+              <input id="fdlMailReply"
+                     class="input slim"
+                     placeholder="z. B. documents@fidelior.de">
+            </label>
           </div>
+        </details>
 
-          <div id="fdlGentleNote" style="display:none;font-size:12px;margin-top:6px">
-            ⚠ Bitte prüfen Sie die Empfängeradresse vor dem Versand.
-          </div>
+        <label class="row" style="display:grid;gap:6px">
+          <span>Betreff:</span>
+          <input id="fdlMailSubj"
+                 class="input slim"
+                 placeholder="Betreff">
+        </label>
+
+        <label class="row" style="display:grid;gap:6px">
+          <span>Nachricht (optional):</span>
+          <textarea id="fdlMailBody"
+                    class="input"
+                    rows="3"
+                    placeholder="Kurze Nachricht an den Empfänger"></textarea>
+        </label>
+
+        <div style="font-size:12px;color:#55637A;margin-top:2px">
+          Anhang:
+          <code id="fdlMailAttachment">dokument.pdf</code>
+        </div>
+
+        <div id="fdlGentleNote"
+             style="display:none;
+                    font-size:12px;
+                    margin-top:6px">
+          ⚠ Bitte prüfen Sie die Empfängeradresse vor dem Versand.
         </div>
       </div>
 
-      <div style="padding:14px 20px;border-top:1px solid var(--line,#E2E8F0);display:flex;gap:10px;justify-content:flex-end">
-        <button id="fdlBtnSaveOnly" class="btn" type="button">Nur speichern</button>
-        <button id="fdlBtnSaveAndSend" class="btn btn-outline" type="button" value="send">Speichern & E-Mail senden</button>
+      <!-- STICKY FOOTER (IM SCROLL-CONTAINER!) -->
+      <div class="dialog-actions"
+           style="position:sticky;
+                  bottom:0;
+                  background:#fff;
+                  padding:14px 0;
+                  margin-top:16px;
+                  display:flex;
+                  gap:10px;
+                  justify-content:flex-end;
+                  border-top:1px solid var(--line,#E2E8F0);
+                  z-index:5">
+
+        <button id="fdlBtnSaveOnly"
+                class="btn"
+                type="button">
+          Nur speichern
+        </button>
+        <button id="fdlBtnSaveAndSend"
+                class="btn btn-outline"
+                type="button">
+          Speichern &amp; E-Mail senden
+        </button>
       </div>
-    </form>
-  `;
+
+    </div>
+  </div>
+`;
+
   document.body.appendChild(dlg);
+  try { makeDialogWindow(dlg, ".dialog-titlebar"); } catch {}
 
   const to   = dlg.querySelector("#fdlMailTo");
   const cc   = dlg.querySelector("#fdlMailCc");
@@ -4732,11 +4810,18 @@ if (sel.replyTo && rep && !rep.value.trim()) rep.value = String(sel.replyTo).tri
   return dlg;
 }
 
-
 // Öffnet den Dialog und gibt eine Entscheidung zurück
 function promptForEmailOnce({ attachmentName, subject, replyTo }) {
   return new Promise((resolve) => {
     const dlg = buildEmailPromptDialog();
+    // ❌ Close-Button explizit anbinden
+dlg.querySelectorAll(".dlg-close, [data-close]").forEach(btn => {
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    try { dlg.close(); } catch {}
+  });
+});
+
     dlg.__fdlPrefill({ attachmentName, subject, replyTo });
 
     // NEU: Vorlagen für die aktuelle Liegenschaft/Objekt bereitstellen
@@ -4751,10 +4836,17 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
 
     let done = false; // verhindert Doppel-Resolve
 
+    // Body-Scroll sperren, solange der Dialog offen ist
+    const __fdlPrevOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+
     const cleanup = () => {
       dlg?.removeEventListener("close", onClose);
       btnSend?.removeEventListener("click", onClickSend);
       btnOnly?.removeEventListener("click", onClickOnly);
+
+      // Body-Scroll wieder herstellen (egal wie der Dialog geschlossen wurde)
+      document.documentElement.style.overflow = __fdlPrevOverflow || "";
     };
 
     const finish = (mode, extra = {}) => {
@@ -4781,8 +4873,21 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
     const onClickSend = (e) => {
       const sec = dlg.querySelector("#fdlEmailSection");
 
-      // 1. Klick: Felder werden nur sichtbar gemacht – hier NICHT schließen
-      if (sec && sec.style.display === "none") return;
+      // 1. Klick: Felder nur sichtbar machen – NICHT schließen
+      if (sec && (sec.style.display === "none" || !sec.style.display)) {
+        e.preventDefault();
+
+        // sichtbar machen (Grid)
+        sec.style.display = "grid";
+
+        // in den Dialog scrollen (nicht die Seite)
+        const bodyWrap = dlg.querySelector(".dialog-body") || dlg;
+        requestAnimationFrame(() => {
+          try { bodyWrap.scrollTop = bodyWrap.scrollHeight; } catch {}
+        });
+
+        return;
+      }
 
       e.preventDefault();
       if (done) return;
@@ -4792,31 +4897,28 @@ function promptForEmailOnce({ attachmentName, subject, replyTo }) {
       const bcc  = dlg.querySelector("#fdlMailBcc")?.value || "";
       const subj = dlg.querySelector("#fdlMailSubj")?.value || "";
       const rep  = dlg.querySelector("#fdlMailReply")?.value || "";
-      const body = dlg.querySelector("#fdlMailBody")?.value || ""; // NEU
+      const body = dlg.querySelector("#fdlMailBody")?.value || "";
 
-      const split = s => s.split(/[;, ]+/).map(x => x.trim()).filter(Boolean);
+      const split = (s) => s.split(/[;, ]+/).map(x => x.trim()).filter(Boolean);
 
-      const extra = {
-        to:      split(to),
-        cc:      split(cc),
-        bcc:     split(bcc),
+      finish("save_and_send", {
+        to: split(to),
+        cc: split(cc),
+        bcc: split(bcc),
         subject: subj.trim(),
         replyTo: rep.trim(),
-        text:    body.trim()          // NEU: optionale Nachricht
-      };
-
-      finish("save_and_send", extra);
+        text: body.trim()
+      });
     };
 
-    btnSend.addEventListener("click", onClickSend);
-    btnOnly.addEventListener("click", onClickOnly);
-    dlg.addEventListener("close", onClose, { once: true });
+    btnSend?.addEventListener("click", onClickSend);
+    btnOnly?.addEventListener("click", onClickOnly);
+    dlg?.addEventListener("close", onClose, { once: true });
 
     if (typeof dlg.showModal === "function") dlg.showModal();
     else dlg.setAttribute("open", "open");
   });
 }
-
 
 
   /* ------------------------------ Email: Senden ---------------------------- */
@@ -6456,14 +6558,13 @@ try {
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot, { once: true });
-  } else {
-    boot();
-    try {
-      document.querySelectorAll("dialog").forEach(d => {
-        if (typeof makeDialogDraggable === "function") makeDialogDraggable(d);
-      });
-    } catch {}
-  }
+ } else {
+  boot();
+  try {
+    fdlMakeAllDialogsWindowed();
+  } catch {}
+}
+
 })();
 
 /* ================= TEIL 3: "Speichern in" – klare Checkboxen + richtiger Backup-Status ================ */
@@ -6767,3 +6868,200 @@ if (typeof loadJson === "function") {
   // danach: Email-Checkboxen neu rendern (falls Labels/Mapping erst jetzt verfügbar sind)
   try { await window.__fdlRefreshEmailCheckboxes?.(); } catch {}
 })();
+/* =========================================================
+   Draggable + Resizable for dialogs
+   - Works for <dialog> and custom overlay (#fdlConnDlg)
+   - Does NOT affect native OS pickers (showDirectoryPicker)
+   ========================================================= */
+
+function makeDialogWindow(dlg, handleSelector = ".dialog-titlebar") {
+  if (!dlg || dlg.__fdlWindowed) return;
+  dlg.__fdlWindowed = true;
+
+  // ---- find handle (titlebar) ----
+  const handle =
+    dlg.querySelector(handleSelector) ||
+    dlg.querySelector(".dialog-titlebar") ||
+    dlg;
+
+  // ---- ensure positioning works ----
+  // <dialog> defaults to centered; once moved we switch to fixed positioning.
+  const setFixedIfNeeded = () => {
+    const st = dlg.style;
+    if (!st.position) st.position = "fixed";
+    // IMPORTANT: remove default centering behavior
+    if (st.inset === "") st.inset = "auto";
+    st.margin = "0";
+  };
+
+  // ---- DRAG ----
+  let drag = null;
+
+  const isInteractive = (el) => {
+    if (!el) return false;
+    return !!el.closest("input, textarea, select, button, a, label, summary, details");
+  };
+
+  const startDrag = (e) => {
+    // on small screens: don't drag (prevents accidental moves)
+    if (window.matchMedia("(max-width: 720px)").matches) return;
+    if (e.button !== undefined && e.button !== 0) return; // left click only
+    if (isInteractive(e.target)) return;
+
+    // if dialog is centered, lock current position first
+    const r = dlg.getBoundingClientRect();
+    setFixedIfNeeded();
+    dlg.style.left = r.left + "px";
+    dlg.style.top  = r.top  + "px";
+
+    drag = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startL: r.left,
+      startT: r.top
+    };
+
+    handle.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  };
+
+  const moveDrag = (e) => {
+    if (!drag) return;
+
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // current size (fallback to bounding box)
+    const r = dlg.getBoundingClientRect();
+    const w = r.width;
+    const h = r.height;
+
+    // clamp inside viewport with small padding
+    const pad = 8;
+    let nextL = drag.startL + dx;
+    let nextT = drag.startT + dy;
+
+    nextL = Math.max(pad, Math.min(nextL, vw - w - pad));
+    nextT = Math.max(pad, Math.min(nextT, vh - h - pad));
+
+    dlg.style.left = nextL + "px";
+    dlg.style.top  = nextT + "px";
+  };
+
+  const endDrag = (e) => {
+    if (!drag) return;
+    drag = null;
+    try { handle.releasePointerCapture?.(e.pointerId); } catch {}
+  };
+
+  handle.style.cursor = handle.style.cursor || "move";
+  handle.addEventListener("pointerdown", startDrag);
+  window.addEventListener("pointermove", moveDrag);
+  window.addEventListener("pointerup", endDrag);
+
+  // ---- RESIZE (bottom-right grip) ----
+  // We attach a small grip into the visible dialog box.
+  // For <dialog> markup you have: <dialog><div class="dialog">...</div></dialog>
+  // For #fdlConnDlg you have: <div id="fdlConnDlg"><div class="dialog">...</div></div>
+  const box =
+    dlg.querySelector(".dialog") || // your inner wrapper
+    dlg;
+
+  // make sure box can host absolute children
+  const boxStyle = getComputedStyle(box);
+  if (boxStyle.position === "static") box.style.position = "relative";
+
+  // create grip
+  const grip = document.createElement("div");
+  grip.className = "fdl-resize-grip";
+  grip.title = "Größe ändern";
+  Object.assign(grip.style, {
+    position: "absolute",
+    right: "8px",
+    bottom: "8px",
+    width: "14px",
+    height: "14px",
+    cursor: "nwse-resize",
+    borderRight: "2px solid rgba(0,0,0,.25)",
+    borderBottom: "2px solid rgba(0,0,0,.25)",
+    borderRadius: "2px",
+    opacity: "0.65",
+    userSelect: "none"
+  });
+  box.appendChild(grip);
+
+  let resize = null;
+
+  const startResize = (e) => {
+    // on small screens: don't resize (layout should be full-width anyway)
+    if (window.matchMedia("(max-width: 720px)").matches) return;
+    if (e.button !== undefined && e.button !== 0) return;
+
+    const r = box.getBoundingClientRect();
+    setFixedIfNeeded();
+
+    resize = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: r.width,
+      startH: r.height
+    };
+    grip.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  };
+
+  const moveResize = (e) => {
+    if (!resize) return;
+
+    const dx = e.clientX - resize.startX;
+    const dy = e.clientY - resize.startY;
+
+    const minW = 420;
+    const minH = 220;
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // keep some padding to viewport
+    const pad = 16;
+
+    let nextW = resize.startW + dx;
+    let nextH = resize.startH + dy;
+
+    nextW = Math.max(minW, Math.min(nextW, vw - pad));
+    nextH = Math.max(minH, Math.min(nextH, vh - pad));
+
+    // apply to the visible box, not the backdrop
+    box.style.width  = Math.round(nextW) + "px";
+    box.style.height = Math.round(nextH) + "px";
+
+    // ensure scroll works
+    box.style.maxWidth  = "none";
+    box.style.maxHeight = "none";
+  };
+
+  const endResize = (e) => {
+    if (!resize) return;
+    resize = null;
+    try { grip.releasePointerCapture?.(e.pointerId); } catch {}
+  };
+
+  grip.addEventListener("pointerdown", startResize);
+  window.addEventListener("pointermove", moveResize);
+  window.addEventListener("pointerup", endResize);
+}
+
+// Convenience: apply to all dialogs in DOM
+function fdlMakeAllDialogsWindowed() {
+  document.querySelectorAll("dialog").forEach(d => {
+    // your dialogs consistently have .dialog-titlebar inside
+    makeDialogWindow(d, ".dialog-titlebar");
+  });
+
+  // custom overlay: #fdlConnDlg uses .dialog-titlebar in inner HTML
+  const conn = document.getElementById("fdlConnDlg");
+  if (conn) makeDialogWindow(conn, ".dialog-titlebar");
+}

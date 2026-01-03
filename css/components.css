@@ -399,10 +399,7 @@ button{ border:0; background:none; outline: none; }
   font-weight: 600;
 }
 /* Grundschrift der Fidelior-App etwas verkleinern */
-body {
-  font-size: 13px;
-  line-height: 1.4;
-}
+
 .required-star {
   margin-left: 0.25rem;
   color: #e11d48;         /* rot */
@@ -488,4 +485,78 @@ details .pay-status{
   margin-top: 1rem;
   padding-top: .75rem;
   border-top: 1px solid var(--border);
+}
+/* Dialog Typography – enforce small, consistent sizing */
+dialog,
+dialog *{
+  font-size: var(--fs-body);
+}
+/* ===========================
+   Mail-Dialog: Scroll im Dialog
+   =========================== */
+
+dialog[open]{
+  padding: 0;
+  border: 0;
+  max-width: 92vw;
+  /* wichtig: Dialog selbst darf nicht höher als Viewport werden */
+  max-height: 86vh;
+  overflow: hidden;            /* außen keine Scrollbar */
+  border-radius: 16px;
+}
+
+/* falls dein inneres Card-Wrapper .dialog heißt (bei dir üblich) */
+dialog[open] .dialog{
+  max-height: 86vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* der Body scrollt */
+dialog[open] .dialog-body{
+  overflow: auto;
+  min-height: 0;               /* wichtig für flex */
+}
+
+/* Buttons bleiben sichtbar (optional, aber sehr empfehlenswert) */
+dialog[open] .dialog-actions{
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  padding: .9rem 1.1rem;
+  border-top: 1px solid var(--border);
+}
+.fdl-dialog{
+  width: min(720px, 92vw);
+  max-height: 90vh;
+  border-radius: var(--radius);
+  padding: 0;
+  overflow: hidden; /* wichtig */
+}
+
+.fdl-dialog .dialog-header{
+  padding: .9rem 1rem;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.fdl-dialog .dialog-body{
+  padding: 1rem;
+  overflow-y: auto;
+  max-height: calc(90vh - 140px); /* Header + Footer */
+}
+
+.fdl-dialog .dialog-actions{
+  position: sticky;
+  bottom: 0;
+  padding: .8rem 1rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.dialog-actions{
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  z-index: 5;
 }
