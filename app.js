@@ -2245,11 +2245,16 @@ function resolveTargets(){
   }
 
      // ---------- pCloud: Sammelordner (Backup nur, wenn Checkbox aktiv) ----------
-  if (wantBackup && pcloudRoot){
-    const seg = ["FIDELIOR", (typeof PCL_COLLECT_FOLDER === "string" ? PCL_COLLECT_FOLDER : "DMS BACKUP PCLOUD")];
-    out.pcloudBucket.root = pcloudRoot;
-    out.pcloudBucket.seg  = seg;
-  }
+ if (wantBackup && pcloudRoot){
+  const seg = [
+    "FIDELIOR",
+    (typeof PCL_COLLECT_FOLDER === "string" ? PCL_COLLECT_FOLDER : "DMS BACKUP PCLOUD"),
+    year
+  ];
+  out.pcloudBucket.root = pcloudRoot;
+  out.pcloudBucket.seg  = seg;
+}
+
   return out;
 }      
 
