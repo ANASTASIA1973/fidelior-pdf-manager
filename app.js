@@ -2246,11 +2246,11 @@ function resolveTargets(){
 
      // ---------- pCloud: Sammelordner (Backup nur, wenn Checkbox aktiv) ----------
  if (wantBackup && pcloudRoot){
-  const seg = [
-    "FIDELIOR",
-    (typeof PCL_COLLECT_FOLDER === "string" ? PCL_COLLECT_FOLDER : "DMS BACKUP PCLOUD"),
-    year
-  ];
+const seg = [
+  "FIDELIOR",
+  (typeof PCL_COLLECT_FOLDER === "string" ? PCL_COLLECT_FOLDER : "DMS BACKUP PCLOUD"),
+  year
+];
   out.pcloudBucket.root = pcloudRoot;
   out.pcloudBucket.seg  = seg;
 }
@@ -5281,7 +5281,7 @@ async function handleSaveFlow(mode = "save_only") {
       if (!root || !Array.isArray(seg)) return;
       if (seg.length) {
         try {
-          await ensureDirPath(root, seg);
+          await ensureDirWithPrompt(root, seg);
         } catch (e) {
           console.warn("ensureDirPath fehlgeschlagen:", e);
         }
