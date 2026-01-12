@@ -140,8 +140,6 @@ function __fdlRemoveInboxListItemByName(name) {
   if (li) li.remove();
 }
 
-
-
 // ===== Persistenz für Directory-Handles (IndexedDB) =====
 const FDL_IDB_DB = "fdl-handles-v1";
 const FDL_IDB_STORE = "handles";
@@ -159,6 +157,7 @@ function idbOpen() {
     req.onerror = () => reject(req.error);
   });
 }
+
 async function idbSet(key, val) {
   const db = await idbOpen();
   await new Promise((res, rej) => {
@@ -169,6 +168,7 @@ async function idbSet(key, val) {
   });
   db.close();
 }
+
 async function idbGet(key) {
   const db = await idbOpen();
   const val = await new Promise((res, rej) => {
@@ -179,6 +179,7 @@ async function idbGet(key) {
   });
   db.close();
   return val;
+}
 
 async function idbDel(key) {
   const db = await idbOpen();
@@ -189,7 +190,6 @@ async function idbDel(key) {
     tx.onerror = () => rej(tx.error);
   });
   db.close();
-}
 }
 
 
@@ -220,6 +220,7 @@ function getOverrideHandleSync(id){
 try { setTimeout(() => { refreshOverrideCache().catch(()=>{}); }, 0); } catch {}
 
 // Speichern der verbundenen Handles
+// Speichern der verbundenen Handles
 async function saveBoundHandles() {
   try {
     await idbSet("scopeRootHandle",     scopeRootHandle     || null);
@@ -228,19 +229,47 @@ async function saveBoundHandles() {
     // optional mitpersistieren:
     await idbSet("pcloudRootHandle",    pcloudRootHandle    || null);
     await idbSet("configDirHandle",     configDirHandle     || null);
+
+    // --- NEU: Snapshot-Meta für Diagnose ---
+    const hadAny = !!(
+      scopeRootHandle ||
+      inboxRootHandle ||
+      processedRootHandle ||
+      pcloudRootHandle ||
+      configDirHandle
+    );
+
+    await idbSet("meta:lastHandlesSnapshot", {
+      ts: Date.now(),
+      hadAny
+    });
   } catch (e) {
     console.warn("saveBoundHandles failed:", e);
   }
 }
 
+
+// Wiederherstellen (beim Boot)
 // Wiederherstellen (beim Boot)
 async function restoreBoundHandles() {
   try {
+    // --- NEU: Meta-Snapshot laden (falls vorhanden) ---
+    let lastMeta = null;
+    try {
+      lastMeta = await idbGet("meta:lastHandlesSnapshot");
+    } catch {
+      // Meta darf die Wiederherstellung nie komplett blockieren
+      lastMeta = null;
+    }
+
     const s = await idbGet("scopeRootHandle");
     const i = await idbGet("inboxRootHandle");
     const b = await idbGet("processedRootHandle");
     const p = await idbGet("pcloudRootHandle");
     const c = await idbGet("configDirHandle");
+
+    const anyHandles = !!(s || i || b || p || c);
+    const hadSnapshotBefore = !!(lastMeta && lastMeta.hadAny);
 
     // WICHTIG: immer beide setzen – lokal und window.*
     if (s) { scopeRootHandle     = s; window.scopeRootHandle     = s; }
@@ -248,6 +277,30 @@ async function restoreBoundHandles() {
     if (b) { processedRootHandle = b; window.processedRootHandle = b; }
     if (p) { pcloudRootHandle    = p; window.pcloudRootHandle    = p; }
     if (c) { syncConfigHandle(c); }
+
+    // --- NEU: Diagnose, falls der Browser alles weggeworfen hat ---
+    // Fall: Früher gab es mindestens eine Verbindung (hadAny === true),
+    // jetzt kommt NICHTS mehr aus der IndexedDB zurück.
+    if (hadSnapshotBefore && !anyHandles) {
+      window.__fdlStorageDiag = window.__fdlStorageDiag || {};
+      window.__fdlStorageDiag.handlesCleared = true;
+      window.__fdlStorageDiag.lastSnapshotTs = lastMeta.ts || null;
+
+      console.warn(
+        "[FDL] Hinweis: Es gab früher gespeicherte Verbindungen," +
+        " aber die IndexedDB liefert jetzt keine Handles mehr zurück." +
+        " Sehr wahrscheinlich werden die lokalen Daten durch Browser-Einstellungen" +
+        " oder Sicherheitssoftware beim Beenden gelöscht."
+      );
+
+      try {
+        toast(
+          "Hinweis: Ihr Browser hat zuvor gespeicherte Verbindungen gelöscht. " +
+          "Bitte prüfen Sie die Datenschutz-/Sicherheitseinstellungen.",
+          9000
+        );
+      } catch {}
+    }
 
     // Permissions prüfen (ohne Popup)
     const check = async (h) => {
@@ -265,7 +318,10 @@ async function restoreBoundHandles() {
     // Guard: Bearbeitet darf nicht innerhalb der Inbox liegen
     if (okInbox && okBearb && inboxRootHandle && processedRootHandle) {
       try { await assertProcessedNotInsideInbox(inboxRootHandle, processedRootHandle); }
-      catch { processedRootHandle = null; window.processedRootHandle = null; }
+      catch {
+        processedRootHandle = null;
+        window.processedRootHandle = null;
+      }
     }
 
     paintChips();
@@ -274,10 +330,11 @@ async function restoreBoundHandles() {
   } catch (e) {
     console.warn("restoreBoundHandles failed:", e);
   }
-      // sicherheitshalber Config aus allen Quellen zusammenziehen
-    syncConfigHandle();
 
+  // sicherheitshalber Config aus allen Quellen zusammenziehen
+  try { syncConfigHandle(); } catch {}
 }
+
 // --- Root-Verbindungen direkt herstellen (mit echtem System-Picker) ---
 // --- PICKER & BINDING: pCloud ---
 // ---------- Hilfsfunktion: Picker sicher mit User-Geste starten ----------
@@ -5854,7 +5911,6 @@ if (!window.__FDL_BOOT_BOUND__) {
   }
 }
 
-
 // --- DEBUG-Export für Konsole ---
 try {
   window.FDLDBG = {
@@ -5864,7 +5920,9 @@ try {
         inboxRoot:        !!inboxRootHandle,
         bearbeitetRoot:   !!processedRootHandle,
         currentInboxFileName,
-        hasInboxHandle:   !!currentInboxFileHandle
+        hasInboxHandle:   !!currentInboxFileHandle,
+        // NEU: Diagnose-Objekt, falls gesetzt
+        storageDiag: window.__fdlStorageDiag || null
       };
     },
     move: moveInboxToProcessed
@@ -5873,6 +5931,7 @@ try {
 } catch (e) {
   console.warn("FDLDBG-Export fehlgeschlagen:", e);
 }
+
 
 try {
   window.FDLDBG = window.FDLDBG || {};
@@ -6377,15 +6436,40 @@ try {
     if (changed) window.fdlRefreshConnectionsUI?.();
   }
 
-  // ---- Speicher als „dauerhaft“ anfragen
-  async function tryPersist(){
-    try {
-      if (navigator.storage?.persist) {
-        const persisted = await navigator.storage.persisted?.();
-        if (!persisted) await navigator.storage.persist();
-      }
-    } catch {}
+// ---- Speicher als „dauerhaft“ anfragen + Nutzer-Hinweis bei Ablehnung
+async function tryPersist() {
+  try {
+    if (!navigator.storage?.persist || !navigator.storage?.persisted) {
+      return;
+    }
+
+    const already = await navigator.storage.persisted();
+    if (already) {
+      console.log("[FDL] Storage ist bereits persistent (Browser behält Daten dauerhaft).");
+      return;
+    }
+
+    const granted = await navigator.storage.persist();
+    console.log("[FDL] navigator.storage.persist() Ergebnis:", granted);
+
+    if (!granted) {
+      // Browser lehnt "dauerhaft" ab → Hinweis für den Nutzer
+      try {
+        toast(
+          "Hinweis: Ihr Browser speichert lokale Daten möglicherweise nicht dauerhaft. " +
+          "Typische Ursachen: privater Modus, automatische Löschung von Websitedaten beim Beenden " +
+          "oder Sicherheitssoftware, die Browserdaten bereinigt. " +
+          "Bitte prüfen Sie in den Browser-Einstellungen, ob Websitedaten automatisch gelöscht werden " +
+          "und ob diese Seite als Ausnahme zugelassen werden kann.",
+          12000
+        );
+      } catch {}
+    }
+  } catch (e) {
+    console.warn("[FDL] tryPersist() fehlgeschlagen:", e);
   }
+}
+
 
   // ---- Hooks einbauen: nach JEDER erfolgreichen Wahl speichern
   const _oldPick = window.openConnectionsCenter; // nur um sicherzugehen, dass Teil 1 geladen ist
