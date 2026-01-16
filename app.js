@@ -1757,9 +1757,20 @@ if (assignmentsCfg && Array.isArray(assignmentsCfg.patterns) && assignmentsCfg.p
       }
     }
 
-    if (typeof updateSubfolderOptions === "function") {
-      await updateSubfolderOptions({ silent: !hit.subfolder });
+       if (typeof updateSubfolderOptions === "function") {
+      // Aktuell gesetzte Liegenschaft ermitteln
+      const codeNow    = (objSel?.value || "").trim();
+
+      // Sonderfall: wenn durch Auto-Zuordnung B75 gesetzt ist und es sich um eine Rechnung handelt,
+      // soll das B75-Dropdown (D1/D4) IMMER angezeigt werden – auch ohne hit.subfolder.
+      const forceShow  = (codeNow === "B75" && isInvoice());
+
+      // silent nur dann, wenn KEIN Unterordner aus der Regel kommt UND nicht B75-Rechnung:
+      const wantSilent = !hit.subfolder && !forceShow;
+
+      await updateSubfolderOptions({ silent: wantSilent });
     }
+
 
     if (hit.subfolder && subSel) {
       const wanted = String(hit.subfolder).trim();
