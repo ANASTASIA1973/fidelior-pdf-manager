@@ -195,15 +195,32 @@ function injectCSS() {
    HEADER BUTTON
    ════════════════════════════════════════════ */
 #fdl-av3-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--font-ui, 'Inter', system-ui); font-size: 11.5px; font-weight: 600;
-  padding: 5px 13px; border-radius: 8px; cursor: pointer;
-  border: 1.5px solid rgba(255,255,255,.2);
-  background: rgba(255,255,255,.08); color: #fff;
-  transition: background .15s, border-color .15s; white-space: nowrap; letter-spacing: .01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui, 'Inter', system-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 6px 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid #D9DDE3;
+  background: #FFFFFF;
+  color: #5B1B70;
+  transition: background .15s, border-color .15s, color .15s;
+  white-space: nowrap;
+  letter-spacing: .01em;
 }
-#fdl-av3-btn:hover { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.35); }
-#fdl-av3-btn svg { opacity: .85; }
+
+#fdl-av3-btn:hover {
+  background: #F7F2FA;
+  border-color: #C8B3D3;
+  color: #4A155C;
+}
+
+#fdl-av3-btn svg {
+  opacity: 1;
+}
 
 /* ════════════════════════════════════════════
    OVERLAY FULLSCREEN
