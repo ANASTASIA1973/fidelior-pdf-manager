@@ -1804,6 +1804,9 @@ if (assignmentsCfg && Array.isArray(assignmentsCfg.patterns) && assignmentsCfg.p
     if (found.length)    toast(`<strong>Automatisch erkannt</strong><br>${found.join(" · ")}`, 2800);
     if (appliedMsg)      toast(appliedMsg, 2200);
 
+    // KI-Absender-Erkennung (sicher – tut nichts wenn nicht geladen)
+    try { window.fdlKiOnOcr?.(txt, lines, assignmentsCfg); } catch {}
+
     // am Ende UI aktualisieren
     refreshPreview();
   } catch (e) {
