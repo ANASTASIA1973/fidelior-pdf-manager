@@ -48,22 +48,7 @@ function flag(newId, oldId){
 const pad2 = n => (n<10?"0":"")+n;
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
-function suggestEgyoSuffix(){
-  const d = dispToIso(invDateEl?.value) || dispToIso(recvDateEl?.value);
-  if(!d) return "";
 
-  const dt = new Date(d);
-  const yy = String(dt.getFullYear()).slice(2);
-  const mm = String(dt.getMonth()+1).padStart(2,"0");
-  const dd = String(dt.getDate()).padStart(2,"0");
-
-  const months = [
-    "Januar","Februar","Maerz","April","Mai","Juni",
-    "Juli","August","September","Oktober","November","Dezember"
-  ];
-
-  return `${yy}${mm}${dd}_${months[dt.getMonth()]}`;
-}
 // pCloud Sammelordner (unterhalb des verbundenen pCloud-Roots)
 const PCL_COLLECT_FOLDER = "DMS BACKUP PCLOUD";
 
@@ -501,19 +486,7 @@ let objectsCfg=null, docTypesCfg=null, emailsCfg=null, assignmentsCfg=null, stam
  const subRow=$("#subfolderRow"), subSel=$("#genericSubfolder"), egyoSuffixEl=$("#egyoSuffixInput");
  egyoSuffixEl?.addEventListener("input", ()=> refreshPreview());
 egyoSuffixEl?.addEventListener("change", ()=> refreshPreview());
-invDateEl?.addEventListener("change", ()=>{
-  if(objSel?.value === "EGYO" && !egyoSuffixEl.value){
-    egyoSuffixEl.value = suggestEgyoSuffix();
-    refreshPreview();
-  }
-});
 
-recvDateEl?.addEventListener("change", ()=>{
-  if(objSel?.value === "EGYO" && !egyoSuffixEl.value){
-    egyoSuffixEl.value = suggestEgyoSuffix();
-    refreshPreview();
-  }
-});
   const fileNamePrev=$("#fileNamePreview"), targetPrev=$("#targetPreview");
   const amountLabel = document.querySelector("label[for='amountInput']");
   const amountStar  = document.getElementById("amountRequiredStar");
@@ -1980,9 +1953,6 @@ if (code === "EGYO" && invoice) {
 
   if (egyoSuffixEl) {
     egyoSuffixEl.style.display = "block";
-    if (!egyoSuffixEl.value) {
-      egyoSuffixEl.value = suggestEgyoSuffix();
-    }
   }
 
   if (subHint) {
