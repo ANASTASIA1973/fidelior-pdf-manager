@@ -483,7 +483,9 @@ let objectsCfg=null, docTypesCfg=null, emailsCfg=null, assignmentsCfg=null, stam
   const amountEl=$("#amountInput"), senderEl=$("#senderInput");
   const recvDateEl=$("#receivedDate"), invDateEl=$("#invoiceDate"), invNoEl=$("#invoiceNo");
   const typeSel=$("#docTypeSelect"), objSel=$("#objectSelect");
-  const subRow=$("#subfolderRow"), subSel=$("#genericSubfolder");
+ const subRow=$("#subfolderRow"), subSel=$("#genericSubfolder"), egyoSuffixEl=$("#egyoSuffixInput");
+ egyoSuffixEl?.addEventListener("input", ()=> refreshPreview());
+egyoSuffixEl?.addEventListener("change", ()=> refreshPreview());
   const fileNamePrev=$("#fileNamePreview"), targetPrev=$("#targetPreview");
   const amountLabel = document.querySelector("label[for='amountInput']");
   const amountStar  = document.getElementById("amountRequiredStar");
@@ -1831,7 +1833,7 @@ function computeFileNameAuto() {
   const reNummer  = (invNoEl?.value || "").trim();            // RE-/Rechnungsnummer (roh)
   const objCode   = (objSel?.value  || "").trim();            // z. B. "EGYO" / "B75" ...
   const sub       = (subSel?.value  || "").trim();            // Unterordner (für B75-Sonderfall)
-
+const egyoZusatz = (egyoSuffixEl?.value || "").trim();
   // Objekt-/Liegenschafts-Part wie bisher (ARNDT & CIE fix, B75-D1/D4)
   let liegenschaft = (() => {
     const c = String(objCode).toUpperCase();
@@ -1860,7 +1862,25 @@ function computeFileNameAuto() {
       rePart = id;                  // z.B. "RE1244", "RG-2025-0317", "W7-55321"
     }
   }
+  // EGYO-Sonderformat nach Handloser-System:
+  // [Betrag]_[Absender]_[Zusatz]_[YYMMDD].pdf
+  if (isInvoice() && /^EGYO$/i.test(objCode)) {
+    const datumIso =
+      dispToIso(invDateEl?.value) ||
+      dispToIso(recvDateEl?.value) ||
+      new Date().toISOString().slice(0, 10);
 
+    const datumKurz = datumIso.slice(2).replace(/-/g, ""); // YYMMDD
+
+    const parts = [];
+    if (includeAmount) parts.push(betragRaw);
+    if (absender) parts.push(absender);
+    if (egyoZusatz) parts.push(egyoZusatz);
+    parts.push(datumKurz);
+
+    const base = parts.filter(Boolean).join("_") || "dokument";
+    return base + ".pdf";
+  }
   // =======================
   // Rechnung:
   //   [Betrag]_[Liegenschaft]_[Absender]_[RE-Teil]_[JJJJ.MM.TT].pdf
@@ -1916,10 +1936,33 @@ async function updateSubfolderOptions({ silent = false } = {}) {
   subRow.style.display = "none";
   subSel.innerHTML = "";
   if (subHint) subHint.style.display = "none";
+  if (egyoSuffixEl) {
+  egyoSuffixEl.style.display = "none";
+}
 
   // PRAGMATIK: Für PRV/ohne Code nichts anzeigen
   if (!code || code === "PRIVAT") return;
+  // ---- Sonderfall EGYO (nur bei Rechnung, nur für Dateinamen) ----
+  if (code === "EGYO" && invoice) {
+    if (subLabel) subLabel.textContent = "Zusatz im Dateinamen";
 
+    subSel.innerHTML = "";
+    subSel.style.display = "none";
+
+    if (egyoSuffixEl) {
+      egyoSuffixEl.style.display = "block";
+    }
+
+    if (subHint) {
+      subHint.innerHTML =
+        'Dieser Zusatz steuert nur den Dateinamen, z.&nbsp;B. <code>Marina_GU</code> oder <code>Strom_LP_185</code>.' +
+        ' Die Ablage erfolgt weiterhin im normalen EGYO-Ordner.';
+      subHint.style.display = "block";
+    }
+
+    if (!silent) subRow.style.display = "grid";
+    return;
+  }
   // ---- Sonderfall B75 (nur bei Rechnung, nur für Dateinamen) ----
   if (code === "B75" && invoice) {
     const prev = (subSel.value || "").trim();
@@ -1951,8 +1994,11 @@ async function updateSubfolderOptions({ silent = false } = {}) {
     if (!silent) subRow.style.display = "grid";
     return;
   }
-
+    subSel.style.display = "";
+    if (egyoSuffixEl) egyoSuffixEl.style.display = "none";
   // ---- alle anderen Objekte: echter Unterordner ----
+    subSel.style.display = "";
+  if (egyoSuffixEl) egyoSuffixEl.style.display = "none";
   if (subLabel) subLabel.textContent = "Unterordner";
   if (subHint) {
     subHint.textContent =
@@ -5609,7 +5655,7 @@ function hardReset(){
     lastBlobUrl = null;
   }
 
-  [amountEl, invNoEl, senderEl].forEach(el => {
+ [amountEl, invNoEl, senderEl, egyoSuffixEl].forEach(el => {
     if (!el) return;
     el.value = "";
     el.dataset.raw = "";
@@ -5627,7 +5673,8 @@ function hardReset(){
 
   if (subSel){  subSel.innerHTML = ""; }
   if (subRow){  subRow.style.display = "none"; }
-
+if (egyoSuffixEl){ egyoSuffixEl.value = ""; egyoSuffixEl.style.display = "none"; }
+if (subSel){ subSel.style.display = ""; }
   if (fileNameInput){
     if (fileNameInput.dataset.mode !== "manual") fileNameInput.value = "";
     fileNameInput.dataset.mode = "auto";
