@@ -1968,78 +1968,82 @@ async function updateSubfolderOptions({ silent = false } = {}) {
   egyoSuffixEl.style.display = "none";
 }
 
-  // PRAGMATIK: Für PRV/ohne Code nichts anzeigen
-  if (!code || code === "PRIVAT") return;
-  // ---- Sonderfall EGYO (nur bei Rechnung, nur für Dateinamen) ----
-  if (code === "EGYO" && invoice) {
-    if (subLabel) subLabel.textContent = "Zusatz im Dateinamen";
+// PRAGMATIK: Für PRV/ohne Code nichts anzeigen
+if (!code || code === "PRIVAT") return;
 
-    subSel.innerHTML = "";
-    subSel.style.display = "none";
+// ---- Sonderfall EGYO (nur bei Rechnung, nur für Dateinamen) ----
+if (code === "EGYO" && invoice) {
+  if (subLabel) subLabel.textContent = "Zusatz im Dateinamen";
 
-   if (egyoSuffixEl) {
-  egyoSuffixEl.style.display = "block";
-  if (!egyoSuffixEl.value) {
-    egyoSuffixEl.value = suggestEgyoSuffix();
-  }
-}
+  subSel.innerHTML = "";
+  subSel.style.display = "none";
 
-    if (subHint) {
-      subHint.innerHTML =
-        'Dieser Zusatz steuert nur den Dateinamen, z.&nbsp;B. <code>Marina_GU</code> oder <code>Strom_LP_185</code>.' +
-        ' Die Ablage erfolgt weiterhin im normalen EGYO-Ordner.';
-      subHint.style.display = "block";
+  if (egyoSuffixEl) {
+    egyoSuffixEl.style.display = "block";
+    if (!egyoSuffixEl.value) {
+      egyoSuffixEl.value = suggestEgyoSuffix();
     }
-
-    if (!silent) subRow.style.display = "grid";
-    return;
   }
-  // ---- Sonderfall B75 (nur bei Rechnung, nur für Dateinamen) ----
-  if (code === "B75" && invoice) {
-    const prev = (subSel.value || "").trim();
-    const opts = [
-      { value: "",   label: "(kein Unterordner)" },
-      { value: "D1", label: "D1" },
-      { value: "D4", label: "D4" }
-    ];
 
-    subSel.innerHTML = opts
-      .map(o => `<option value="${o.value}">${o.label}</option>`)
-      .join("");
-
-    if (opts.some(o => o.value === prev)) {
-      subSel.value = prev;
-    } else {
-      subSel.value = "";
-    }
-
-    // Label + Erklärung für B75
-    if (subLabel) subLabel.textContent = "Zusatz im Dateinamen";
-    if (subHint) {
-      subHint.innerHTML =
-        'Diese Auswahl steuert nur den Dateinamen, z.&nbsp;B. <code>B75-D1-…</code>.' +
-        ' Die Ablage erfolgt immer im Ordner „Rechnungsbelege“ der Liegenschaft B75.';
-      subHint.style.display = "block";
-    }
-
-    if (!silent) subRow.style.display = "grid";
-    return;
-  }
-    subSel.style.display = "";
-    if (egyoSuffixEl) egyoSuffixEl.style.display = "none";
-  // ---- alle anderen Objekte: echter Unterordner ----
-    subSel.style.display = "";
-  if (egyoSuffixEl) egyoSuffixEl.style.display = "none";
-  if (subLabel) subLabel.textContent = "Unterordner";
   if (subHint) {
-    subHint.textContent =
-      "Hier kannst du einen Unterordner innerhalb der Liegenschaft auswählen. " +
-      "Er beeinflusst Ablagepfad und Dateinamen.";
+    subHint.innerHTML =
+      'Dieser Zusatz steuert nur den Dateinamen, z.&nbsp;B. <code>Marina_GU</code> oder <code>Strom_LP_185</code>.' +
+      ' Die Ablage erfolgt weiterhin im normalen EGYO-Ordner.';
     subHint.style.display = "block";
   }
 
-  // Sichtbarkeits-Flag statt mehrfacher DOM-Schalter
-  let show = false;
+  if (!silent) subRow.style.display = "grid";
+  return;
+}
+
+// ---- Sonderfall B75 (nur bei Rechnung, nur für Dateinamen) ----
+if (code === "B75" && invoice) {
+  const prev = (subSel.value || "").trim();
+  const opts = [
+    { value: "",   label: "(kein Unterordner)" },
+    { value: "D1", label: "D1" },
+    { value: "D4", label: "D4" }
+  ];
+
+  subSel.innerHTML = opts
+    .map(o => `<option value="${o.value}">${o.label}</option>`)
+    .join("");
+
+  if (opts.some(o => o.value === prev)) {
+    subSel.value = prev;
+  } else {
+    subSel.value = "";
+  }
+
+  subSel.style.display = "";
+  if (egyoSuffixEl) egyoSuffixEl.style.display = "none";
+
+  if (subLabel) subLabel.textContent = "Zusatz im Dateinamen";
+  if (subHint) {
+    subHint.innerHTML =
+      'Diese Auswahl steuert nur den Dateinamen, z.&nbsp;B. <code>B75-D1-…</code>.' +
+      ' Die Ablage erfolgt immer im Ordner „Rechnungsbelege“ der Liegenschaft B75.';
+    subHint.style.display = "block";
+  }
+
+  if (!silent) subRow.style.display = "grid";
+  return;
+}
+
+// ---- alle anderen Objekte: echter Unterordner ----
+subSel.style.display = "";
+if (egyoSuffixEl) egyoSuffixEl.style.display = "none";
+
+if (subLabel) subLabel.textContent = "Unterordner";
+if (subHint) {
+  subHint.textContent =
+    "Hier kannst du einen Unterordner innerhalb der Liegenschaft auswählen. " +
+    "Er beeinflusst Ablagepfad und Dateinamen.";
+  subHint.style.display = "block";
+}
+
+// Sichtbarkeits-Flag statt mehrfacher DOM-Schalter
+let show = false;
 
   // ---- Spezialfall FIDELIOR (nur bei Nicht-Rechnung, pCloud-Verwaltung) ----
   if (code === "FIDELIOR") {
