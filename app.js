@@ -5627,6 +5627,19 @@ async function handleSaveFlow(mode = "save_only") {
       5000
     );
 
+    // Addon-Hook: Aufgaben & Dashboard (sicher – tut nichts wenn Addon nicht geladen)
+    try {
+      window.fdlOnFileSaved?.({
+        fileName:    safeName,
+        objectCode:  objSel?.value   || "",
+        objectName:  objSel?.options[objSel.selectedIndex]?.textContent || objSel?.value || "",
+        docType:     typeSel?.options[typeSel.selectedIndex]?.textContent || typeSel?.value || "",
+        amount:      amountEl?.value  || "",
+        invoiceDate: invDateEl?.value || "",
+        targets:     successTargets,
+      });
+    } catch (_addonErr) { /* Addon-Fehler niemals in die Ablage-Logik durchlassen */ }
+
     if (typeof hardReset === "function") {
       hardReset();
     }
