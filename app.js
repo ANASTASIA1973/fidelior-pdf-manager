@@ -1864,7 +1864,7 @@ const egyoZusatz = (egyoSuffixEl?.value || "").trim();
     }
   }
   // EGYO-Sonderformat nach Handloser-System:
-  // [Betrag]_[Absender]_[Zusatz]_[YYMMDD].pdf
+ // [Betrag]_[Absender]_[YYMMDD]_[Zusatz].pdf
   if (isInvoice() && /^EGYO$/i.test(objCode)) {
     const datumIso =
       dispToIso(invDateEl?.value) ||
@@ -1873,14 +1873,14 @@ const egyoZusatz = (egyoSuffixEl?.value || "").trim();
 
     const datumKurz = datumIso.slice(2).replace(/-/g, ""); // YYMMDD
 
-    const parts = [];
-    if (includeAmount) parts.push(betragRaw);
-    if (absender) parts.push(absender);
-    if (egyoZusatz) parts.push(egyoZusatz);
-    parts.push(datumKurz);
+   const parts = [];
+if (includeAmount) parts.push(betragRaw);
+if (absender) parts.push(absender);
+parts.push(datumKurz);
+if (egyoZusatz) parts.push(egyoZusatz);
 
-    const base = parts.filter(Boolean).join("_") || "dokument";
-    return base + ".pdf";
+const base = parts.filter(Boolean).join("_") || "dokument";
+return base + ".pdf";
   }
   // =======================
   // Rechnung:
