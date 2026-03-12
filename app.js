@@ -2304,7 +2304,7 @@ const base = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokume
 
 let egyoAutoSub = "";
 if (code === "EGYO" && invoice) {
-  const s = String(absender || "").toLowerCase();
+ const s = String(senderEl?.value || "").trim().toLowerCase();
   if (s.includes("krasowski")) egyoAutoSub = "Krasowski";
   else if (s.includes("handloser")) egyoAutoSub = "Handloser_E";
   else if (s.includes("knappschaft")) egyoAutoSub = "Knappschaft";
@@ -2359,13 +2359,14 @@ seg = base.concat(leaf);
         const leaf = (sub && sub !== "Rechnungsbelege") ? [sub, year] : [year];
         seg = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"].concat(leaf);
       } else {
-     const pcloudName = (typeof getFolderNames === "function" ? getFolderNames(code).pcloudName : code);
+
+const pcloudName = (typeof getFolderNames === "function" ? getFolderNames(code).pcloudName : code);
 if (invoice || sub){
   const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
 
   let egyoAutoSub = "";
   if (code === "EGYO" && invoice) {
-    const s = String(absender || "").toLowerCase();
+    const s = String(senderEl?.value || "").trim().toLowerCase();
     if (s.includes("krasowski")) egyoAutoSub = "Krasowski";
     else if (s.includes("handloser")) egyoAutoSub = "Handloser_E";
     else if (s.includes("knappschaft")) egyoAutoSub = "Knappschaft";
