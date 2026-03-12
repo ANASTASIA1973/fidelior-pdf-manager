@@ -2299,12 +2299,24 @@ function resolveTargets(){
     } else if (typeof isArndtCie === "function" && isArndtCie(code)) {
       seg = ["ARNDT & CIE", (invoice ? "Eingangsrechnungen" : "Dokumente"), year];
     } else {
-      const scopeName = (typeof getFolderNames === "function" ? getFolderNames(code).scopeName : code);
-      const base = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
-      const leaf = (code === "B75" && invoice)
-        ? [year]
-        : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
-      seg = base.concat(leaf);
+     const scopeName = (typeof getFolderNames === "function" ? getFolderNames(code).scopeName : code);
+const base = ["OBJEKTE", scopeName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
+
+let egyoAutoSub = "";
+if (code === "EGYO" && invoice) {
+  const s = String(absender || "").toLowerCase();
+  if (s.includes("krasowski")) egyoAutoSub = "Krasowski";
+  else if (s.includes("handloser")) egyoAutoSub = "Handloser_E";
+  else if (s.includes("knappschaft")) egyoAutoSub = "Knappschaft";
+}
+
+const leaf = (code === "B75" && invoice)
+  ? [year]
+  : (egyoAutoSub
+      ? [year, egyoAutoSub]
+      : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]));
+
+seg = base.concat(leaf);
     }
     out.scope.root = scopeRoot;
     out.scope.seg  = seg;
@@ -2347,14 +2359,26 @@ function resolveTargets(){
         const leaf = (sub && sub !== "Rechnungsbelege") ? [sub, year] : [year];
         seg = ["FIDELIOR","OBJEKTE","A15 Ahrweiler Straße 15","Buchhaltung","Rechnungsbelege"].concat(leaf);
       } else {
-        const pcloudName = (typeof getFolderNames === "function" ? getFolderNames(code).pcloudName : code);
-        if (invoice || sub){
-          const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
-          const leaf = (code === "B75" && invoice)
-            ? [year]
-            : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]);
-          seg = base.concat(leaf);
-        }
+     const pcloudName = (typeof getFolderNames === "function" ? getFolderNames(code).pcloudName : code);
+if (invoice || sub){
+  const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
+
+  let egyoAutoSub = "";
+  if (code === "EGYO" && invoice) {
+    const s = String(absender || "").toLowerCase();
+    if (s.includes("krasowski")) egyoAutoSub = "Krasowski";
+    else if (s.includes("handloser")) egyoAutoSub = "Handloser_E";
+    else if (s.includes("knappschaft")) egyoAutoSub = "Knappschaft";
+  }
+
+  const leaf = (code === "B75" && invoice)
+    ? [year]
+    : (egyoAutoSub
+        ? [year, egyoAutoSub]
+        : (sub && !["Rechnungsbelege","Objektdokumente"].includes(sub) ? [sub, year] : [year]));
+
+  seg = base.concat(leaf);
+}
       }
     }
     if (seg){
