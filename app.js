@@ -1956,9 +1956,9 @@ if (code === "EGYO" && invoice) {
   }
 
   if (subHint) {
-    subHint.innerHTML =
-      'Dieser Zusatz steuert nur den Dateinamen, z.&nbsp;B. <code>Marina_GU</code> oder <code>Strom_LP_185</code>.' +
-      ' Die Ablage erfolgt weiterhin im normalen EGYO-Ordner.';
+  subHint.innerHTML =
+  'Dieser Zusatz ist optional und wird am Ende des Dateinamens angehängt, z.&nbsp;B. <code>_Oktober</code> oder <code>_Marina_GU</code>.' +
+  ' Die Ablage erfolgt weiterhin im normalen EGYO-Ordner.';
     subHint.style.display = "block";
   }
 
