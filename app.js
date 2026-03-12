@@ -2306,7 +2306,7 @@ let egyoAutoSub = "";
 if (code === "EGYO" && invoice) {
  const s = String(senderEl?.value || "").trim().toLowerCase();
   if (s.includes("krasowski")) egyoAutoSub = "Krasowski";
-  else if (s.includes("handloser")) egyoAutoSub = "Handloser_E";
+ else if (s === "handloser_e") egyoAutoSub = "Handloser_E";
   else if (s.includes("knappschaft")) egyoAutoSub = "Knappschaft";
 }
 
@@ -2364,13 +2364,13 @@ const pcloudName = (typeof getFolderNames === "function" ? getFolderNames(code).
 if (invoice || sub){
   const base = ["FIDELIOR","OBJEKTE", pcloudName, (invoice ? "Rechnungsbelege" : "Objektdokumente")];
 
-  let egyoAutoSub = "";
-  if (code === "EGYO" && invoice) {
-    const s = String(senderEl?.value || "").trim().toLowerCase();
-    if (s.includes("krasowski")) egyoAutoSub = "Krasowski";
-    else if (s.includes("handloser")) egyoAutoSub = "Handloser_E";
-    else if (s.includes("knappschaft")) egyoAutoSub = "Knappschaft";
-  }
+let egyoAutoSub = "";
+if (code === "EGYO" && invoice) {
+  const s = String(senderEl?.value || "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (s.includes("krasowski")) egyoAutoSub = "Krasowski";
+  else if (s === "handloser_e") egyoAutoSub = "Handloser_E";
+  else if (s.includes("knappschaft")) egyoAutoSub = "Knappschaft";
+}
 
   const leaf = (code === "B75" && invoice)
     ? [year]
