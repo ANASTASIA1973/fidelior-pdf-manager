@@ -1,7 +1,7 @@
 /* ==========================================================================
-   Fidelior Pro Shell  v2.1
+   Fidelior Pro Shell  v2.2
    ==========================================================================
-   CHANGES v2.1:
+   CHANGES v2.2:
    - Dashboard shows category counts: Objekte / Fidelior / Privat
    - Single deriveCategory() function — used by dashboard + index
    - Category summary cards above KPI stats
@@ -420,7 +420,7 @@ async function renderDash() {
 
   /* ── Category summary cards ── */
   const catDefs = [
-    { key:'Objekte',     label:'Objekte',      sub:'Liegenschaften', onclick:"window.__fdlPro.goArchiv()" },
+    { key:'Objekte',     label:'Objekte',      sub:'Liegenschaften', onclick:"window.__fdlPro.goArchivCategory('Objekte')" },
     { key:'Fidelior',   label:'Fidelior',     sub:'Buchhaltung',    onclick:"window.__fdlPro.goArchivObj('FIDELIOR')" },
     { key:'Privat',     label:'Privat',        sub:'Buchhaltung',    onclick:"window.__fdlPro.goArchivObj('PRIVAT')" },
     { key:'ARNDT & CIE',label:'ARNDT & CIE',  sub:'Buchhaltung',    onclick:"window.__fdlPro.goArchivObj('ARNDTCIE')" },
@@ -588,7 +588,7 @@ async function buildInboxWidget() {
     const badge = document.getElementById('fdl-sb-inbox-badge');
     if (badge) { badge.textContent=files.length; badge.style.display='inline-flex'; badge.className='fdl-sb-badge muted'; }
     return files.slice(0,6).map(n=>`
-      <div class="fdl-inbox-row" onclick="window.__fdlPro.goFiling()">
+      <div class="fdl-inbox-row" onclick="window.__fdlPro.openInboxFile('${encodeURIComponent(n)}')">
         <div class="fdl-inbox-icon">${icon('file')}</div>
         <div class="fdl-inbox-name" title="${n}">${n.replace(/\.pdf$/i,'')}</div>
       </div>`).join('')+
@@ -646,13 +646,40 @@ function hideRedundant() {
   });
 }
 
+
+async function openInboxFile(encodedName) {
+  try {
+    const name = decodeURIComponent(encodedName || '');
+    const scopeRoot = window.scopeRootHandle;
+    if (!scopeRoot || !name) return;
+    const inbox = await scopeRoot.getDirectoryHandle('Inbox', { create: false }).catch(() => null);
+    if (!inbox) return;
+    const handle = await inbox.getFileHandle(name, { create: false }).catch(() => null);
+    if (!handle) return;
+    const file = await handle.getFile();
+    activateView('filing');
+    setTimeout(() => {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const fi = document.querySelector('input[type="file"]');
+      if (!fi) return;
+      Object.defineProperty(fi, 'files', { value: dt.files, configurable: true });
+      fi.dispatchEvent(new Event('change', { bubbles: true }));
+    }, 120);
+  } catch (e) {
+    console.warn('[FideliorPro] Inbox-Datei konnte nicht geöffnet werden', e);
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    PUBLIC API
    ══════════════════════════════════════════════════════════════════════════ */
 window.__fdlPro = {
   goFiling()        { activateView('filing'); },
   goArchiv()        { activateView('archive'); },
-  goArchivObj(code) { activateView('archive',{obj:code}); },
+  goArchivCategory(category) { activateView('archive', { category }); },
+  goArchivObj(code) { activateView('archive',{obj:code, category: deriveCategory(code)}); },
+  openInboxFile,
   goTasks()         { activateView('tasks'); },
   openDoc(encoded)  {
     const name = decodeURIComponent(encoded);
@@ -713,7 +740,7 @@ function init() {
     setTimeout(hideRedundant, 700);
     setTimeout(watchArchivClose, 900);
   }, 100);
-  console.info('[FideliorPro v2.1] bereit — Kategorien: Objekte/Fidelior/Privat, 1:Dash 2:Ablage 3:Archiv 4:Aufgaben');
+  console.info('[FideliorPro v2.2] bereit — Kategorien: Objekte/Fidelior/Privat, 1:Dash 2:Ablage 3:Archiv 4:Aufgaben');
 }
 
 if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', init);

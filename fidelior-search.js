@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Fidelior Search  v1.0  —  Volltext-Suche mit natürlicher Sprache
+   Fidelior Search  v1.1  —  Volltext-Suche mit gemeinsamer Datenbasis
    ==========================================================================
    Erweitert das Suche-UI aus fidelior-index.js um:
    - Token-basiertes NL-Parsing mit Vorschlag-Chips
@@ -31,6 +31,54 @@ function idbGetAll(dbName, store) {
 /* ─────────────────────────────── FMT ───────────────────────────────────── */
 const fmtDate = iso => { try { return new Date(iso).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}); } catch { return '—'; }};
 const fmtEuro = n => !n ? '' : n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+
+const SVG = {
+  search: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>',
+  close:  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+  history:'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/><path d="M12 7v5l4 2"/></svg>'
+};
+
+function parseAmount(v) {
+  if (typeof v === 'number') return v;
+  const n = parseFloat(String(v || '0').replace(/\./g, '').replace(',', '.').replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeDoc(d) {
+  const fileName = d.fileName || d.name || '';
+  const sender = d.sender || d.absender || d.meta?.absender || '';
+  const amount = parseAmount(d.amount ?? d.meta?.betrag);
+  const invoiceDate = d.invoiceDate || d.date || d.meta?.datum?.replace(/\./g, '-') || '';
+  return {
+    ...d,
+    fileName,
+    sender,
+    senderNorm: (d.senderNorm || sender || '').toLowerCase(),
+    amount,
+    invoiceDate,
+    docType: d.docType || d.folderType || '',
+    serviceDesc: d.serviceDesc || d.subfolder || '',
+    keywords: d.keywords || [],
+    id: d.id || d.documentId || d.archiveRef?.id || `${d.objectCode || ''}:${fileName}:${d.savedAt || d.modified || ''}`,
+  };
+}
+
+async function getSearchDataset() {
+  const [idxDocs, archiveDocs] = await Promise.all([
+    idbGetAll('fidelior_index_v1','documents').catch(() => []),
+    window.__fdlArchiveData?.getAllDocs ? window.__fdlArchiveData.getAllDocs() : Promise.resolve([]),
+  ]);
+  const merged = [];
+  const seen = new Set();
+  for (const raw of [...archiveDocs, ...idxDocs]) {
+    const d = normalizeDoc(raw);
+    const key = d.id || `${d.objectCode || ''}:${d.fileName}:${d.invoiceDate || d.savedAt || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(d);
+  }
+  return merged;
+}
 
 /* ─────────────────────────────── HISTORY ───────────────────────────────── */
 const HIST_KEY = 'fdl_search_history';
@@ -125,29 +173,27 @@ function highlightText(text, query) {
 
 /* ─────────────────────────────── SEARCH CORE ───────────────────────────── */
 async function runSearch(filter, opts = {}) {
-  // Nutze fidelior-index wenn verfügbar
-  if (window.__fdlIdx?.search) {
-    return window.__fdlIdx.search(filter, opts);
-  }
-  // Fallback: direkt aus IDB
-  const docs = await idbGetAll('fidelior_index_v1','documents');
+  const docs = await getSearchDataset();
   const tf = filter;
   const results = docs.filter(d => {
     if (tf.objectCode && d.objectCode !== tf.objectCode) return false;
-    if (tf.year && d.year !== tf.year) return false;
-    if (tf.month && d.invoiceDate && !d.invoiceDate.slice(5,7).startsWith(tf.month)) return false;
+    if (tf.year && String(d.year || '').slice(0,4) !== String(tf.year)) return false;
+    if (tf.month && d.invoiceDate && !String(d.invoiceDate).slice(5,7).startsWith(tf.month)) return false;
     if (tf.amountGt !== undefined && d.amount <= tf.amountGt) return false;
     if (tf.amountLt !== undefined && d.amount >= tf.amountLt) return false;
-    if (tf.docType && d.docType !== tf.docType) return false;
-    if (tf.sender && !(d.senderNorm||'').includes(tf.sender.toLowerCase())) return false;
+    if (tf.docType) {
+      const typeHit = [d.docType, d.folderType].filter(Boolean).join(' ').toLowerCase();
+      if (!typeHit.includes(String(tf.docType).toLowerCase())) return false;
+    }
+    if (tf.sender && !(d.senderNorm || '').includes(String(tf.sender).toLowerCase())) return false;
     if (tf.text) {
-      const h = [d.fileName,d.sender,d.ocrText,d.serviceDesc,...(d.keywords||[])].join(' ').toLowerCase();
-      if (!h.includes(tf.text.toLowerCase())) return false;
+      const hay = [d.fileName, d.sender, d.ocrText, d.serviceDesc, d.objectCode, d.category, ...(d.keywords || [])].join(' ').toLowerCase();
+      if (!hay.includes(String(tf.text).toLowerCase())) return false;
     }
     return true;
   });
-  results.sort((a,b) => (b.savedAt||'').localeCompare(a.savedAt||''));
-  return { results: results.slice(0, opts.limit||100), total: results.length, filter };
+  results.sort((a, b) => new Date(b.invoiceDate || b.savedAt || b.modified || 0) - new Date(a.invoiceDate || a.savedAt || a.modified || 0));
+  return { results: results.slice(0, opts.limit || 100), total: results.length, filter };
 }
 
 /* ─────────────────────────────── CSS ───────────────────────────────────── */
@@ -279,15 +325,15 @@ function build() {
   _overlay.innerHTML = `
     <div class="fdl-srch-box" id="fdl-srch-box">
       <div class="fdl-srch-input-row">
-        <span class="fdl-srch-icon">🔍</span>
+        <span class="fdl-srch-icon">${SVG.search}</span>
         <input class="fdl-srch-input" id="fdl-srch-input" type="search" autocomplete="off" spellcheck="false"
-               placeholder="Suche: Rechnungen von Zinnikus EGYO 2026…">
-        <button class="fdl-srch-close" id="fdl-srch-close" title="Schließen (Esc)">✕</button>
+               placeholder="Suche: Rechnungen von Zinnikus EGYO 2026">
+        <button class="fdl-srch-close" id="fdl-srch-close" title="Schließen (Esc)">${SVG.close}</button>
       </div>
       <div class="fdl-srch-chips" id="fdl-srch-chips"></div>
       <div class="fdl-srch-meta" id="fdl-srch-meta" style="display:none"></div>
       <div class="fdl-srch-results" id="fdl-srch-results">
-        <div class="fdl-srch-empty">⌨ Suchbegriff eingeben oder aus Verlauf auswählen</div>
+        <div class="fdl-srch-empty">Suchbegriff eingeben oder aus Verlauf auswählen</div>
       </div>
       <div class="fdl-srch-footer">
         <span><span class="fdl-srch-kbdtag">↑↓</span> Navigation</span>
@@ -387,7 +433,7 @@ async function doSearch(filter, rawQuery) {
     showMeta(total, ms);
 
     if (!results.length) {
-      _results.innerHTML = `<div class="fdl-srch-empty">Keine Dokumente gefunden für „${rawQuery}"</div>`;
+      _results.innerHTML = `<div class="fdl-srch-empty">Keine Dokumente gefunden für „${rawQuery}“</div>`;
       return;
     }
 
@@ -409,7 +455,7 @@ async function doSearch(filter, rawQuery) {
             ${d.invoiceNo?`<span class="fdl-srch-rc t">${d.invoiceNo}</span>`:''}
           </div>
         </div>
-        <div class="fdl-srch-result-date">${fmtDate(d.invoiceDate||d.savedAt)}</div>
+        <div class="fdl-srch-result-date">${fmtDate(d.invoiceDate||d.savedAt||d.modified)}</div>
       </div>`;
     }).join('');
 
@@ -421,24 +467,32 @@ async function doSearch(filter, rawQuery) {
 function showHistory() {
   const hist = getHistory();
   if (!hist.length) {
-    _results.innerHTML = '<div class="fdl-srch-empty">⌨ Suchbegriff eingeben</div>';
+    _results.innerHTML = '<div class="fdl-srch-empty">Suchbegriff eingeben</div>';
     hideMeta(); return;
   }
   hideMeta();
   _results.innerHTML = `<div class="fdl-srch-sect">Letzte Suchen</div>` +
     hist.map(h => `<div class="fdl-srch-hist" onclick="window.__fdlSrch.useHistory('${encodeURIComponent(h)}')">
-      <span style="color:#C0C0C8;font-size:13px">↩</span> ${h}
+      <span style="color:#C0C0C8;font-size:13px;display:inline-flex;align-items:center">${SVG.history}</span> ${h}
     </div>`).join('');
 }
 
-function openResult(doc) {
+async function openResult(doc) {
   addHistory(_input.value.trim());
   close();
+  if (doc?.archiveRef && window.__fdlArchiveData?.openByRef) {
+    await window.__fdlArchiveData.openByRef(doc.archiveRef);
+    return;
+  }
+  if (doc?.objectCode && doc?.fileName && window.__fdlArchiveData?.openByRef) {
+    await window.__fdlArchiveData.openByRef({ objectCode: doc.objectCode, name: doc.fileName, modified: doc.modified, category: doc.category });
+    return;
+  }
   if (typeof window.fdlArchivOpen === 'function') window.fdlArchivOpen();
   setTimeout(() => {
     const sf = document.getElementById('fdl-av3-search');
     if (sf) {
-      sf.value = (doc.fileName||'').replace(/\.pdf$/i,'').slice(0,50);
+      sf.value = (doc.fileName || '').replace(/\.pdf$/i, '').slice(0, 80);
       sf.dispatchEvent(new Event('input',{bubbles:true}));
     }
   }, 380);
@@ -476,7 +530,7 @@ if (window.__fdlIdx) {
 /* ─────────────────────────────── INIT ──────────────────────────────────── */
 function init() {
   build();
-  console.info('[FideliorSearch v1.0] bereit — Ctrl+K');
+  console.info('[FideliorSearch v1.1] bereit — Ctrl+K');
 }
 
 if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', init);

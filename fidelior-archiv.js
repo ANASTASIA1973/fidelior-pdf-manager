@@ -1,7 +1,7 @@
 /* ==========================================================================
-   Fidelior Archiv  v3.1  —  Dokument-Browser (vollständig überarbeitet)
+   Fidelior Archiv  v3.2  —  Dokument-Browser (vollständig überarbeitet)
    ==========================================================================
-   FIXES v3.1:
+   FIXES v3.2:
    - Dokumentliste gruppiert nach Ordnertyp (Rechnungen / Dokumente) + Jahr
    - PDF-Vorschau füllt gesamtes rechtes Panel (flex layout, volle Höhe)
    - Sortierung verwendet geparste Dokumentdatum aus Dateiname (primär)
@@ -31,6 +31,14 @@ async function loadObjectsConfig() {
 }
 
 function getScopeName(code) { return objectsMap[code]?.scopevisioName || code; }
+
+function deriveCategory(code) {
+  if (typeof window.fdlDeriveCategory === 'function') return window.fdlDeriveCategory(code);
+  if (code === 'FIDELIOR') return 'Fidelior';
+  if (code === 'PRIVAT') return 'Privat';
+  if (code === 'ARNDTCIE') return 'ARNDT & CIE';
+  return 'Objekte';
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    PFAD-MAPPING  (exakt wie preflightTargets in app.js — NICHT ÄNDERN)
@@ -321,7 +329,7 @@ function injectCSS() {
 
 /* ── 3-SPALTEN BODY ── */
 .av3-body {
-  flex: 1; display: grid; grid-template-columns: 200px 1fr 380px;
+  flex: 1; display: grid; grid-template-columns: 210px minmax(420px,1fr) minmax(420px,520px);
   min-height: 0; overflow: hidden;
 }
 
@@ -330,6 +338,9 @@ function injectCSS() {
 .av3-sb-head {
   padding: 14px 16px 6px; font-size: 10px; font-weight: 700;
   letter-spacing: .1em; text-transform: uppercase; color: #9CA3AF;
+}
+.av3-sb-subhead {
+  padding: 2px 16px 10px; font-size: 12px; font-weight: 600; color: #5B1B70;
 }
 .av3-obj {
   display: flex; align-items: center; gap: 7px; padding: 7px 12px 7px 16px;
@@ -511,7 +522,7 @@ function injectCSS() {
 .av3-spinner { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; border: 2px solid #E5E7EB; border-top-color: #5B1B70; animation: av3spin .65s linear infinite; }
 
 /* Responsive */
-@media (max-width: 1100px) { .av3-body { grid-template-columns: 180px 1fr 320px; } }
+@media (max-width: 1100px) { .av3-body { grid-template-columns: 180px 1fr 360px; } }
 @media (max-width: 900px)  { .av3-body { grid-template-columns: 160px 1fr; } .av3-panel { display: none; } }
   `;
   document.head.appendChild(s);
@@ -526,6 +537,7 @@ const S = {
   files:      [],     // all loaded files for current object
   filtered:   [],     // after applying all filters
   selected:   null,
+  category:   'all',
   query:      '',
   typeFilter: 'all',  // 'all' | 'Rechnungen' | 'Dokumente' | 'Abrechnungsbelege'
   yearFilter: 'all',  // 'all' | '2026' | '2025' | ...
@@ -608,8 +620,11 @@ function getShortName(o) {
 function renderSidebar() {
   const el = document.getElementById('fdl-av3-sb');
   if (!el) return;
-  const objs = getObjList();
+  let objs = getObjList();
+  if (S.category && S.category !== 'all') objs = objs.filter(o => deriveCategory(o.code) === S.category);
+  const headLabel = S.category && S.category !== 'all' ? S.category : 'Liegenschaften';
   let h = '<div class="av3-sb-head">Liegenschaften</div>';
+  if (S.category && S.category !== 'all') h += `<div class="av3-sb-subhead">${headLabel}</div>`;
   for (const o of objs) {
     const active = S.obj?.code === o.code ? 'active' : '';
     const cnt    = S.counts[o.code] !== undefined ? S.counts[o.code] : '…';
@@ -618,6 +633,9 @@ function renderSidebar() {
       <span class="av3-obj-name">${getShortName(o)}</span>
       <span class="av3-obj-cnt" id="av3c-${o.code}">${cnt}</span>
     </div>`;
+  }
+  if (!objs.length) {
+    h += `<div class="av3-empty" style="min-height:120px;padding:20px 12px"><div class="av3-empty-title">Keine Einträge</div><div class="av3-empty-sub">Für diesen Bereich wurden keine Liegenschaften gefunden.</div></div>`;
   }
   el.innerHTML = h;
 }
@@ -843,10 +861,11 @@ async function renderPDF(file) {
    ══════════════════════════════════════════════════════════════════════════ */
 
 window.__av3 = {
-  async obj(code) {
+  async obj(code, opts = {}) {
     const o = getObjList().find(x => x.code === code);
     if (!o) return;
     S.obj = { ...o, ...(objectsMap[code] || {}) };
+    if (opts.category) S.category = opts.category;
     S.selected = null; S.files = []; S.filtered = [];
     S.query = ''; S.typeFilter = 'all'; S.yearFilter = 'all';
 
@@ -857,7 +876,10 @@ window.__av3 = {
     S.sortOrder = 'date-desc';
 
     const bc = document.getElementById('fdl-av3-bc');
-    if (bc) bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${o.name}</span>`;
+    if (bc) {
+      const cat = deriveCategory(code);
+      bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span>${cat}</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${o.name}</span>`;
+    }
 
     renderSidebar();
     const li = document.getElementById('fdl-av3-li');
@@ -992,11 +1014,17 @@ function buildOverlay() {
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && ov.classList.contains('open')) close(); });
 }
 
-async function open() {
+async function open(opts = {}) {
   buildOverlay();
   await loadObjectsConfig();
+  S.category = opts.category || S.category || 'all';
   renderSidebar();
   document.getElementById('fdl-av3').classList.add('open');
+
+  const bc = document.getElementById('fdl-av3-bc');
+  if (bc && S.category && S.category !== 'all' && !opts.obj) {
+    bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${S.category}</span>`;
+  }
 
   const root = window.scopeRootHandle;
   if (root) {
@@ -1006,6 +1034,10 @@ async function open() {
         const el = document.getElementById(`av3c-${o.code}`); if (el) el.textContent = files.length;
       }).catch(() => {});
     }
+  }
+
+  if (opts.obj) {
+    setTimeout(() => { window.__av3?.obj?.(opts.obj, { category: opts.category }); }, 80);
   }
 }
 
@@ -1017,6 +1049,75 @@ function close() {
 /* ══════════════════════════════════════════════════════════════════════════
    INIT
    ══════════════════════════════════════════════════════════════════════════ */
+
+
+let _allDocsCache = null;
+let _allDocsCacheAt = 0;
+
+function parseAmountNumber(v) {
+  if (typeof v === 'number') return v;
+  const n = parseFloat(String(v || '0').replace(/\./g, '').replace(',', '.').replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeArchiveRecord(code, f) {
+  const invoiceIso = f.meta?.datum && /^\d{4}\.\d{2}\.\d{2}$/.test(f.meta.datum) ? f.meta.datum.replace(/\./g, '-') : '';
+  return {
+    id: `${code}::${f.name}::${f.modified}`,
+    objectCode: code,
+    category: deriveCategory(code),
+    folderType: fmtFolderType(f.folderType),
+    year: f.year || '',
+    fileName: f.name,
+    sender: f.meta?.absender || '',
+    senderNorm: (f.meta?.absender || '').toLowerCase(),
+    amount: parseAmountNumber(f.meta?.betrag),
+    invoiceDate: invoiceIso,
+    savedAt: new Date(f.modified || 0).toISOString(),
+    modified: f.modified,
+    ocrText: '',
+    serviceDesc: f.subfolder || '',
+    archiveRef: { objectCode: code, name: f.name, modified: f.modified, category: deriveCategory(code) },
+  };
+}
+
+async function getAllArchiveDocs(opts = {}) {
+  const now = Date.now();
+  if (!opts.refresh && _allDocsCache && (now - _allDocsCacheAt) < 30000) return _allDocsCache;
+  await loadObjectsConfig();
+  const objs = getObjList();
+  const out = [];
+  for (const o of objs) {
+    const files = await loadFiles(o.code);
+    for (const f of files) out.push(normalizeArchiveRecord(o.code, f));
+  }
+  _allDocsCache = out;
+  _allDocsCacheAt = now;
+  return out;
+}
+
+async function openByRef(ref) {
+  if (!ref?.objectCode || !ref?.name) return false;
+  await open({ category: ref.category || deriveCategory(ref.objectCode), obj: ref.objectCode });
+  const trySelect = async (attempt = 0) => {
+    const match = S.files.find(f => f.name === ref.name && (!ref.modified || Number(f.modified) === Number(ref.modified))) || S.files.find(f => f.name === ref.name);
+    if (match) {
+      S.selected = match;
+      renderList(S.filtered && S.filtered.length ? S.filtered : S.files);
+      await renderPanel(match);
+      setTimeout(() => {
+        document.querySelector('.av3-file.active')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 30);
+      return true;
+    }
+    if (attempt < 12) {
+      setTimeout(() => { trySelect(attempt + 1); }, 120);
+    }
+    return false;
+  };
+  setTimeout(() => { trySelect(0); }, 180);
+  return true;
+}
 
 function injectButton() {
   if (document.getElementById('fdl-av3-btn')) return;
@@ -1042,6 +1143,7 @@ function init() {
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+window.__fdlArchiveData = { getAllDocs: getAllArchiveDocs, openByRef, openCategory: (category) => open({ category }), deriveCategory };
 window.fdlArchivOpen = open;
 
 })();
