@@ -1,7 +1,7 @@
 /* ==========================================================================
-   Fidelior Pro Shell  v2.2
+   Fidelior Pro Shell  v2.1
    ==========================================================================
-   CHANGES v2.2:
+   CHANGES v2.1:
    - Dashboard shows category counts: Objekte / Fidelior / Privat
    - Single deriveCategory() function — used by dashboard + index
    - Category summary cards above KPI stats
@@ -384,7 +384,7 @@ function showArchiveView(opts = {}) {
     existing.classList.add('open');
     existing.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;background:transparent;padding:0;';
   } else {
-    window.fdlArchivOpen?.();
+    window.fdlArchivOpen?.(opts);
     setTimeout(() => {
       const ov = document.getElementById('fdl-av3');
       if (ov && ov.parentElement !== archView) {
@@ -393,11 +393,19 @@ function showArchiveView(opts = {}) {
       }
     }, 100);
   }
+  const folderMap = { rechnung: 'Rechnungen', other: 'Dokumente' };
   if (opts.obj) {
     setTimeout(() => {
-      document.querySelector(`[data-code="${opts.obj}"], .av3-obj[onclick*="${opts.obj}"]`)?.click() ||
-      window.__av3?.obj?.(opts.obj);
-    }, 350);
+      window.__av3?.obj?.(opts.obj, {
+        scopeCategory: opts.scopeCategory,
+        typeFilter: folderMap[opts.folder] || 'all',
+        subFilter: (opts.folder && !folderMap[opts.folder]) ? opts.folder : 'all',
+        selectName: opts.selectName || '',
+        query: opts.query || ''
+      });
+    }, 180);
+  } else if (opts.scopeCategory) {
+    setTimeout(() => window.__av3?.setCategory?.(opts.scopeCategory), 180);
   }
 }
 
@@ -421,9 +429,9 @@ async function renderDash() {
   /* ── Category summary cards ── */
   const catDefs = [
     { key:'Objekte',     label:'Objekte',      sub:'Liegenschaften', onclick:"window.__fdlPro.goArchivCategory('Objekte')" },
-    { key:'Fidelior',   label:'Fidelior',     sub:'Buchhaltung',    onclick:"window.__fdlPro.goArchivObj('FIDELIOR')" },
-    { key:'Privat',     label:'Privat',        sub:'Buchhaltung',    onclick:"window.__fdlPro.goArchivObj('PRIVAT')" },
-    { key:'ARNDT & CIE',label:'ARNDT & CIE',  sub:'Buchhaltung',    onclick:"window.__fdlPro.goArchivObj('ARNDTCIE')" },
+    { key:'Fidelior',   label:'Fidelior',     sub:'Buchhaltung',    onclick:"window.__fdlPro.goArchivCategory('Fidelior')" },
+    { key:'Privat',     label:'Privat',       sub:'Buchhaltung',    onclick:"window.__fdlPro.goArchivCategory('Privat')" },
+    { key:'ARNDT & CIE',label:'ARNDT & CIE',  sub:'Buchhaltung',    onclick:"window.__fdlPro.goArchivCategory('ARNDT & CIE')" },
   ].filter(c => s.catCounts[c.key] > 0 || c.key === 'Objekte' || c.key === 'Fidelior' || c.key === 'Privat');
 
   const catCards = catDefs.map(c => `
@@ -588,7 +596,7 @@ async function buildInboxWidget() {
     const badge = document.getElementById('fdl-sb-inbox-badge');
     if (badge) { badge.textContent=files.length; badge.style.display='inline-flex'; badge.className='fdl-sb-badge muted'; }
     return files.slice(0,6).map(n=>`
-      <div class="fdl-inbox-row" onclick="window.__fdlPro.openInboxFile('${encodeURIComponent(n)}')">
+      <div class="fdl-inbox-row" onclick="window.__fdlPro.goFiling()">
         <div class="fdl-inbox-icon">${icon('file')}</div>
         <div class="fdl-inbox-name" title="${n}">${n.replace(/\.pdf$/i,'')}</div>
       </div>`).join('')+
@@ -646,48 +654,33 @@ function hideRedundant() {
   });
 }
 
-
-async function openInboxFile(encodedName) {
-  try {
-    const name = decodeURIComponent(encodedName || '');
-    const scopeRoot = window.scopeRootHandle;
-    if (!scopeRoot || !name) return;
-    const inbox = await scopeRoot.getDirectoryHandle('Inbox', { create: false }).catch(() => null);
-    if (!inbox) return;
-    const handle = await inbox.getFileHandle(name, { create: false }).catch(() => null);
-    if (!handle) return;
-    const file = await handle.getFile();
-    activateView('filing');
-    setTimeout(() => {
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      const fi = document.querySelector('input[type="file"]');
-      if (!fi) return;
-      Object.defineProperty(fi, 'files', { value: dt.files, configurable: true });
-      fi.dispatchEvent(new Event('change', { bubbles: true }));
-    }, 120);
-  } catch (e) {
-    console.warn('[FideliorPro] Inbox-Datei konnte nicht geöffnet werden', e);
-  }
-}
-
 /* ══════════════════════════════════════════════════════════════════════════
    PUBLIC API
    ══════════════════════════════════════════════════════════════════════════ */
 window.__fdlPro = {
+  goDash()          { activateView('dash'); },
   goFiling()        { activateView('filing'); },
   goArchiv()        { activateView('archive'); },
-  goArchivCategory(category) { activateView('archive', { category }); },
-  goArchivObj(code) { activateView('archive',{obj:code, category: deriveCategory(code)}); },
-  openInboxFile,
+  goArchivCategory(category) { activateView('archive',{ scopeCategory: category }); },
+  goArchivObj(code, folder='all') { activateView('archive',{obj:code, folder, scopeCategory: deriveCategory(code)}); },
   goTasks()         { activateView('tasks'); },
   openDoc(encoded)  {
     const name = decodeURIComponent(encoded);
-    activateView('archive');
+    activateView('archive', { query: name.replace(/\.pdf$/i,''), selectName: name });
     setTimeout(()=>{
       const sf=document.getElementById('fdl-av3-search');
       if(sf){sf.value=name.replace(/\.pdf$/i,'').slice(0,50);sf.dispatchEvent(new Event('input',{bubbles:true}));}
     },380);
+  },
+  openIndexedDoc(doc) {
+    if (!doc) return;
+    activateView('archive', {
+      obj: doc.objectCode || null,
+      folder: doc.docType === 'Rechnung' ? 'rechnung' : (doc.docType === 'Dokument' ? 'other' : 'all'),
+      scopeCategory: deriveCategory(doc.objectCode),
+      selectName: doc.fileName || '',
+      query: (doc.fileName || '').replace(/\.pdf$/i,'')
+    });
   },
   refreshDash() { if(_view==='dash') renderDash(); },
   deriveCategory,  // expose for external use
@@ -740,7 +733,7 @@ function init() {
     setTimeout(hideRedundant, 700);
     setTimeout(watchArchivClose, 900);
   }, 100);
-  console.info('[FideliorPro v2.2] bereit — Kategorien: Objekte/Fidelior/Privat, 1:Dash 2:Ablage 3:Archiv 4:Aufgaben');
+  console.info('[FideliorPro v2.1] bereit — Kategorien: Objekte/Fidelior/Privat, 1:Dash 2:Ablage 3:Archiv 4:Aufgaben');
 }
 
 if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', init);

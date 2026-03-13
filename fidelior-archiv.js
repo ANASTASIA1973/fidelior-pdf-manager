@@ -1,7 +1,7 @@
 /* ==========================================================================
-   Fidelior Archiv  v3.2  —  Dokument-Browser (vollständig überarbeitet)
+   Fidelior Archiv  v3.1  —  Dokument-Browser (vollständig überarbeitet)
    ==========================================================================
-   FIXES v3.2:
+   FIXES v3.1:
    - Dokumentliste gruppiert nach Ordnertyp (Rechnungen / Dokumente) + Jahr
    - PDF-Vorschau füllt gesamtes rechtes Panel (flex layout, volle Höhe)
    - Sortierung verwendet geparste Dokumentdatum aus Dateiname (primär)
@@ -31,14 +31,6 @@ async function loadObjectsConfig() {
 }
 
 function getScopeName(code) { return objectsMap[code]?.scopevisioName || code; }
-
-function deriveCategory(code) {
-  if (typeof window.fdlDeriveCategory === 'function') return window.fdlDeriveCategory(code);
-  if (code === 'FIDELIOR') return 'Fidelior';
-  if (code === 'PRIVAT') return 'Privat';
-  if (code === 'ARNDTCIE') return 'ARNDT & CIE';
-  return 'Objekte';
-}
 
 /* ══════════════════════════════════════════════════════════════════════════
    PFAD-MAPPING  (exakt wie preflightTargets in app.js — NICHT ÄNDERN)
@@ -329,7 +321,7 @@ function injectCSS() {
 
 /* ── 3-SPALTEN BODY ── */
 .av3-body {
-  flex: 1; display: grid; grid-template-columns: 210px minmax(420px,1fr) minmax(420px,520px);
+  flex: 1; display: grid; grid-template-columns: 200px 1fr 380px;
   min-height: 0; overflow: hidden;
 }
 
@@ -338,9 +330,6 @@ function injectCSS() {
 .av3-sb-head {
   padding: 14px 16px 6px; font-size: 10px; font-weight: 700;
   letter-spacing: .1em; text-transform: uppercase; color: #9CA3AF;
-}
-.av3-sb-subhead {
-  padding: 2px 16px 10px; font-size: 12px; font-weight: 600; color: #5B1B70;
 }
 .av3-obj {
   display: flex; align-items: center; gap: 7px; padding: 7px 12px 7px 16px;
@@ -522,7 +511,7 @@ function injectCSS() {
 .av3-spinner { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; border: 2px solid #E5E7EB; border-top-color: #5B1B70; animation: av3spin .65s linear infinite; }
 
 /* Responsive */
-@media (max-width: 1100px) { .av3-body { grid-template-columns: 180px 1fr 360px; } }
+@media (max-width: 1100px) { .av3-body { grid-template-columns: 180px 1fr 320px; } }
 @media (max-width: 900px)  { .av3-body { grid-template-columns: 160px 1fr; } .av3-panel { display: none; } }
   `;
   document.head.appendChild(s);
@@ -537,13 +526,14 @@ const S = {
   files:      [],     // all loaded files for current object
   filtered:   [],     // after applying all filters
   selected:   null,
-  category:   'all',
   query:      '',
   typeFilter: 'all',  // 'all' | 'Rechnungen' | 'Dokumente' | 'Abrechnungsbelege'
   yearFilter: 'all',  // 'all' | '2026' | '2025' | ...
   sortOrder:  'date-desc',
   blobUrl:    null,
   counts:     {},
+  subFilter:  'all',
+  scopeCategory: null,
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -572,12 +562,17 @@ function applyFilters() {
     result = result.filter(f => fmtFolderType(f.folderType) === S.typeFilter);
   }
 
-  // 3. Jahr
+  // 3. Sonder-Unterordner
+  if (S.subFilter && S.subFilter !== 'all') {
+    result = result.filter(f => (f.subfolder || '') === S.subFilter);
+  }
+
+  // 4. Jahr
   if (S.yearFilter && S.yearFilter !== 'all') {
     result = result.filter(f => f.year === S.yearFilter);
   }
 
-  // 4. Sortierung
+  // 5. Sortierung
   result = sortFiles(result, S.sortOrder);
 
   S.filtered = result;
@@ -621,10 +616,14 @@ function renderSidebar() {
   const el = document.getElementById('fdl-av3-sb');
   if (!el) return;
   let objs = getObjList();
-  if (S.category && S.category !== 'all') objs = objs.filter(o => deriveCategory(o.code) === S.category);
-  const headLabel = S.category && S.category !== 'all' ? S.category : 'Liegenschaften';
-  let h = '<div class="av3-sb-head">Liegenschaften</div>';
-  if (S.category && S.category !== 'all') h += `<div class="av3-sb-subhead">${headLabel}</div>`;
+  if (S.scopeCategory) {
+    objs = objs.filter(o => {
+      const cat = (window.fdlDeriveCategory ? window.fdlDeriveCategory(o.code) : o.code);
+      return cat === S.scopeCategory;
+    });
+  }
+  const headLabel = S.scopeCategory || 'Liegenschaften';
+  let h = `<div class="av3-sb-head">${headLabel}</div>`;
   for (const o of objs) {
     const active = S.obj?.code === o.code ? 'active' : '';
     const cnt    = S.counts[o.code] !== undefined ? S.counts[o.code] : '…';
@@ -633,9 +632,6 @@ function renderSidebar() {
       <span class="av3-obj-name">${getShortName(o)}</span>
       <span class="av3-obj-cnt" id="av3c-${o.code}">${cnt}</span>
     </div>`;
-  }
-  if (!objs.length) {
-    h += `<div class="av3-empty" style="min-height:120px;padding:20px 12px"><div class="av3-empty-title">Keine Einträge</div><div class="av3-empty-sub">Für diesen Bereich wurden keine Liegenschaften gefunden.</div></div>`;
   }
   el.innerHTML = h;
 }
@@ -865,20 +861,23 @@ window.__av3 = {
     const o = getObjList().find(x => x.code === code);
     if (!o) return;
     S.obj = { ...o, ...(objectsMap[code] || {}) };
-    if (opts.category) S.category = opts.category;
+    S.scopeCategory = opts.scopeCategory || (window.fdlDeriveCategory ? window.fdlDeriveCategory(code) : null);
     S.selected = null; S.files = []; S.filtered = [];
-    S.query = ''; S.typeFilter = 'all'; S.yearFilter = 'all';
+    S.query = (opts.query || '').trim().toLowerCase();
+    S.typeFilter = opts.typeFilter || 'all';
+    S.subFilter = opts.subFilter || 'all';
+    S.yearFilter = opts.yearFilter || 'all';
 
-    const sf = document.getElementById('fdl-av3-search'); if (sf) sf.value = '';
-    const tf = document.getElementById('fdl-av3-type');   if (tf) tf.value = 'all';
-    const yf = document.getElementById('fdl-av3-year');   if (yf) yf.value = 'all';
-    const so = document.getElementById('fdl-av3-sort');   if (so) so.value = 'date-desc';
-    S.sortOrder = 'date-desc';
+    const sf = document.getElementById('fdl-av3-search'); if (sf) sf.value = opts.query || '';
+    const tf = document.getElementById('fdl-av3-type');   if (tf) tf.value = S.typeFilter;
+    const yf = document.getElementById('fdl-av3-year');   if (yf) yf.value = S.yearFilter;
+    const so = document.getElementById('fdl-av3-sort');   if (so) so.value = opts.sortOrder || 'date-desc';
+    S.sortOrder = opts.sortOrder || 'date-desc';
 
     const bc = document.getElementById('fdl-av3-bc');
     if (bc) {
-      const cat = deriveCategory(code);
-      bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span>${cat}</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${o.name}</span>`;
+      const scope = S.scopeCategory ? `<span class="av3-bc-current">${S.scopeCategory}</span><span class="av3-bc-sep">/</span>` : '';
+      bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span>${scope}<span class="av3-bc-current">${o.name}</span>`;
     }
 
     renderSidebar();
@@ -898,7 +897,28 @@ window.__av3 = {
     const ce = document.getElementById(`av3c-${code}`); if (ce) ce.textContent = files.length;
 
     populateYearFilter(files);
-    renderList(files);
+    applyFilters();
+
+    if (opts.selectName) {
+      const match = S.filtered.find(f => f.name === opts.selectName) || S.files.find(f => f.name === opts.selectName);
+      if (match) await window.__av3.file(encodeURIComponent(match.name + '||' + match.modified));
+    }
+  },
+
+  setCategory(category) {
+    S.scopeCategory = category || null;
+    S.obj = null; S.files = []; S.filtered = []; S.selected = null;
+    S.query=''; S.typeFilter='all'; S.subFilter='all'; S.yearFilter='all'; S.sortOrder='date-desc';
+    const sf = document.getElementById('fdl-av3-search'); if (sf) sf.value = '';
+    const tf = document.getElementById('fdl-av3-type');   if (tf) tf.value = 'all';
+    const yf = document.getElementById('fdl-av3-year');   if (yf) { yf.innerHTML = `<option value="all">Alle Jahre</option>`; yf.value = 'all'; }
+    const so = document.getElementById('fdl-av3-sort');   if (so) so.value = 'date-desc';
+    const bc = document.getElementById('fdl-av3-bc');
+    if (bc) bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${category || 'Alle Liegenschaften'}</span>`;
+    renderSidebar();
+    renderPanel(null);
+    const li = document.getElementById('fdl-av3-li');
+    if (li) li.innerHTML = `<div class="av3-empty"><div class="av3-empty-icon">${SVG.folder}</div><div class="av3-empty-title">${category ? 'Bereich wählen' : 'Liegenschaft wählen'}</div></div>`;
   },
 
   async file(key) {
@@ -1017,16 +1037,19 @@ function buildOverlay() {
 async function open(opts = {}) {
   buildOverlay();
   await loadObjectsConfig();
-  S.category = opts.category || S.category || 'all';
   renderSidebar();
   document.getElementById('fdl-av3').classList.add('open');
 
-  const bc = document.getElementById('fdl-av3-bc');
-  if (bc && S.category && S.category !== 'all' && !opts.obj) {
-    bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${S.category}</span>`;
-  }
+  if (opts.scopeCategory) S.scopeCategory = opts.scopeCategory;
+  renderSidebar();
 
   const root = window.scopeRootHandle;
+  if (opts.obj) {
+    setTimeout(() => { window.__av3.obj(opts.obj, opts); }, 0);
+  } else if (opts.scopeCategory) {
+    setTimeout(() => { window.__av3.setCategory(opts.scopeCategory); }, 0);
+  }
+
   if (root) {
     for (const o of getObjList()) {
       loadFiles(o.code).then(files => {
@@ -1035,89 +1058,19 @@ async function open(opts = {}) {
       }).catch(() => {});
     }
   }
-
-  if (opts.obj) {
-    setTimeout(() => { window.__av3?.obj?.(opts.obj, { category: opts.category }); }, 80);
-  }
 }
 
 function close() {
   document.getElementById('fdl-av3')?.classList.remove('open');
   if (S.blobUrl) { try { URL.revokeObjectURL(S.blobUrl); } catch {} S.blobUrl = null; }
+  if (document.body.classList.contains('view-archive') && window.__fdlPro?.goDash) {
+    setTimeout(() => window.__fdlPro.goDash(), 0);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
    INIT
    ══════════════════════════════════════════════════════════════════════════ */
-
-
-let _allDocsCache = null;
-let _allDocsCacheAt = 0;
-
-function parseAmountNumber(v) {
-  if (typeof v === 'number') return v;
-  const n = parseFloat(String(v || '0').replace(/\./g, '').replace(',', '.').replace(/[^0-9.\-]/g, ''));
-  return Number.isFinite(n) ? n : 0;
-}
-
-function normalizeArchiveRecord(code, f) {
-  const invoiceIso = f.meta?.datum && /^\d{4}\.\d{2}\.\d{2}$/.test(f.meta.datum) ? f.meta.datum.replace(/\./g, '-') : '';
-  return {
-    id: `${code}::${f.name}::${f.modified}`,
-    objectCode: code,
-    category: deriveCategory(code),
-    folderType: fmtFolderType(f.folderType),
-    year: f.year || '',
-    fileName: f.name,
-    sender: f.meta?.absender || '',
-    senderNorm: (f.meta?.absender || '').toLowerCase(),
-    amount: parseAmountNumber(f.meta?.betrag),
-    invoiceDate: invoiceIso,
-    savedAt: new Date(f.modified || 0).toISOString(),
-    modified: f.modified,
-    ocrText: '',
-    serviceDesc: f.subfolder || '',
-    archiveRef: { objectCode: code, name: f.name, modified: f.modified, category: deriveCategory(code) },
-  };
-}
-
-async function getAllArchiveDocs(opts = {}) {
-  const now = Date.now();
-  if (!opts.refresh && _allDocsCache && (now - _allDocsCacheAt) < 30000) return _allDocsCache;
-  await loadObjectsConfig();
-  const objs = getObjList();
-  const out = [];
-  for (const o of objs) {
-    const files = await loadFiles(o.code);
-    for (const f of files) out.push(normalizeArchiveRecord(o.code, f));
-  }
-  _allDocsCache = out;
-  _allDocsCacheAt = now;
-  return out;
-}
-
-async function openByRef(ref) {
-  if (!ref?.objectCode || !ref?.name) return false;
-  await open({ category: ref.category || deriveCategory(ref.objectCode), obj: ref.objectCode });
-  const trySelect = async (attempt = 0) => {
-    const match = S.files.find(f => f.name === ref.name && (!ref.modified || Number(f.modified) === Number(ref.modified))) || S.files.find(f => f.name === ref.name);
-    if (match) {
-      S.selected = match;
-      renderList(S.filtered && S.filtered.length ? S.filtered : S.files);
-      await renderPanel(match);
-      setTimeout(() => {
-        document.querySelector('.av3-file.active')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }, 30);
-      return true;
-    }
-    if (attempt < 12) {
-      setTimeout(() => { trySelect(attempt + 1); }, 120);
-    }
-    return false;
-  };
-  setTimeout(() => { trySelect(0); }, 180);
-  return true;
-}
 
 function injectButton() {
   if (document.getElementById('fdl-av3-btn')) return;
@@ -1143,7 +1096,6 @@ function init() {
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-window.__fdlArchiveData = { getAllDocs: getAllArchiveDocs, openByRef, openCategory: (category) => open({ category }), deriveCategory };
 window.fdlArchivOpen = open;
 
 })();
