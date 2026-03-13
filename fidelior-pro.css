@@ -379,3 +379,70 @@ body.fdl-pro .btn-outline {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--pro-border); border-radius: 3px; }
 * { scrollbar-width: thin; scrollbar-color: var(--pro-border) transparent; }
+
+/* ── Category summary cards (NEW v2.1) ── */
+.fdl-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+@media (max-width: 900px) { .fdl-cat-grid { grid-template-columns: repeat(3, 1fr); } }
+
+.fdl-cat-card {
+  background: var(--pro-surface);
+  border: 1px solid var(--pro-border);
+  border-radius: var(--pro-radius-lg);
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: border-color .12s, box-shadow .12s;
+  position: relative;
+  overflow: hidden;
+}
+.fdl-cat-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 2px;
+  background: var(--pro-accent);
+  opacity: 0;
+  transition: opacity .12s;
+}
+.fdl-cat-card:hover { border-color: var(--pro-accent-bd); box-shadow: var(--pro-shadow-md); }
+.fdl-cat-card:hover::after { opacity: 1; }
+
+.fdl-cat-num {
+  font-size: 28px; font-weight: 700; color: var(--pro-text);
+  letter-spacing: -.03em; line-height: 1; margin-bottom: 4px;
+}
+.fdl-cat-label {
+  font-size: 12.5px; font-weight: 700; color: var(--pro-accent);
+  letter-spacing: -.01em;
+}
+.fdl-cat-sub {
+  font-size: 11px; color: var(--pro-text4); margin-top: 1px;
+}
+
+/* inbox row missing from original */
+.fdl-inbox-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 16px; border-bottom: 1px solid var(--pro-bg);
+  cursor: pointer; transition: background .1s;
+}
+.fdl-inbox-row:last-child { border-bottom: none; }
+.fdl-inbox-row:hover { background: var(--pro-surface2); }
+.fdl-inbox-icon {
+  width: 28px; height: 32px; border-radius: 4px; flex-shrink: 0;
+  background: var(--pro-blue-bg); border: 1px solid #BFDBFE;
+  display: flex; align-items: center; justify-content: center;
+}
+.fdl-inbox-icon svg { width: 12px; height: 12px; stroke: var(--pro-blue); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.fdl-inbox-name {
+  font-size: 12px; color: var(--pro-text); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; max-width: 240px;
+}
+
+/* dash body grid fix — 1 column on right sidebar */
+.fdl-dash-body {
+  grid-template-columns: 1fr 300px;
+}
+.fdl-dash-body > div:first-child { display: none; } /* hide placeholder */
