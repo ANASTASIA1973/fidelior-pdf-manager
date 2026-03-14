@@ -1,3 +1,4 @@
+
 /* ==========================================================================
    Fidelior Search  v1.0  —  Volltext-Suche mit natürlicher Sprache
    ==========================================================================
@@ -29,7 +30,14 @@ function idbGetAll(dbName, store) {
 }
 
 /* ─────────────────────────────── FMT ───────────────────────────────────── */
-const fmtDate = iso => { try { return new Date(iso).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}); } catch { return '—'; }};
+const fmtDate = iso => {
+  try {
+    if (!iso) return '—';
+    const value = typeof iso === 'number' ? iso : String(iso);
+    const d = typeof value === 'number' || /^\d+$/.test(value) ? new Date(Number(value)) : new Date(value);
+    return isNaN(d) ? '—' : d.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+  } catch { return '—'; }
+};
 const fmtEuro = n => !n ? '' : n.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 
 /* ─────────────────────────────── HISTORY ───────────────────────────────── */
@@ -88,19 +96,19 @@ function parseQuery(q) {
   if (ltM) { filter.amountLt = parseFloat(ltM[1].replace(',','.')); chips.push({label:`< ${fmtEuro(filter.amountLt)}`, type:'amt'}); }
 
   // Dokumenttyp
-  const TYPES = { rechnung:'rechnung', rechnungen:'rechnung', gutschrift:'gutschrift', vertrag:'vertrag', angebot:'angebot', sonstiges:'sonstiges' };
+  const TYPES = { rechnung:'rechnung', rechnungen:'rechnung', gutschrift:'gutschrift', vertrag:'vertrag', angebot:'angebot', sonstiges:'sonstiges', dokument:'dokument', dokumente:'dokument' };
   for (const [kw, key] of Object.entries(TYPES)) {
     if (lower.includes(kw)) { filter.docType = key; chips.push({label:key.charAt(0).toUpperCase()+key.slice(1), type:'type'}); break; }
   }
 
   // Absender nach "von"
-  const smatch = lower.match(/\bvon\s+([a-zäöüß][a-zäöüß\-\.]{2,25})(?:\s+\d{4}|\s+im\b|\s*$)/i);
+  const smatch = lower.match(/\bvon\s+([a-zäöüß0-9&][a-zäöüß0-9&\-\.\s]{2,40})(?:\s+\d{4}|\s+im\b|\s*$)/i);
   if (smatch) { filter.sender = smatch[1].trim(); chips.push({label:`Von: ${filter.sender}`, type:'sender'}); }
 
   // Rest = Freitext
   let rest = q;
   [/\b20\d{2}\b/g, /\büber\s+\d[\d.,]*\s*(?:euro|€)?/gi, /\bunter\s+\d[\d.,]*\s*(?:euro|€)?/gi,
-   /\bvon\s+\S{3,26}/gi, /\b(Rechnungen?|Gutschriften?|Verträge?|Angebote?|Sonstiges)\b/gi,
+   /\bvon\s+\S.{1,40}/gi, /\b(Rechnungen?|Gutschriften?|Verträge?|Angebote?|Sonstiges|Dokumente?)\b/gi,
    /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
   ].forEach(p => { rest = rest.replace(p,''); });
   // Objekt-Codes entfernen
@@ -123,31 +131,118 @@ function highlightText(text, query) {
   return out;
 }
 
+function normalizeSearchDoc(d, source) {
+  return {
+    source,
+    id: d.id,
+    fileName: d.fileName || d.name || '',
+    objectCode: d.objectCode || '',
+    objectName: d.objectName || '',
+    category: d.category || '',
+    docType: d.docType || '',
+    amount: d.amount || 0,
+    amountRaw: d.amountRaw || '',
+    invoiceDate: d.invoiceDate || '',
+    savedAt: d.savedAt || '',
+    modified: d.modified || 0,
+    sender: d.sender || '',
+    senderNorm: d.senderNorm || (d.sender || '').toLowerCase(),
+    ocrText: d.ocrText || '',
+    serviceDesc: d.serviceDesc || '',
+    keywords: d.keywords || [],
+    year: d.year || '',
+    subfolder: d.subfolder || '',
+    selectName: d.selectName || d.fileName || d.name || '',
+    archiveRef: d.archiveRef || null
+  };
+}
+
+function dedupeDocs(docs) {
+  const seen = new Map();
+  for (const d of docs) {
+    const key = [
+      d.objectCode || '',
+      d.fileName || '',
+      d.invoiceDate || '',
+      d.modified || '',
+      d.amount || ''
+    ].join('||');
+
+    if (!seen.has(key)) {
+      seen.set(key, d);
+      continue;
+    }
+
+    const prev = seen.get(key);
+    if (prev.source === 'index' && d.source === 'archive') continue;
+    if (prev.source === 'archive' && d.source === 'index') {
+      seen.set(key, { ...d, archiveRef: prev.archiveRef || d.archiveRef, modified: prev.modified || d.modified });
+    }
+  }
+  return [...seen.values()];
+}
+
+function sortMergedResults(results) {
+  return [...results].sort((a, b) => {
+    const ad = a.invoiceDate || a.savedAt || a.modified || 0;
+    const bd = b.invoiceDate || b.savedAt || b.modified || 0;
+    const ats = typeof ad === 'number' ? ad : Date.parse(ad) || 0;
+    const bts = typeof bd === 'number' ? bd : Date.parse(bd) || 0;
+    return bts - ats;
+  });
+}
+
 /* ─────────────────────────────── SEARCH CORE ───────────────────────────── */
 async function runSearch(filter, opts = {}) {
-  // Nutze fidelior-index wenn verfügbar
-  if (window.__fdlIdx?.search) {
-    return window.__fdlIdx.search(filter, opts);
-  }
-  // Fallback: direkt aus IDB
-  const docs = await idbGetAll('fidelior_index_v1','documents');
-  const tf = filter;
-  const results = docs.filter(d => {
-    if (tf.objectCode && d.objectCode !== tf.objectCode) return false;
-    if (tf.year && d.year !== tf.year) return false;
-    if (tf.month && d.invoiceDate && !d.invoiceDate.slice(5,7).startsWith(tf.month)) return false;
-    if (tf.amountGt !== undefined && d.amount <= tf.amountGt) return false;
-    if (tf.amountLt !== undefined && d.amount >= tf.amountLt) return false;
-    if (tf.docType && d.docType !== tf.docType) return false;
-    if (tf.sender && !(d.senderNorm||'').includes(tf.sender.toLowerCase())) return false;
-    if (tf.text) {
-      const h = [d.fileName,d.sender,d.ocrText,d.serviceDesc,...(d.keywords||[])].join(' ').toLowerCase();
-      if (!h.includes(tf.text.toLowerCase())) return false;
+  let idxResults = { results: [], total: 0, filter };
+  let archResults = { results: [], total: 0, filter };
+
+  try {
+    if (window.__fdlIdx?.search) {
+      idxResults = await window.__fdlIdx.search(filter, opts);
+    } else {
+      const docs = await idbGetAll('fidelior_index_v1','documents');
+      const tf = filter;
+      const results = docs.filter(d => {
+        if (tf.objectCode && d.objectCode !== tf.objectCode) return false;
+        if (tf.year && d.year !== tf.year) return false;
+        if (tf.month && d.invoiceDate && !d.invoiceDate.slice(5,7).startsWith(tf.month)) return false;
+        if (tf.amountGt !== undefined && d.amount <= tf.amountGt) return false;
+        if (tf.amountLt !== undefined && d.amount >= tf.amountLt) return false;
+        if (tf.docType && d.docType !== tf.docType) return false;
+        if (tf.sender && !(d.senderNorm||'').includes(tf.sender.toLowerCase())) return false;
+        if (tf.text) {
+          const h = [d.fileName,d.sender,d.ocrText,d.serviceDesc,...(d.keywords||[])].join(' ').toLowerCase();
+          if (!h.includes(tf.text.toLowerCase())) return false;
+        }
+        return true;
+      });
+      results.sort((a,b) => (b.savedAt||'').localeCompare(a.savedAt||''));
+      idxResults = { results: results.slice(0, opts.limit||100), total: results.length, filter };
     }
-    return true;
-  });
-  results.sort((a,b) => (b.savedAt||'').localeCompare(a.savedAt||''));
-  return { results: results.slice(0, opts.limit||100), total: results.length, filter };
+  } catch (e) {
+    console.warn('[FideliorSearch] Index-Suche fehlgeschlagen:', e);
+  }
+
+  try {
+    if (typeof window.fdlArchivSearch === 'function') {
+      archResults = await window.fdlArchivSearch(filter, { limit: opts.limit || 100, maxAgeMs: 30000 });
+    }
+  } catch (e) {
+    console.warn('[FideliorSearch] Archiv-Suche fehlgeschlagen:', e);
+  }
+
+  const merged = dedupeDocs([
+    ...(idxResults.results || []).map(d => normalizeSearchDoc(d, 'index')),
+    ...(archResults.results || []).map(d => normalizeSearchDoc(d, 'archive'))
+  ]);
+
+  const sorted = sortMergedResults(merged);
+  return {
+    results: sorted.slice(0, opts.limit || 100),
+    total: sorted.length,
+    filter
+  };
 }
 
 /* ─────────────────────────────── CSS ───────────────────────────────────── */
@@ -407,9 +502,10 @@ async function doSearch(filter, rawQuery) {
             ${amt?`<span class="fdl-srch-rc a">${amt}</span>`:''}
             ${d.docType?`<span class="fdl-srch-rc t">${d.docType}</span>`:''}
             ${d.invoiceNo?`<span class="fdl-srch-rc t">${d.invoiceNo}</span>`:''}
+            ${d.source==='archive'?`<span class="fdl-srch-rc t">Archiv</span>`:''}
           </div>
         </div>
-        <div class="fdl-srch-result-date">${fmtDate(d.invoiceDate||d.savedAt)}</div>
+        <div class="fdl-srch-result-date">${fmtDate(d.invoiceDate||d.savedAt||d.modified)}</div>
       </div>`;
     }).join('');
 
@@ -434,22 +530,23 @@ function showHistory() {
 function openResult(doc) {
   addHistory(_input.value.trim());
   close();
-  if (window.__fdlPro?.openIndexedDoc) {
+  if (window.__fdlPro?.openIndexedDoc && doc.source !== 'archive') {
     window.__fdlPro.openIndexedDoc(doc);
     return;
   }
   if (typeof window.fdlArchivOpen === 'function') {
-    const derive = window.fdlDeriveCategory ? window.fdlDeriveCategory(doc.objectCode) : '';
+    const derive = doc.archiveRef?.scopeCategory || (window.fdlDeriveCategory ? window.fdlDeriveCategory(doc.objectCode) : '');
     const typeFilter =
-      doc.docType === 'Rechnung' ? 'Rechnungen' :
-      doc.docType === 'Dokument' ? 'Dokumente' :
+      doc.docType === 'Rechnung' || doc.docType === 'Rechnungen' ? 'Rechnungen' :
+      doc.docType === 'Dokument' || doc.docType === 'Dokumente' ? 'Dokumente' :
+      doc.docType === 'Abrechnungsbelege' ? 'Abrechnungsbelege' :
       'all';
     window.fdlArchivOpen({
-      obj: doc.objectCode || '',
-      code: doc.objectCode || '',
+      obj: doc.archiveRef?.code || doc.objectCode || '',
+      code: doc.archiveRef?.code || doc.objectCode || '',
       scopeCategory: derive || '',
       typeFilter,
-      selectName: doc.fileName || '',
+      selectName: doc.selectName || doc.fileName || '',
       query: (doc.fileName || '').replace(/\.pdf$/i, ''),
       sortOrder: 'date-desc'
     });

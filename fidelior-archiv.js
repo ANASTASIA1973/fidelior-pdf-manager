@@ -1,3 +1,4 @@
+
 /* ==========================================================================
    Fidelior Archiv  v3.1  —  Dokument-Browser (vollständig überarbeitet)
    ==========================================================================
@@ -904,6 +905,151 @@ async function renderPDF(file) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   ARCHIV-SUCHE FÜR GLOBALE SUCHE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const _globalSearchCache = {
+  ts: 0,
+  rootKey: '',
+  files: []
+};
+
+function getRootCacheKey() {
+  const h = window.scopeRootHandle;
+  if (!h) return '';
+  return h.name || 'scope-root';
+}
+
+function toAmountNumber(raw) {
+  if (!raw) return 0;
+  const s = String(raw).replace(/[€\s]/g, '').replace(/\./g, '').replace(',', '.').replace(/[^0-9.\-]/g, '');
+  const n = parseFloat(s);
+  return isFinite(n) ? n : 0;
+}
+
+function toArchiveSearchDoc(f) {
+  const category = window.fdlDeriveCategory ? window.fdlDeriveCategory(f.objectCode) : '';
+  const folderType = fmtFolderType(f.folderType);
+  return {
+    source: 'archive',
+    id: `archive:${f.objectCode || ''}:${f.name}:${f.modified}`,
+    fileName: f.name || '',
+    objectCode: f.objectCode || '',
+    objectName: f.objectName || '',
+    category: category || '',
+    docType: folderType,
+    amount: toAmountNumber(f.meta?.betrag || ''),
+    amountRaw: f.meta?.betrag || '',
+    invoiceDate: f.meta?.datum ? f.meta.datum.replace(/\./g, '-') : '',
+    year: f.year || '',
+    sender: f.meta?.absender || '',
+    senderNorm: (f.meta?.absender || '').toLowerCase(),
+    ocrText: '',
+    serviceDesc: '',
+    keywords: [],
+    subfolder: f.subfolder || '',
+    modified: f.modified || 0,
+    selectName: f.name || '',
+    archiveRef: {
+      code: f.objectCode || '',
+      scopeCategory: category || '',
+      modified: f.modified || 0
+    }
+  };
+}
+
+async function getAllArchiveFilesFresh() {
+  await loadObjectsConfig();
+  const objs = getObjList();
+  let all = [];
+  for (const o of objs) {
+    const files = await loadFiles(o.code);
+    all.push(...files);
+  }
+  return all;
+}
+
+async function getAllArchiveFilesCached(maxAgeMs = 30000) {
+  const now = Date.now();
+  const rootKey = getRootCacheKey();
+  if (_globalSearchCache.files.length && _globalSearchCache.rootKey === rootKey && (now - _globalSearchCache.ts) < maxAgeMs) {
+    return _globalSearchCache.files;
+  }
+  const all = await getAllArchiveFilesFresh();
+  _globalSearchCache.ts = now;
+  _globalSearchCache.rootKey = rootKey;
+  _globalSearchCache.files = all;
+  return all;
+}
+
+function matchesArchiveFilter(doc, tf) {
+  if (tf.objectCode && doc.objectCode !== tf.objectCode) return false;
+  if (tf.year && doc.year !== String(tf.year)) return false;
+  if (tf.month && doc.invoiceDate) {
+    const month = doc.invoiceDate.slice(5, 7);
+    if (month !== tf.month) return false;
+  }
+  if (tf.amountGt !== undefined && doc.amount <= tf.amountGt) return false;
+  if (tf.amountLt !== undefined && doc.amount >= tf.amountLt) return false;
+
+  if (tf.docType) {
+    const wanted = String(tf.docType).toLowerCase();
+    const actual = String(doc.docType || '').toLowerCase();
+    if (wanted === 'rechnung' || wanted === 'rechnungen') {
+      if (actual !== 'rechnungen') return false;
+    } else if (wanted === 'dokument' || wanted === 'dokumente') {
+      if (actual !== 'dokumente') return false;
+    } else if (wanted === 'abrechnungsbelege') {
+      if (actual !== 'abrechnungsbelege') return false;
+    } else if (actual !== wanted) {
+      return false;
+    }
+  }
+
+  if (tf.sender) {
+    const senderNeedle = String(tf.sender).toLowerCase();
+    if (!(doc.senderNorm || '').includes(senderNeedle)) return false;
+  }
+
+  if (tf.text) {
+    const haystack = [
+      doc.fileName,
+      doc.sender,
+      doc.amountRaw,
+      doc.docType,
+      doc.category,
+      doc.objectCode,
+      doc.objectName,
+      doc.subfolder,
+      doc.year
+    ].join(' ').toLowerCase();
+    if (!haystack.includes(String(tf.text).toLowerCase())) return false;
+  }
+
+  return true;
+}
+
+async function searchArchiveGlobal(filter, opts = {}) {
+  if (!window.scopeRootHandle) return { results: [], total: 0, source: 'archive' };
+
+  const files = await getAllArchiveFilesCached(opts.maxAgeMs || 30000);
+  const mapped = files.map(toArchiveSearchDoc);
+  const results = mapped.filter(doc => matchesArchiveFilter(doc, filter));
+
+  results.sort((a, b) => {
+    const am = a.modified || 0;
+    const bm = b.modified || 0;
+    return bm - am;
+  });
+
+  return {
+    results: results.slice(0, opts.limit || 200),
+    total: results.length,
+    source: 'archive'
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    AKTIONEN
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -1251,5 +1397,6 @@ function init() {
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 window.fdlArchivOpen = open;
+window.fdlArchivSearch = searchArchiveGlobal;
 
 })();
