@@ -1161,11 +1161,16 @@ function hideMeta() {
   _meta.style.display = 'none';
 }
 
-function showMeta(total, ms) {
+function showMeta(total, ms, visibleTotal, filter) {
   _meta.style.display = 'flex';
-  _meta.innerHTML = `<span>${total} Dokument${total !== 1 ? 'e' : ''} gefunden</span><span>${ms}ms</span>`;
-}
 
+  const hasLimit = Number(filter?.limit || 0) > 0 && Number(total || 0) > Number(visibleTotal || 0);
+  const leftText = hasLimit
+    ? `${visibleTotal} von ${total} Dokument${total !== 1 ? 'en' : ''} angezeigt`
+    : `${total} Dokument${total !== 1 ? 'e' : ''} gefunden`;
+
+  _meta.innerHTML = `<span>${leftText}</span><span>${ms}ms</span>`;
+}
 /* ─────────────────────────────── SEARCH RUN ────────────────────────────── */
 async function doSearch(filter, rawQuery) {
   _results.innerHTML = '<div class="fdl-srch-empty"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid #E5E7EB;border-top-color:#5B1B70;animation:fdl-sp .6s linear infinite;vertical-align:middle;margin-right:6px"></span>Suche…</div>';
@@ -1173,12 +1178,11 @@ async function doSearch(filter, rawQuery) {
   const t0 = Date.now();
 
   try {
-    const { results, total } = await runSearch(filter, { limit: 50 });
+    const { results, total, visibleTotal } = await runSearch(filter, { limit: 50 });
     const ms = Date.now() - t0;
 
     _lastResults = results;
-    showMeta(total, ms);
-
+   showMeta(total, ms, visibleTotal, filter);
     if (!results.length) {
       _results.innerHTML = `<div class="fdl-srch-empty">Keine Dokumente gefunden für „${rawQuery}“</div>`;
       return;
