@@ -342,6 +342,21 @@ function injectCSS() {
   background:#fff;
   margin-top:2px;
 }
+  .fdl-srch-chips{
+  display:flex;
+  gap:5px;
+  flex-wrap:wrap;
+  padding:8px 18px 8px;
+  min-height:32px;
+  overflow:visible;
+  align-items:center;
+  position:sticky;
+  top:0;
+  background:#fff;
+  z-index:4;
+}
+
+
 .fdl-srch-chips:empty{display:none}
 .fdl-srch-chip{
   display:inline-flex;align-items:center;gap:4px;
@@ -356,19 +371,6 @@ function injectCSS() {
 .fdl-srch-chip.sender{background:#FEF3C7;color:#92400E;border-color:#FDE68A}
 .fdl-srch-chip.text  {background:#F3F4F6;color:#374151;border-color:#E5E7EB}
 
-/* Meta */
-.fdl-srch-meta{
-  padding:6px 18px 8px;
-  font-size:11px;
-  color:#9CA3AF;
-  border-bottom:1px solid #F9FAFB;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  position:relative;
-  z-index:2;
-  background:#fff;
-}
 
 /* Results */
 .fdl-srch-results{flex:1;overflow-y:auto}
