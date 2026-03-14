@@ -2077,16 +2077,13 @@ dialog .dialog-close{
   display:flex;
 }
 /* ==========================================================================
-   FIX: nur EINE Shell aktiv
-   Bestehende Fidelior-Pro-Shell behält Layout-Kontrolle
+   FIX v2: eine Shell, aber Filing wieder mit großer Vorschau
    ========================================================================== */
 
-/* neue HTML-Sidebar deaktivieren */
 .app-sidebar{
   display:none !important;
 }
 
-/* Wrapper neutralisieren */
 .app-shell{
   display:block !important;
   min-height:0 !important;
@@ -2098,7 +2095,6 @@ dialog .dialog-close{
   min-width:0 !important;
 }
 
-/* Header bleibt, aber ohne eigenes Flächen-Layout */
 .app-workspace.container{
   max-width:none !important;
   width:auto !important;
@@ -2107,13 +2103,11 @@ dialog .dialog-close{
   padding:0 !important;
 }
 
-/* Bestehende JS-Shell bekommt volle Breite */
 #fdl-main{
   width:calc(100vw - 236px) !important;
   max-width:none !important;
 }
 
-/* Dashboard/Archiv nicht künstlich begrenzen */
 #fdl-content,
 #fdl-view-dash,
 #fdl-view-archive{
@@ -2121,56 +2115,74 @@ dialog .dialog-close{
   max-width:none !important;
 }
 
-/* Haupt-Container im Filing-Modus großzügiger */
+/* Filing: linke Spalte bewusst schmaler, Vorschau deutlich größer */
 body.view-filing main.container{
   max-width:none !important;
   width:calc(100vw - 236px) !important;
   height:calc(100vh - 72px) !important;
   margin:0 !important;
-  padding:16px 18px !important;
+  padding:14px 16px !important;
 }
 
-/* Filing-Grid breiter und ruhiger */
 body.view-filing #mainGrid.grid{
-  grid-template-columns:minmax(470px, 560px) minmax(0, 1fr) !important;
-  gap:18px !important;
+  grid-template-columns: minmax(360px, 430px) minmax(720px, 1fr) !important;
+  gap:16px !important;
   height:100% !important;
+  align-items:stretch !important;
 }
 
-/* linkes Formularpanel sauberer */
 body.view-filing #leftPane{
   min-width:0 !important;
   width:100% !important;
 }
 
-/* rechte Vorschau soll dominant werden */
 body.view-filing #previewPane{
   min-width:0 !important;
   width:100% !important;
+  display:flex !important;
+  flex-direction:column !important;
+}
+
+body.view-filing #previewPane .preview-head{
+  flex:0 0 auto !important;
 }
 
 body.view-filing #previewPane .preview-wrap{
-  min-height:calc(100vh - 190px) !important;
+  flex:1 1 auto !important;
+  min-height:0 !important;
+  height:auto !important;
 }
 
-/* Dashboard ebenfalls voller nutzen */
+/* WICHTIG: Zoom nicht durch CSS kaputtquetschen */
+body.view-filing #previewPane .pdf-viewer{
+  padding:16px !important;
+}
+
+body.view-filing #previewPane .pdf-page{
+  width:max-content !important;
+  max-width:none !important;
+  margin:0 auto 16px auto !important;
+}
+
+body.view-filing #previewPane .pdf-page canvas{
+  width:auto !important;
+  max-width:none !important;
+  height:auto !important;
+  display:block !important;
+}
+
+/* Dashboard voller nutzen */
 body.view-dash #fdl-view-dash{
   padding:16px 18px 22px !important;
 }
 
-/* große Screens: noch mehr Luft */
 @media (min-width: 1500px){
   body.view-filing #mainGrid.grid{
-    grid-template-columns:minmax(520px, 620px) minmax(0, 1fr) !important;
-    gap:20px !important;
-  }
-
-  #fdl-main{
-    width:calc(100vw - 236px) !important;
+    grid-template-columns: minmax(380px, 460px) minmax(820px, 1fr) !important;
+    gap:18px !important;
   }
 }
 
-/* Mobile / kleinere Fenster */
 @media (max-width: 980px){
   #fdl-main{
     width:100vw !important;
@@ -2190,5 +2202,16 @@ body.view-dash #fdl-view-dash{
 
   body.view-filing #previewPane .preview-wrap{
     min-height:68vh !important;
+  }
+
+  body.view-filing #previewPane .pdf-page{
+    width:auto !important;
+    max-width:100% !important;
+  }
+
+  body.view-filing #previewPane .pdf-page canvas{
+    width:100% !important;
+    max-width:100% !important;
+    height:auto !important;
   }
 }
