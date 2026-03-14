@@ -3150,6 +3150,8 @@ async function refreshInbox(){
               if (typeof window.__fdl_takeFile === "function"){
                 await window.__fdl_takeFile(f, { fromInbox:true });
               }
+                  // bestehende Navigation wiederverwenden
+    document.getElementById("btnNavSave")?.click();
               toast(`Inbox-Datei ausgewählt: <code>${entry.name}</code>`, 1400);
             } catch (err) {
               console.warn("[refreshInbox] Klick-Fehler:", err);
