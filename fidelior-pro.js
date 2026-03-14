@@ -1209,6 +1209,7 @@ const _prevSaved = window.fdlOnFileSaved;
 window.fdlOnFileSaved = function(data) {
   try { _prevSaved?.(data); } catch {}
   invalidateArchiveCache();
+  try { window.fdlArchivInvalidateSearchCache?.(); } catch {}
   setTimeout(() => {
     updateSidebarCounts();
     if (_view === 'dash') renderDash();

@@ -55,66 +55,108 @@ function addHistory(q) {
   } catch {}
 }
 
+
+const SEARCH_MONTH_MAP = {januar:'01',februar:'02',märz:'03',maerz:'03',april:'04',mai:'05',juni:'06',juli:'07',august:'08',september:'09',oktober:'10',november:'11',dezember:'12'};
+const SEARCH_CATEGORY_KEYWORDS = {
+  Privat: ['privat','private','persönlich','persoenlich'],
+  Fidelior: ['fidelior'],
+  Objekte: ['objekt','objekte','liegenschaft','liegenschaften','immobilie','immobilien']
+};
+function normalizeSearchValue(v) {
+  return String(v || '')
+    .toLowerCase()
+    .replace(/[ä]/g,'ae').replace(/[ö]/g,'oe').replace(/[ü]/g,'ue').replace(/[ß]/g,'ss')
+    .replace(/[^a-z0-9]+/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+function tokenizeSearchValue(v) {
+  return normalizeSearchValue(v).split(' ').filter(Boolean);
+}
+
 /* ─────────────────────────────── NL-PARSER ─────────────────────────────── */
 function parseQuery(q) {
-  const lower = q.toLowerCase().trim();
-  const chips = [];  // { label, removable }
-  const filter = { raw: q };
+  const raw = String(q || '').trim();
+  const lower = raw.toLowerCase();
+  const normalized = normalizeSearchValue(lower);
+  const chips = [];
+  const filter = { raw };
 
-  // Objekte aus objectSelect
   const sel = document.getElementById('objectSelect');
-  const objCodes = sel ? Array.from(sel.options).filter(o=>o.value).map(o=>o.value.toLowerCase()) : [];
-  for (const code of objCodes) {
-    if (lower.includes(code.toLowerCase())) {
-      filter.objectCode = code.toUpperCase();
+  const objOptions = sel ? Array.from(sel.options).filter(o => o.value).map(o => ({ code: o.value, name: o.textContent || '' })) : [];
+  for (const obj of objOptions) {
+    const codeNorm = normalizeSearchValue(obj.code);
+    const nameNorm = normalizeSearchValue(obj.name);
+    if ((codeNorm && normalized.includes(codeNorm)) || (nameNorm && normalized.includes(nameNorm.split(' ').slice(0, 2).join(' ')))) {
+      filter.objectCode = obj.code.toUpperCase();
       chips.push({ label: `Objekt: ${filter.objectCode}`, type:'obj' });
       break;
     }
   }
 
-  // Jahres-Erkennung
   const ym = lower.match(/\b(20\d{2})\b/);
   if (ym) {
     filter.year = ym[1];
     chips.push({ label: `Jahr: ${ym[1]}`, type:'year' });
   }
 
-  // Monats-Erkennung
-  const MONTHS = {januar:1,februar:2,märz:3,maerz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12};
-  for (const [name, num] of Object.entries(MONTHS)) {
-    if (lower.includes(name)) {
-      filter.month = String(num).padStart(2,'0');
+  for (const [name, num] of Object.entries(SEARCH_MONTH_MAP)) {
+    if (normalized.includes(normalizeSearchValue(name))) {
+      filter.month = num;
       chips.push({ label: name.charAt(0).toUpperCase()+name.slice(1), type:'month' });
       break;
     }
   }
 
-  // Betrag-Operatoren
-  const gtM = lower.match(/über\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
-  if (gtM) { filter.amountGt = parseFloat(gtM[1].replace(',','.')); chips.push({label:`> ${fmtEuro(filter.amountGt)}`, type:'amt'}); }
-  const ltM = lower.match(/unter\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
-  if (ltM) { filter.amountLt = parseFloat(ltM[1].replace(',','.')); chips.push({label:`< ${fmtEuro(filter.amountLt)}`, type:'amt'}); }
-
-  // Dokumenttyp
-  const TYPES = { rechnung:'rechnung', rechnungen:'rechnung', gutschrift:'gutschrift', vertrag:'vertrag', angebot:'angebot', sonstiges:'sonstiges', dokument:'dokument', dokumente:'dokument' };
-  for (const [kw, key] of Object.entries(TYPES)) {
-    if (lower.includes(kw)) { filter.docType = key; chips.push({label:key.charAt(0).toUpperCase()+key.slice(1), type:'type'}); break; }
+  const gtM = lower.match(/\b(?:ueber|über|ab|mehr als|mindestens)\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
+  if (gtM) {
+    filter.amountGt = parseFloat(gtM[1].replace(',','.'));
+    chips.push({label:`> ${fmtEuro(filter.amountGt)}`, type:'amt'});
+  }
+  const ltM = lower.match(/\b(?:unter|bis|maximal|hoechstens|höchstens)\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
+  if (ltM) {
+    filter.amountLt = parseFloat(ltM[1].replace(',','.'));
+    chips.push({label:`< ${fmtEuro(filter.amountLt)}`, type:'amt'});
   }
 
-  // Absender nach "von"
-  const smatch = lower.match(/\bvon\s+([a-zäöüß0-9&][a-zäöüß0-9&\-\.\s]{2,40})(?:\s+\d{4}|\s+im\b|\s*$)/i);
-  if (smatch) { filter.sender = smatch[1].trim(); chips.push({label:`Von: ${filter.sender}`, type:'sender'}); }
+  const TYPES = { rechnung:'rechnung', rechnungen:'rechnung', eingangsrechnung:'rechnung', gutschrift:'gutschrift', vertrag:'vertrag', verträge:'vertrag', vertraege:'vertrag', angebot:'angebot', angebote:'angebot', dokument:'dokument', dokumente:'dokument' };
+  for (const [kw, key] of Object.entries(TYPES)) {
+    if (normalized.includes(normalizeSearchValue(kw))) { filter.docType = key; chips.push({label:key.charAt(0).toUpperCase()+key.slice(1), type:'type'}); break; }
+  }
 
-  // Rest = Freitext
-  let rest = q;
-  [/\b20\d{2}\b/g, /\büber\s+\d[\d.,]*\s*(?:euro|€)?/gi, /\bunter\s+\d[\d.,]*\s*(?:euro|€)?/gi,
-   /\bvon\s+\S.{1,40}/gi, /\b(Rechnungen?|Gutschriften?|Verträge?|Angebote?|Sonstiges|Dokumente?)\b/gi,
-   /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
-  ].forEach(p => { rest = rest.replace(p,''); });
-  // Objekt-Codes entfernen
-  for (const code of objCodes) rest = rest.replace(new RegExp('\\b'+code+'\\b','gi'),'');
-  rest = rest.trim().replace(/\s{2,}/g,' ');
-  if (rest.length > 1) { filter.text = rest; chips.push({label:`"${rest}"`, type:'text'}); }
+  const smatch = lower.match(/\b(?:von|bei)\s+([a-zäöüß0-9&][a-zäöüß0-9&\-.\s]{1,40}?)(?:\s+\d{4}|\s+(?:im|in|aus|über|ueber)\b|\s*$)/i);
+  if (smatch) {
+    filter.sender = smatch[1].trim();
+    chips.push({label:`Von: ${filter.sender}`, type:'sender'});
+  }
+
+  for (const [category, words] of Object.entries(SEARCH_CATEGORY_KEYWORDS)) {
+    if (words.some(word => normalized.includes(normalizeSearchValue(word)))) {
+      filter.category = category;
+      chips.push({label:`Kategorie: ${category}`, type:'cat'});
+      break;
+    }
+  }
+
+  let rest = raw;
+  [
+    /\b20\d{2}\b/g,
+    /\b(?:ueber|über|ab|mehr als|mindestens|unter|bis|maximal|hoechstens|höchstens)\s+\d[\d.,]*\s*(?:euro|€)?/gi,
+    /\b(?:von|bei)\s+[a-zäöüß0-9&][a-zäöüß0-9&\-.\s]{1,40}/gi,
+    /\b(Rechnungen?|Eingangsrechnungen?|Gutschriften?|Verträge?|Vertraege?|Angebote?|Dokumente?)\b/gi,
+    /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
+    /\b(?:privat|persönlich|persoenlich|fidelior|objekte|objekt|liegenschaft|liegenschaften|immobilie|immobilien)\b/gi,
+  ].forEach(p => { rest = rest.replace(p,' '); });
+  for (const obj of objOptions) rest = rest.replace(new RegExp('\\b'+obj.code+'\\b','gi'),' ');
+  rest = rest.replace(/\s{2,}/g,' ').trim();
+  if (rest.length > 1) {
+    filter.text = rest;
+    filter.textTokens = tokenizeSearchValue(rest);
+    chips.push({label:`"${rest}"`, type:'text'});
+  } else {
+    filter.text = '';
+    filter.textTokens = [];
+  }
 
   return { filter, chips };
 }
@@ -184,6 +226,9 @@ function dedupeDocs(docs) {
 
 function sortMergedResults(results) {
   return [...results].sort((a, b) => {
+    const as = Number(a.searchScore || a.score || 0);
+    const bs = Number(b.searchScore || b.score || 0);
+    if (bs !== as) return bs - as;
     const ad = a.invoiceDate || a.savedAt || a.modified || 0;
     const bd = b.invoiceDate || b.savedAt || b.modified || 0;
     const ats = typeof ad === 'number' ? ad : Date.parse(ad) || 0;

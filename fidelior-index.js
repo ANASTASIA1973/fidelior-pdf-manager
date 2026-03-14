@@ -462,114 +462,219 @@ async function detectConflicts(sender, objectCode, invoiceDateISO, year) {
    VOLLTEXT-SUCHE
    ══════════════════════════════════════════════════════════════════════════ */
 
+const IDX_MONTHS = { januar:'01', februar:'02', märz:'03', maerz:'03', april:'04', mai:'05', juni:'06', juli:'07', august:'08', september:'09', oktober:'10', november:'11', dezember:'12' };
+const IDX_TOPIC_SYNONYMS = {
+  handwerker: ['handwerker','reparatur','reparaturen','wartung','montage','elektriker','sanitaer','sanitär','hausmeister'],
+  versicherung: ['versicherung','versicherungen','police','schaden','beitrag','haftpflicht','kasko'],
+  telefon: ['telefon','telekom','vodafone','o2','mobilfunk','internet'],
+  strom: ['strom','energie','versorger','abschlag'],
+  wasser: ['wasser','abwasser'],
+  steuer: ['steuer','steuererklaerung','steuererklärung','finanzamt'],
+};
+
+function normSearch(v) {
+  return String(v || '')
+    .toLowerCase()
+    .replace(/[ä]/g, 'ae')
+    .replace(/[ö]/g, 'oe')
+    .replace(/[ü]/g, 'ue')
+    .replace(/[ß]/g, 'ss')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeSearch(v) {
+  return normSearch(v).split(' ').filter(Boolean);
+}
+
 /**
  * Natürliche-Sprache-Anfrage → strukturierte Filter
  */
 function parseNaturalQuery(q) {
-  const lower = q.toLowerCase().trim();
-  const filter = { raw: q };
+  if (q && typeof q === 'object' && !Array.isArray(q)) {
+    const cloned = { ...q };
+    const raw = String(cloned.raw || cloned.text || '').trim();
+    cloned.raw = raw;
+    cloned.text = String(cloned.text || '').trim();
+    cloned.sender = String(cloned.sender || '').trim();
+    cloned.textTokens = cloned.textTokens || tokenizeSearch(cloned.text);
+    return cloned;
+  }
 
-  // Objekt-Namen (aus objects.json via window)
+  const raw = String(q || '').trim();
+  const lower = raw.toLowerCase().trim();
+  const filter = { raw, text: '', textTokens: [] };
+
   const objList = getObjectList();
   for (const o of objList) {
-    if (lower.includes(o.code.toLowerCase()) ||
-        (o.displayName && lower.includes(o.displayName.toLowerCase().split(' ')[0].toLowerCase()))) {
+    const codeNorm = normSearch(o.code);
+    const nameNorm = normSearch(o.displayName || '');
+    if (codeNorm && normSearch(lower).includes(codeNorm)) {
       filter.objectCode = o.code;
+      break;
+    }
+    if (nameNorm) {
+      const head = nameNorm.split(' ').slice(0, 2).join(' ');
+      if (head && normSearch(lower).includes(head)) {
+        filter.objectCode = o.code;
+        break;
+      }
+    }
+  }
+
+  const yearM = lower.match(/\b(20\d{2})\b/);
+  if (yearM) filter.year = yearM[1];
+
+  for (const [name, month] of Object.entries(IDX_MONTHS)) {
+    if (normSearch(lower).includes(normSearch(name))) {
+      filter.month = month;
       break;
     }
   }
 
-  // Jahr
-  const yearM = lower.match(/\b(20\d{2})\b/);
-  if (yearM) filter.year = yearM[1];
-
-  // Monat
-  const MONTHS = { januar:1,februar:2,märz:3,maerz:3,april:4,mai:5,juni:6,
-    juli:7,august:8,september:9,oktober:10,november:11,dezember:12 };
-  for (const [name, num] of Object.entries(MONTHS)) {
-    if (lower.includes(name)) { filter.month = String(num).padStart(2,'0'); break; }
-  }
-
-  // Betrag > X
-  const amtGtM = lower.match(/über\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
+  const amtGtM = lower.match(/\b(?:ueber|über|ab|mehr als|mindestens)\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
   if (amtGtM) filter.amountGt = parseFloat(amtGtM[1].replace(',', '.'));
 
-  // Betrag < X
-  const amtLtM = lower.match(/unter\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
+  const amtLtM = lower.match(/\b(?:unter|bis|maximal|hoechstens|höchstens)\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
   if (amtLtM) filter.amountLt = parseFloat(amtLtM[1].replace(',', '.'));
 
-  // Dokumenttyp
-  if (/\brechnungen?\b/.test(lower))  filter.docType = 'rechnung';
-  if (/\bverträge?\b/.test(lower))    filter.docType = 'vertrag';
-  if (/\bgutschriften?\b/.test(lower)) filter.docType = 'gutschrift';
-  if (/\bangebote?\b/.test(lower))    filter.docType = 'angebot';
+  if (/\brechnungen?\b/.test(lower)) filter.docType = 'rechnung';
+  else if (/\bverträge?\b|\bvertraege?\b|\bdokumente?\b/.test(lower)) filter.docType = 'vertrag';
+  else if (/\bgutschriften?\b/.test(lower)) filter.docType = 'gutschrift';
+  else if (/\bangebote?\b/.test(lower)) filter.docType = 'angebot';
 
-  // Absender (nach "von", "von der", "von dem")
-  const senderM = lower.match(/\bvon\s+([a-zäöüß][a-zäöüß\s\-\.]{2,30}?)(?:\s+\d{4}|\s+im\b|\s*$)/i);
+  const senderM = lower.match(/\b(?:von|bei)\s+([a-zäöüß0-9&][a-zäöüß0-9&\s\-.]{1,40}?)(?:\s+20\d{2}\b|\s+(?:im|in|aus|ueber|über)\b|$)/i);
   if (senderM) filter.sender = senderM[1].trim();
 
-  // Sammlung (nach "sammlung" oder bekannte Namen)
   const colWords = ['steuererklärung','steuererklarung','betriebskosten','lohnbuch','versicherung'];
   for (const cw of colWords) {
-    if (lower.includes(cw)) { filter.collectionHint = cw; break; }
+    if (normSearch(lower).includes(normSearch(cw))) { filter.collectionHint = cw; break; }
   }
 
-  // Restlicher Text = Freitext-Suche
-  const stripped = q
-    .replace(/\b(Rechnungen?|Dokumente?|von|über|unter|im|im Jahr)\b/gi, '')
-    .replace(/\b20\d{2}\b/g, '')
-    .replace(/[€\d.,]/g, '')
-    .trim();
-  if (stripped.length > 2) filter.text = stripped;
+  let stripped = raw;
+  [
+    /\b(Rechnungen?|Dokumente?|Verträge?|Vertraege?|Gutschriften?|Angebote?|von|bei|über|unter|ab|bis|im|im Jahr)\b/gi,
+    /\b20\d{2}\b/g,
+    /\b(?:ueber|über|ab|mehr als|mindestens|unter|bis|maximal|hoechstens|höchstens)\s+\d+[\.,]?\d*\s*(?:euro|€)?/gi,
+    /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
+  ].forEach(pattern => stripped = stripped.replace(pattern, ' '));
+  stripped = stripped.replace(/[€]/g, ' ').replace(/\s+/g, ' ').trim();
+  filter.text = stripped;
+  filter.textTokens = tokenizeSearch(stripped);
 
   return filter;
+}
+
+function buildIndexSearchDoc(doc) {
+  const hayParts = [
+    doc.fileName, doc.sender, doc.ocrText, doc.serviceDesc,
+    ...(doc.keywords || []), doc.invoiceNo, doc.objectCode, doc.docType, doc.year,
+  ];
+  const tokens = tokenizeSearch(hayParts.join(' '));
+  return {
+    doc,
+    tokenSet: new Set(tokens),
+    tokens,
+    haystack: normSearch(hayParts.join(' ')),
+    senderNorm: normSearch(doc.senderNorm || doc.sender || ''),
+    fileNameNorm: normSearch(doc.fileName || ''),
+    objectNorm: normSearch(doc.objectCode || ''),
+  };
+}
+
+function computeIndexSearchScore(entry, filter) {
+  const doc = entry.doc;
+  let score = 0;
+  if (filter.objectCode) {
+    if (String(doc.objectCode || '').toUpperCase() !== String(filter.objectCode).toUpperCase()) return -1;
+    score += 220;
+  }
+  if (filter.year) {
+    if (String(doc.year || '') !== String(filter.year)) return -1;
+    score += 120;
+  }
+  if (filter.month) {
+    if (!doc.invoiceDate || doc.invoiceDate.slice(5, 7) !== String(filter.month).padStart(2, '0')) return -1;
+    score += 90;
+  }
+  if (filter.amountGt !== undefined && !(Number(doc.amount || 0) > Number(filter.amountGt))) return -1;
+  if (filter.amountLt !== undefined && !(Number(doc.amount || 0) < Number(filter.amountLt))) return -1;
+  if (filter.amountGt !== undefined || filter.amountLt !== undefined) score += 70;
+  if (filter.docType) {
+    const want = normSearch(filter.docType);
+    const docTypeNorm = normSearch(doc.docType || '');
+    if (!(docTypeNorm === want || docTypeNorm.includes(want) || (want === 'vertrag' && docTypeNorm.includes('dokument')))) return -1;
+    score += 90;
+  }
+  const sender = normSearch(filter.sender || '');
+  if (sender) {
+    if (entry.senderNorm === sender) score += 220;
+    else if (entry.senderNorm.includes(sender)) score += 150;
+    else if (entry.fileNameNorm.includes(sender)) score += 110;
+    else return -1;
+  }
+  if (filter.collectionId && !(doc.collections || []).includes(filter.collectionId)) return -1;
+
+  const raw = normSearch(filter.raw || '');
+  if (raw && entry.fileNameNorm.includes(raw)) score += 65;
+  else if (raw && entry.haystack.includes(raw)) score += 35;
+
+  const textTokens = Array.isArray(filter.textTokens) ? filter.textTokens : tokenizeSearch(filter.text || '');
+  if (textTokens.length) {
+    let matched = 0;
+    for (const token of textTokens) {
+      if (token.length < 2) continue;
+      if (entry.tokenSet.has(token)) {
+        matched += 1;
+        score += 34;
+        continue;
+      }
+      const fuzzy = [...entry.tokenSet].some(t => t.includes(token) || token.includes(t));
+      if (fuzzy) {
+        matched += 1;
+        score += 22;
+        continue;
+      }
+      let synonymHit = false;
+      for (const words of Object.values(IDX_TOPIC_SYNONYMS)) {
+        const normalizedWords = words.map(normSearch);
+        if (!normalizedWords.includes(token)) continue;
+        if (normalizedWords.some(w => entry.tokenSet.has(w) || entry.haystack.includes(w))) {
+          matched += 1;
+          score += 18;
+          synonymHit = true;
+          break;
+        }
+      }
+      if (!synonymHit && token.length >= 4) return -1;
+    }
+    if (!matched) return -1;
+    if (matched === textTokens.length) score += 45;
+  }
+  return score;
 }
 
 /**
  * Haupt-Suchfunktion: kombiniert alle Index-Quellen
  */
 async function search(query, opts = {}) {
-  const filter  = typeof query === 'string' ? parseNaturalQuery(query) : query;
-  const all     = await dbGetAll(S_DOCS);
-  const text    = (filter.text || '').toLowerCase();
-  const sender  = (filter.sender || '').toLowerCase();
+  const filter = typeof query === 'string' ? parseNaturalQuery(query) : parseNaturalQuery(query || {});
+  const all = await dbGetAll(S_DOCS);
 
-  const results = all.filter(doc => {
-    // Objekt-Filter
-    if (filter.objectCode && doc.objectCode !== filter.objectCode) return false;
-    // Jahr-Filter
-    if (filter.year && doc.year !== String(filter.year)) return false;
-    // Monat-Filter
-    if (filter.month && doc.invoiceDate) {
-      if (!doc.invoiceDate.slice(5, 7).startsWith(filter.month)) return false;
-    }
-    // Betrag-Filter
-    if (filter.amountGt !== undefined && doc.amount <= filter.amountGt) return false;
-    if (filter.amountLt !== undefined && doc.amount >= filter.amountLt) return false;
-    // Dokumenttyp-Filter
-    if (filter.docType && doc.docType !== filter.docType) return false;
-    // Absender-Filter
-    if (sender && !doc.senderNorm.includes(sender) &&
-        !doc.fileName.toLowerCase().includes(sender)) return false;
-    // Sammlungs-Filter
-    if (filter.collectionId && !(doc.collections || []).includes(filter.collectionId)) return false;
-    // Volltext / Metadaten-Filter
-    if (text) {
-      const haystack = [
-        doc.fileName, doc.sender, doc.ocrText, doc.serviceDesc,
-        ...(doc.keywords || []), doc.invoiceNo, doc.objectCode,
-      ].join(' ').toLowerCase();
-      if (!haystack.includes(text)) return false;
-    }
-    return true;
-  });
+  const scored = [];
+  for (const doc of all) {
+    const entry = buildIndexSearchDoc(doc);
+    const score = computeIndexSearchScore(entry, filter);
+    if (score < 0) continue;
+    scored.push({ ...doc, score, searchScore: score });
+  }
 
-  // Sortierung: neueste zuerst
-  results.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+  scored.sort((a, b) => (b.searchScore || 0) - (a.searchScore || 0) || String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
 
   return {
-    results:  results.slice(0, opts.limit || 200),
-    total:    results.length,
+    results: scored.slice(0, opts.limit || 200),
+    total: scored.length,
     filter,
   };
 }

@@ -1244,63 +1244,312 @@ function dispDateToISO(s) {
   return '';
 }
 
-function archiveFileToSearchDoc(f) {
-  return {
-    __source: 'archive',
-    fileName: f.name || '',
-    objectCode: f.objectCode || '',
-    docType: fmtFolderType(f.folderType || ''),
-    amount: parseMetaAmount(f.meta?.betrag),
-    invoiceDate: dispDateToISO(f.meta?.datum),
-    savedAt: new Date(f.modified || docDateMs(f) || Date.now()).toISOString(),
-    sender: f.meta?.absender || '',
-    senderNorm: (f.meta?.absender || '').toLowerCase(),
-    serviceDesc: f.subfolder || '',
-    keywords: [],
-    ocrText: '',
-    archiveKey: encodeURIComponent((f.name || '') + '||' + (f.modified || '')),
-    archiveModified: f.modified || 0
-  };
+const SEARCH_MONTHS = {
+  januar:'01', february:'02', februar:'02', märz:'03', maerz:'03', march:'03', april:'04', mai:'05', may:'05',
+  juni:'06', june:'06', juli:'07', july:'07', august:'08', september:'09', oktober:'10', october:'10',
+  november:'11', dezember:'12', december:'12'
+};
+const SEARCH_CATEGORY_ALIASES = {
+  privat: ['privat','private','persönlich','persoenlich'],
+  fidelior: ['fidelior'],
+  objekte: ['objekt','objekte','liegenschaft','liegenschaften','immobilie','immobilien']
+};
+const SEARCH_TYPE_SYNONYMS = {
+  rechnung: ['rechnung','rechnungen','eingangsrechnung','eingangsrechnungen','invoice'],
+  dokument: ['dokument','dokumente','vertrag','verträge','vertraglich','unterlage','unterlagen'],
+  gutschrift: ['gutschrift','gutschriften'],
+  angebot: ['angebot','angebote','offerte','offerten'],
+  abrechnungsbelege: ['abrechnung','abrechnungen','abrechnungsbeleg','abrechnungsbelege'],
+};
+const SEARCH_TOPIC_SYNONYMS = {
+  handwerker: ['handwerker','reparatur','reparaturen','montage','sanitär','sanitaer','elektriker','heizung','wartung','hausmeister','dienstleister'],
+  versicherung: ['versicherung','versicherungen','police','schaden','schadensmeldung','beitrag','haftpflicht','kasko'],
+  telefon: ['telefon','telekom','vodafone','o2','mobilfunk','internet','dsl'],
+  strom: ['strom','energie','versorger','abschlag'],
+  wasser: ['wasser','abwasser'],
+  steuer: ['steuer','steuererklaerung','steuererklärung','finanzamt'],
+};
+
+function normalizeSearchValue(v) {
+  return String(v || '')
+    .toLowerCase()
+    .replace(/[ä]/g, 'ae')
+    .replace(/[ö]/g, 'oe')
+    .replace(/[ü]/g, 'ue')
+    .replace(/[ß]/g, 'ss')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-async function searchArchiveGlobal(query, opts = {}) {
-  await loadObjectsConfig();
-  const q = String(query || '').trim().toLowerCase();
-  if (!q) return { results: [], total: 0 };
+function tokenizeSearchValue(v) {
+  return normalizeSearchValue(v).split(' ').filter(Boolean);
+}
 
-  let objs = getObjList();
-  if (opts.scopeCategory) {
-    objs = objs.filter(o => {
-      const cat = window.fdlDeriveCategory ? window.fdlDeriveCategory(o.code) : o.code;
-      return cat === opts.scopeCategory;
-    });
+function parseAmountLoose(raw) {
+  if (raw === null || raw === undefined) return 0;
+  const cleaned = String(raw).replace(/[^0-9,.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function deriveArchiveScopeCategory(code) {
+  const raw = window.fdlDeriveCategory ? window.fdlDeriveCategory(code) : code;
+  if (!raw) return '';
+  const n = normalizeSearchValue(raw);
+  if (n.includes('privat')) return 'Privat';
+  if (n.includes('fidelior')) return 'Fidelior';
+  return 'Objekte';
+}
+
+function buildArchiveSearchFilter(query) {
+  if (query && typeof query === 'object' && !Array.isArray(query)) {
+    const cloned = { ...query };
+    const raw = String(cloned.raw || cloned.text || '').trim();
+    const text = String(cloned.text || '').trim();
+    cloned.raw = raw || text;
+    cloned.text = text;
+    cloned.category = cloned.category || cloned.scopeCategory || '';
+    cloned.sender = String(cloned.sender || '').trim();
+    cloned.textTokens = cloned.textTokens || tokenizeSearchValue(text);
+    return cloned;
   }
 
-  const results = [];
-  for (const o of objs) {
-    const files = await loadFiles(o.code);
-    for (const f of files) {
-      const hay = [
-        f.name || '',
-        f.objectCode || '',
-        f.objectName || '',
-        f.folderType || '',
-        fmtFolderType(f.folderType || ''),
-        f.year || '',
-        f.subfolder || '',
-        f.meta?.absender || '',
-        f.meta?.betrag || '',
-        f.meta?.datum || ''
-      ].join(' ').toLowerCase();
+  const raw = String(query || '').trim();
+  const lower = raw.toLowerCase();
+  const filter = { raw, text: raw, textTokens: tokenizeSearchValue(raw) };
 
-      if (!hay.includes(q)) continue;
-      results.push(archiveFileToSearchDoc(f));
+  const yearM = lower.match(/\b(20\d{2})\b/);
+  if (yearM) filter.year = yearM[1];
+
+  for (const [name, month] of Object.entries(SEARCH_MONTHS)) {
+    if (normalizeSearchValue(lower).includes(normalizeSearchValue(name))) {
+      filter.month = month;
+      break;
     }
   }
 
-  results.sort((a, b) => (b.archiveModified || 0) - (a.archiveModified || 0));
+  const gtM = lower.match(/\b(?:ueber|über|ab|mehr als|mindestens)\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
+  if (gtM) filter.amountGt = parseFloat(gtM[1].replace(',', '.'));
+  const ltM = lower.match(/\b(?:unter|bis|maximal|hoechstens|höchstens)\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
+  if (ltM) filter.amountLt = parseFloat(ltM[1].replace(',', '.'));
+
+  const senderM = lower.match(/\b(?:von|bei)\s+([a-zäöüß0-9&][a-zäöüß0-9& .\-]{1,40}?)(?:\s+(?:im|in|aus|ueber|über)\b|\s+20\d{2}\b|$)/i);
+  if (senderM) filter.sender = senderM[1].trim();
+
+  if (/\brechnungen?\b/i.test(lower)) filter.docType = 'rechnung';
+  else if (/\b(gutschriften?)\b/i.test(lower)) filter.docType = 'gutschrift';
+  else if (/\b(angebote?|offerten?)\b/i.test(lower)) filter.docType = 'angebot';
+  else if (/\b(vertrag|vertraege|verträge|dokumente?)\b/i.test(lower)) filter.docType = 'dokument';
+
+  const normalized = normalizeSearchValue(lower);
+  if (SEARCH_CATEGORY_ALIASES.privat.some(k => normalized.includes(normalizeSearchValue(k)))) filter.category = 'Privat';
+  else if (SEARCH_CATEGORY_ALIASES.fidelior.some(k => normalized.includes(normalizeSearchValue(k)))) filter.category = 'Fidelior';
+  else if (SEARCH_CATEGORY_ALIASES.objekte.some(k => normalized.includes(normalizeSearchValue(k)))) filter.category = 'Objekte';
+
+  return filter;
+}
+
+function buildArchiveSearchEntry(f) {
+  const invoiceDate = dispDateToISO(f.meta?.datum);
+  const amount = parseAmountLoose(f.meta?.betrag);
+  const scopeCategory = deriveArchiveScopeCategory(f.objectCode || '');
+  const folderType = fmtFolderType(f.folderType || '');
+  const searchParts = [
+    f.name || '',
+    f.objectCode || '',
+    f.objectName || '',
+    folderType,
+    f.folderType || '',
+    scopeCategory,
+    f.year || '',
+    f.subfolder || '',
+    f.meta?.absender || '',
+    f.meta?.betrag || '',
+    f.meta?.datum || ''
+  ];
+  const tokens = tokenizeSearchValue(searchParts.join(' '));
+  return {
+    file: f,
+    normalizedHaystack: normalizeSearchValue(searchParts.join(' ')),
+    tokens,
+    tokenSet: new Set(tokens),
+    amount,
+    invoiceDate,
+    month: invoiceDate ? invoiceDate.slice(5, 7) : '',
+    scopeCategory,
+    folderType,
+    senderNorm: normalizeSearchValue(f.meta?.absender || ''),
+    objectNorm: normalizeSearchValue(`${f.objectCode || ''} ${f.objectName || ''}`),
+    subfolderNorm: normalizeSearchValue(f.subfolder || ''),
+    fileNameNorm: normalizeSearchValue(f.name || ''),
+  };
+}
+
+function computeArchiveSearchScore(entry, filter) {
+  const file = entry.file;
+  let score = 0;
+
+  if (filter.objectCode) {
+    if ((file.objectCode || '').toUpperCase() !== String(filter.objectCode).toUpperCase()) return -1;
+    score += 220;
+  }
+  if (filter.year) {
+    if (String(file.year || '') !== String(filter.year)) return -1;
+    score += 120;
+  }
+  if (filter.month) {
+    if (entry.month !== String(filter.month).padStart(2, '0')) return -1;
+    score += 90;
+  }
+  if (filter.category) {
+    if (normalizeSearchValue(entry.scopeCategory) !== normalizeSearchValue(filter.category)) return -1;
+    score += 110;
+  }
+  if (filter.scopeCategory) {
+    if (normalizeSearchValue(entry.scopeCategory) !== normalizeSearchValue(filter.scopeCategory)) return -1;
+    score += 110;
+  }
+  if (filter.docType) {
+    const want = normalizeSearchValue(filter.docType);
+    const aliases = SEARCH_TYPE_SYNONYMS[want] || [want];
+    if (!aliases.some(a => entry.tokens.includes(normalizeSearchValue(a)))) return -1;
+    score += 90;
+  }
+  if (filter.amountGt !== undefined && !(entry.amount > Number(filter.amountGt))) return -1;
+  if (filter.amountLt !== undefined && !(entry.amount < Number(filter.amountLt))) return -1;
+  if (filter.amountGt !== undefined || filter.amountLt !== undefined) score += 70;
+
+  const sender = normalizeSearchValue(filter.sender || '');
+  if (sender) {
+    if (entry.senderNorm === sender) score += 220;
+    else if (entry.senderNorm.includes(sender)) score += 150;
+    else if (entry.fileNameNorm.includes(sender)) score += 110;
+    else return -1;
+  }
+
+  const raw = normalizeSearchValue(filter.raw || '');
+  if (raw && entry.fileNameNorm.includes(raw)) score += 65;
+  else if (raw && entry.normalizedHaystack.includes(raw)) score += 35;
+
+  const textTokens = Array.isArray(filter.textTokens) ? filter.textTokens : tokenizeSearchValue(filter.text || '');
+  if (textTokens.length) {
+    let matched = 0;
+    for (const token of textTokens) {
+      if (token.length < 2) continue;
+      if (entry.tokenSet.has(token)) {
+        matched += 1;
+        score += 34;
+        continue;
+      }
+      const fuzzy = [...entry.tokenSet].some(t => t.includes(token) || token.includes(t));
+      if (fuzzy) {
+        matched += 1;
+        score += 22;
+        continue;
+      }
+      let synonymHit = false;
+      for (const words of Object.values(SEARCH_TOPIC_SYNONYMS)) {
+        const normalizedWords = words.map(normalizeSearchValue);
+        if (!normalizedWords.includes(token)) continue;
+        if (normalizedWords.some(w => entry.tokenSet.has(w) || entry.normalizedHaystack.includes(w))) {
+          matched += 1;
+          score += 18;
+          synonymHit = true;
+          break;
+        }
+      }
+      if (!synonymHit && token.length >= 4) return -1;
+    }
+    if (!matched) return -1;
+    if (matched === textTokens.length) score += 45;
+  }
+
+  const ageBoost = Math.max(0, 18 - Math.floor((Date.now() - (file.modified || 0)) / 86400000 / 45));
+  score += ageBoost;
+  return score;
+}
+
+function archiveFileToSearchDoc(f, score = 0) {
+  const scopeCategory = deriveArchiveScopeCategory(f.objectCode || '');
+  const folderType = fmtFolderType(f.folderType || '');
+  return {
+    __source: 'archive',
+    source: 'archive',
+    fileName: f.name || '',
+    objectCode: f.objectCode || '',
+    objectName: f.objectName || '',
+    docType: folderType,
+    amount: parseAmountLoose(f.meta?.betrag),
+    invoiceDate: dispDateToISO(f.meta?.datum),
+    savedAt: new Date(f.modified || docDateMs(f) || Date.now()).toISOString(),
+    modified: f.modified || 0,
+    sender: f.meta?.absender || '',
+    senderNorm: normalizeSearchValue(f.meta?.absender || ''),
+    serviceDesc: f.subfolder || '',
+    keywords: [],
+    ocrText: '',
+    score,
+    searchScore: score,
+    selectName: f.name || '',
+    archiveKey: encodeURIComponent((f.name || '') + '||' + (f.modified || '')),
+    archiveModified: f.modified || 0,
+    archiveRef: {
+      code: f.objectCode || '',
+      scopeCategory,
+      selectName: f.name || '',
+      folderType,
+      modified: f.modified || 0,
+    }
+  };
+}
+
+const __fdlArchivSearchCache = { ts: 0, data: null, pending: null };
+
+async function getArchiveSearchIndex(force = false) {
+  const now = Date.now();
+  if (!force && __fdlArchivSearchCache.data && (now - __fdlArchivSearchCache.ts) < 30000) {
+    return __fdlArchivSearchCache.data;
+  }
+  if (__fdlArchivSearchCache.pending) return __fdlArchivSearchCache.pending;
+
+  __fdlArchivSearchCache.pending = (async () => {
+    await loadObjectsConfig();
+    const list = [];
+    for (const o of getObjList()) {
+      const files = await loadFiles(o.code);
+      for (const f of files) list.push(buildArchiveSearchEntry(f));
+    }
+    __fdlArchivSearchCache.ts = Date.now();
+    __fdlArchivSearchCache.data = list;
+    return list;
+  })();
+
+  try {
+    return await __fdlArchivSearchCache.pending;
+  } finally {
+    __fdlArchivSearchCache.pending = null;
+  }
+}
+
+async function searchArchiveGlobal(query, opts = {}) {
+  const filter = buildArchiveSearchFilter(query);
+  if (!String(filter.raw || filter.text || '').trim() && !filter.objectCode && !filter.year && !filter.sender) {
+    return { results: [], total: 0, filter };
+  }
+
+  const entries = await getArchiveSearchIndex(Boolean(opts.forceRefresh));
+  const results = [];
+  for (const entry of entries) {
+    if (opts.scopeCategory && normalizeSearchValue(entry.scopeCategory) !== normalizeSearchValue(opts.scopeCategory)) continue;
+    const score = computeArchiveSearchScore(entry, { ...filter, scopeCategory: filter.scopeCategory || opts.scopeCategory || filter.category || '' });
+    if (score < 0) continue;
+    results.push(archiveFileToSearchDoc(entry.file, score));
+  }
+
+  results.sort((a, b) => (b.searchScore || 0) - (a.searchScore || 0) || (b.archiveModified || 0) - (a.archiveModified || 0));
   const limit = opts.limit || 100;
-  return { results: results.slice(0, limit), total: results.length };
+  return { results: results.slice(0, limit), total: results.length, filter };
 }
 
 const __fdlArchivStatsCache = { ts: 0, data: null, pending: null };
@@ -1419,5 +1668,6 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 window.fdlArchivOpen = open;
 window.fdlArchivSearch = searchArchiveGlobal;
 window.fdlArchivGetDashboardStats = getArchiveDashboardStats;
+window.fdlArchivInvalidateSearchCache = () => { __fdlArchivSearchCache.ts = 0; __fdlArchivSearchCache.data = null; };
 
 })();
