@@ -411,10 +411,10 @@ function activateView(view, opts = {}) {
     document.querySelector(`.fdl-sb-item[data-view="${view}"][data-obj="${opts.obj}"][data-folder="${opts.folder}"]`)?.classList.add('active');
   } else if (opts.obj) {
     document.querySelector(`.fdl-sb-item[data-view="${view}"][data-obj="${opts.obj}"]:not([data-folder])`)?.classList.add('active');
-  } else if (opts.scopeCategory) {
-    document.querySelector(`.fdl-sb-item[data-view="${view}"][data-scope="${opts.scopeCategory}"]:not([data-obj])`)?.classList.add('active');
+   } else if (opts.scopeCategory) {
+    document.querySelector(`.fdl-sb-item[data-view="${view}"][data-scopecat="${opts.scopeCategory}"]:not([data-obj])`)?.classList.add('active');
   } else {
-    document.querySelector(`.fdl-sb-item[data-view="${view}"]:not([data-obj]):not([data-scope])`)?.classList.add('active');
+    document.querySelector(`.fdl-sb-item[data-view="${view}"]:not([data-obj]):not([data-scopecat])`)?.classList.add('active');
   }
 
   document.getElementById('fdl-view-dash')?.classList.remove('active');
@@ -498,10 +498,14 @@ function showArchiveView(opts = {}) {
 
   setTimeout(() => {
     // Kategorie + Typ sofort anwenden
-    if (ctx.obj) {
+     if (ctx.obj) {
       window.__av3?.obj?.(ctx.obj, {
         scopeCategory: ctx.scopeCategory || '',
         typeFilter: ctx.typeFilter || 'all',
+        yearFilter: ctx.yearFilter || 'all',
+        sortOrder: ctx.sortOrder || 'date-desc',
+        dateFrom: ctx.dateFrom || '',
+        dateTo: ctx.dateTo || '',
         selectName: ctx.selectName || '',
         query: ctx.query || ''
       });
@@ -509,19 +513,28 @@ function showArchiveView(opts = {}) {
     }
 
     if (ctx.scopeCategory) {
-      window.__av3?.setCategory?.(ctx.scopeCategory);
+      window.__av3?.setCategory?.(ctx.scopeCategory, {
+        typeFilter: ctx.typeFilter || 'all',
+        yearFilter: ctx.yearFilter || 'all',
+        sortOrder: ctx.sortOrder || 'date-desc',
+        dateFrom: ctx.dateFrom || '',
+        dateTo: ctx.dateTo || '',
+        query: ctx.query || '',
+        autoSelectFirst: false
+      });
+      return;
     }
 
-    if (window.__av3?.filters) {
-      window.__av3.filters.typeFilter = ctx.typeFilter || 'all';
-      if (ctx.query) window.__av3.filters.query = ctx.query;
-      if (ctx.year) window.__av3.filters.year = ctx.year;
-    }
-
-    if (window.__av3?.render) {
-      window.__av3.render();
-    } else if (window.__av3?.refresh) {
-      window.__av3.refresh();
+    if (window.__av3?.setCategory) {
+      window.__av3.setCategory(null, {
+        typeFilter: ctx.typeFilter || 'all',
+        yearFilter: ctx.yearFilter || 'all',
+        sortOrder: ctx.sortOrder || 'date-desc',
+        dateFrom: ctx.dateFrom || '',
+        dateTo: ctx.dateTo || '',
+        query: ctx.query || '',
+        autoSelectFirst: false
+      });
     }
   }, 180);
 }
@@ -566,18 +579,23 @@ async function renderDash() {
       <div class="fdl-kpi-lbl">Dokumente gesamt</div>
       <div class="fdl-kpi-trend neu">Gesamtarchiv</div>
     </div>
-    <div class="fdl-kpi" onclick="window.__fdlPro.goArchiv()">
+
+    <div class="fdl-kpi" onclick="window.__fdlPro.goArchivThisWeek()">
       <div class="fdl-kpi-val">${s.wkCount}</div>
       <div class="fdl-kpi-lbl">Diese Woche</div>
-      <div class="fdl-kpi-trend ${s.wkCount>0?'up':'neu'}">${s.wkCount>0?'Aktiv':'Keine'}</div>
+      <div class="fdl-kpi-trend ${s.wkCount > 0 ? 'up' : 'neu'}">${s.wkCount > 0 ? 'Aktiv' : 'Keine'}</div>
     </div>
+
     <div class="fdl-kpi" onclick="window.__fdlPro.goTasks()">
       <div class="fdl-kpi-val">${s.openCount}</div>
       <div class="fdl-kpi-lbl">Offene Aufgaben</div>
-      <div class="fdl-kpi-trend ${s.overdueCount>0?'red':s.openCount>0?'warn':'up'}">${s.overdueCount>0?s.overdueCount+' überfällig':s.openCount>0?'Offen':'Erledigt'}</div>
+      <div class="fdl-kpi-trend ${s.overdueCount > 0 ? 'red' : s.openCount > 0 ? 'warn' : 'up'}">
+        ${s.overdueCount > 0 ? s.overdueCount + ' überfällig' : s.openCount > 0 ? 'Offen' : 'Erledigt'}
+      </div>
     </div>
-    <div class="fdl-kpi">
-      <div class="fdl-kpi-val" style="font-size:${s.moAmt>9999?'18px':'24px'}">${s.moAmt>0?fmtE(s.moAmt):'—'}</div>
+
+    <div class="fdl-kpi" onclick="window.__fdlPro.goArchivThisMonth()">
+      <div class="fdl-kpi-val" style="font-size:${s.moAmt > 9999 ? '18px' : '24px'}">${s.moAmt > 0 ? fmtE(s.moAmt) : '—'}</div>
       <div class="fdl-kpi-lbl">Monatssumme</div>
       <div class="fdl-kpi-trend neu">${now.toLocaleDateString('de-DE',{month:'long',year:'numeric'})}</div>
     </div>
@@ -771,37 +789,142 @@ function hideRedundant() {
     if (el) el.style.display = 'none';
   });
 }
+function formatLocalISODate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
+function last7DaysStart() {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  d.setHours(0, 0, 0, 0);
+  return formatLocalISODate(d);
+}
+
+function currentMonthStart() {
+  const d = new Date();
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return formatLocalISODate(d);
+}
+
+function currentMonthEnd() {
+  const d = new Date();
+  d.setMonth(d.getMonth() + 1, 0);
+  d.setHours(23, 59, 59, 999);
+  return formatLocalISODate(d);
+}
+
+function goArchivFiltered(opts = {}) {
+  activateView('archive', {
+    scopeCategory: opts.scopeCategory || '',
+    obj: opts.obj || '',
+    typeFilter: opts.typeFilter || 'all',
+    yearFilter: opts.yearFilter || 'all',
+    sortOrder: opts.sortOrder || 'date-desc',
+    query: opts.query || '',
+    dateFrom: opts.dateFrom || '',
+    dateTo: opts.dateTo || '',
+    selectName: opts.selectName || '',
+    autoLoad: true
+  });
+}
 /* ══════════════════════════════════════════════════════════════════════════
    PUBLIC API
    ══════════════════════════════════════════════════════════════════════════ */
+
 window.__fdlPro = {
-  goDash()          { activateView('dash'); },
-  goFiling()        { activateView('filing'); },
-  goArchiv()        { activateView('archive'); },
-  goArchivCategory(category) { activateView('archive',{ scopeCategory: category }); },
-  goArchivObj(code, folder='all') { activateView('archive',{obj:code, folder, scopeCategory: deriveCategory(code)}); },
-  goTasks()         { activateView('tasks'); },
-  openDoc(encoded)  {
-    const name = decodeURIComponent(encoded);
-    activateView('archive', { query: name.replace(/\.pdf$/i,''), selectName: name });
-    setTimeout(()=>{
-      const sf=document.getElementById('fdl-av3-search');
-      if(sf){sf.value=name.replace(/\.pdf$/i,'').slice(0,50);sf.dispatchEvent(new Event('input',{bubbles:true}));}
-    },380);
+  goDash() {
+    activateView('dash');
   },
-  openIndexedDoc(doc) {
-    if (!doc) return;
-    activateView('archive', {
-      obj: doc.objectCode || null,
-      folder: doc.docType === 'Rechnung' ? 'rechnung' : (doc.docType === 'Dokument' ? 'other' : 'all'),
-      scopeCategory: deriveCategory(doc.objectCode),
-      selectName: doc.fileName || '',
-      query: (doc.fileName || '').replace(/\.pdf$/i,'')
+
+  goFiling() {
+    activateView('filing');
+  },
+
+  goArchiv() {
+    goArchivFiltered({});
+  },
+
+  goArchivCategory(category) {
+    goArchivFiltered({
+      scopeCategory: category,
+      sortOrder: 'date-desc'
     });
   },
-  refreshDash() { if(_view==='dash') renderDash(); },
-  deriveCategory,  // expose for external use
+
+  goArchivObj(code, folder = 'all') {
+    const typeFilter =
+      folder === 'rechnung' ? 'Rechnungen' :
+      folder === 'other' ? 'Dokumente' :
+      'all';
+
+    goArchivFiltered({
+      obj: code,
+      scopeCategory: deriveCategory(code),
+      typeFilter,
+      sortOrder: 'date-desc'
+    });
+  },
+
+  goArchivThisWeek() {
+    goArchivFiltered({
+      dateFrom: last7DaysStart(),
+      sortOrder: 'date-desc'
+    });
+  },
+
+  goArchivThisMonth() {
+    goArchivFiltered({
+      dateFrom: currentMonthStart(),
+      dateTo: currentMonthEnd(),
+      sortOrder: 'date-desc'
+    });
+  },
+
+  goTasks() {
+    activateView('tasks');
+  },
+
+  openDoc(encoded) {
+    const name = decodeURIComponent(encoded);
+    goArchivFiltered({
+      query: name.replace(/\.pdf$/i, ''),
+      selectName: name,
+      sortOrder: 'date-desc'
+    });
+
+    setTimeout(() => {
+      const sf = document.getElementById('fdl-av3-search');
+      if (sf) {
+        sf.value = name.replace(/\.pdf$/i, '').slice(0, 50);
+        sf.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }, 380);
+  },
+
+  openIndexedDoc(doc) {
+    if (!doc) return;
+
+    goArchivFiltered({
+      obj: doc.objectCode || '',
+      scopeCategory: deriveCategory(doc.objectCode),
+      typeFilter:
+        doc.docType === 'Rechnung' ? 'Rechnungen' :
+        doc.docType === 'Dokument' ? 'Dokumente' :
+        'all',
+      selectName: doc.fileName || '',
+      query: (doc.fileName || '').replace(/\.pdf$/i, '')
+    });
+  },
+
+  refreshDash() {
+    if (_view === 'dash') renderDash();
+  },
+
+  deriveCategory
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
