@@ -330,8 +330,14 @@ function injectCSS() {
 
 /* Chips */
 .fdl-srch-chips{
-  display:flex;gap:5px;flex-wrap:wrap;padding:8px 18px 0;
-  min-height:0;transition:all .15s;
+  display:flex;
+  gap:5px;
+  flex-wrap:wrap;
+  padding:8px 18px 6px;
+  min-height:0;
+  transition:all .15s;
+  position:relative;
+  z-index:1;
 }
 .fdl-srch-chips:empty{display:none}
 .fdl-srch-chip{
@@ -349,8 +355,16 @@ function injectCSS() {
 
 /* Meta */
 .fdl-srch-meta{
-  padding:5px 18px 6px;font-size:11px;color:#9CA3AF;
-  border-bottom:1px solid #F9FAFB;display:flex;align-items:center;justify-content:space-between;
+  padding:6px 18px 8px;
+  font-size:11px;
+  color:#9CA3AF;
+  border-bottom:1px solid #F9FAFB;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  position:relative;
+  z-index:2;
+  background:#fff;
 }
 
 /* Results */
