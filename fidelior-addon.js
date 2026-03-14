@@ -750,12 +750,13 @@ function injectButtons() {
     </button>`;
 
   // Vor dem Settings-Button einfügen
-  const settingsBtn = document.getElementById('settingsBtn');
-  if (settingsBtn) {
-    headerInner.insertBefore(wrap, settingsBtn);
-  } else {
-    headerInner.appendChild(wrap);
-  }
+ const settingsBtn = document.getElementById('settingsBtn');
+if (settingsBtn && settingsBtn.parentNode === headerInner) {
+  headerInner.insertBefore(wrap, settingsBtn);
+} else {
+  headerInner.appendChild(wrap);
+}
+
 
   document.getElementById('fdl-btn-dash').addEventListener('click', openDash);
   document.getElementById('fdl-btn-tasks').addEventListener('click', () => openTasks());

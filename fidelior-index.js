@@ -1672,8 +1672,13 @@ async function init() {
     `;
     btn.innerHTML = `🔍 Suche <span style="font-size:10px;opacity:.6;background:rgba(255,255,255,.1);border-radius:3px;padding:1px 5px">Ctrl+K</span>`;
     btn.onclick = openSearch;
-    const settings = document.getElementById('settingsBtn');
-    if (settings) hdr.insertBefore(btn, settings); else hdr.appendChild(btn);
+  const settings = document.getElementById('settingsBtn');
+if (settings && settings.parentNode === hdr) {
+  hdr.insertBefore(btn, settings);
+} else {
+  hdr.appendChild(btn);
+}
+
   }
 
   console.info('[FideliorIndex v1.0] bereit – Suche: Ctrl+K, Filing-Panel: Seitenleiste');
