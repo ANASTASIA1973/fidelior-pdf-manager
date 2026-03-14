@@ -90,20 +90,24 @@ async function loadFiles(code) {
   if (!root) return [];
   const roots = buildScanRoots(code);
   const all = [], seen = new Set();
+
   for (const { segs, label } of roots) {
     const dir   = await navigateTo(root, segs);
     if (!dir) continue;
     const batch = [];
     await scanPDFs(dir, segs, 2, batch, seen);
+
     for (const f of batch) {
       f.folderType = label;
       f.meta       = parseName(f.name);
       f.year       = extractYear(f.pathSegs, f.modified);
       f.subfolder  = extractSub(f.pathSegs, segs, f.year);
+      f.objectCode = code;
+      f.objectName = getScopeName(code);
     }
     all.push(...batch);
   }
-  // Initial sort: newest document date first
+
   all.sort((a, b) => docDateMs(b) - docDateMs(a));
   return all;
 }
@@ -601,7 +605,29 @@ function getObjList() {
   if (!sel) return [];
   return Array.from(sel.options).filter(o => o.value).map(o => ({ code: o.value, name: o.textContent }));
 }
+function getObjectsByCategory(category) {
+  let objs = getObjList();
 
+  if (!category) return objs;
+
+  return objs.filter(o => {
+    const cat = window.fdlDeriveCategory ? window.fdlDeriveCategory(o.code) : o.code;
+    return cat === category;
+  });
+}
+
+async function loadFilesForCategory(category) {
+  const objs = getObjectsByCategory(category);
+  let all = [];
+
+  for (const o of objs) {
+    const files = await loadFiles(o.code);
+    all.push(...files);
+  }
+
+  all = sortFiles(all, S.sortOrder || 'date-desc');
+  return all;
+}
 function getShortName(o) {
   const obj = objectsMap[o.code];
   if (obj?.displayName) return obj.displayName.replace(o.code + ' · ', '').trim();
@@ -691,9 +717,10 @@ function renderList(files) {
           <div class="av3-file-body">
             <div class="av3-file-name" title="${f.name}">${f.name}</div>
             <div class="av3-chips">
-              ${m.betrag    ? `<span class="av3-chip amt">${m.betrag}</span>` : ''}
-              ${m.datum     ? `<span class="av3-chip dt">${m.datum}</span>` : ''}
-              ${f.subfolder ? `<span class="av3-chip sub">${f.subfolder}</span>` : ''}
+          ${f.objectCode ? `<span class="av3-chip dt">${f.objectCode}</span>` : ''}
+${m.betrag    ? `<span class="av3-chip amt">${m.betrag}</span>` : ''}
+${m.datum     ? `<span class="av3-chip dt">${m.datum}</span>` : ''}
+${f.subfolder ? `<span class="av3-chip sub">${f.subfolder}</span>` : ''}
             </div>
             ${m.absender ? `<div class="av3-file-sender">${m.absender}</div>` : ''}
             <div class="av3-file-info">${fmtDate(f.modified)} · ${fmtSize(f.size)}</div>
@@ -904,30 +931,82 @@ window.__av3 = {
       if (match) await window.__av3.file(encodeURIComponent(match.name + '||' + match.modified));
     }
   },
-
-  setCategory(category) {
-    S.scopeCategory = category || null;
-    S.obj = null; S.files = []; S.filtered = []; S.selected = null;
-    S.query=''; S.typeFilter='all'; S.subFilter='all'; S.yearFilter='all'; S.sortOrder='date-desc';
-    const sf = document.getElementById('fdl-av3-search'); if (sf) sf.value = '';
-    const tf = document.getElementById('fdl-av3-type');   if (tf) tf.value = 'all';
-    const yf = document.getElementById('fdl-av3-year');   if (yf) { yf.innerHTML = `<option value="all">Alle Jahre</option>`; yf.value = 'all'; }
-    const so = document.getElementById('fdl-av3-sort');   if (so) so.value = 'date-desc';
-    const bc = document.getElementById('fdl-av3-bc');
-    if (bc) bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${category || 'Alle Liegenschaften'}</span>`;
-    renderSidebar();
-    renderPanel(null);
-    const li = document.getElementById('fdl-av3-li');
-    if (li) li.innerHTML = `<div class="av3-empty"><div class="av3-empty-icon">${SVG.folder}</div><div class="av3-empty-title">${category ? 'Bereich wählen' : 'Liegenschaft wählen'}</div></div>`;
+  render() {
+    applyFilters();
   },
 
-  async file(key) {
-    const [name, mod] = decodeURIComponent(key).split('||');
-    const f = S.files.find(x => x.name === name && String(x.modified) === mod) || S.files.find(x => x.name === name);
-    if (!f) return;
-    S.selected = f;
-    renderList(S.filtered);
-    await renderPanel(f);
+  refresh() {
+    applyFilters();
+  },
+  async setCategory(category, opts = {}) {
+    S.scopeCategory = category || null;
+    S.obj = null;
+    S.selected = null;
+    S.files = [];
+    S.filtered = [];
+
+    S.query      = (opts.query || '').trim().toLowerCase();
+    S.typeFilter = opts.typeFilter || 'all';
+    S.subFilter  = opts.subFilter || 'all';
+    S.yearFilter = opts.yearFilter || 'all';
+    S.sortOrder  = opts.sortOrder || 'date-desc';
+
+    const sf = document.getElementById('fdl-av3-search');
+    const tf = document.getElementById('fdl-av3-type');
+    const yf = document.getElementById('fdl-av3-year');
+    const so = document.getElementById('fdl-av3-sort');
+
+    if (sf) sf.value = opts.query || '';
+    if (tf) tf.value = S.typeFilter;
+    if (so) so.value = S.sortOrder;
+
+    if (yf) {
+      yf.innerHTML = `<option value="all">Alle Jahre</option>`;
+      yf.value = 'all';
+    }
+
+    const bc = document.getElementById('fdl-av3-bc');
+    if (bc) {
+      bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${category || 'Alle Liegenschaften'}</span>`;
+    }
+
+    renderSidebar();
+    renderPanel(null);
+
+    const li = document.getElementById('fdl-av3-li');
+    if (li) {
+      li.innerHTML = `<div class="av3-loading"><div class="av3-spinner"></div> Lade Dokumente…</div>`;
+    }
+
+    if (!window.scopeRootHandle) {
+      if (li) {
+        li.innerHTML = `<div class="av3-empty">
+          <div class="av3-empty-icon">${SVG.disconnect}</div>
+          <div class="av3-empty-title">Scopevisio nicht verbunden</div>
+        </div>`;
+      }
+      return;
+    }
+
+    const files = await loadFilesForCategory(category);
+    S.files = files;
+    S.filtered = files;
+
+    populateYearFilter(files);
+
+    if (opts.yearFilter) {
+      S.yearFilter = opts.yearFilter;
+      if (yf) yf.value = opts.yearFilter;
+    }
+
+    applyFilters();
+
+    // optional: erstes Dokument automatisch auswählen
+    if (opts.autoSelectFirst && S.filtered.length) {
+      S.selected = S.filtered[0];
+      renderList(S.filtered);
+      await renderPanel(S.selected);
+    }
   },
 
   dl()     { if (S.blobUrl && S.selected) { const a = Object.assign(document.createElement('a'), { href: S.blobUrl, download: S.selected.name }); a.click(); } },
@@ -1047,7 +1126,16 @@ async function open(opts = {}) {
   if (opts.obj) {
     setTimeout(() => { window.__av3.obj(opts.obj, opts); }, 0);
   } else if (opts.scopeCategory) {
-    setTimeout(() => { window.__av3.setCategory(opts.scopeCategory); }, 0);
+    setTimeout(() => {
+      window.__av3.setCategory(opts.scopeCategory, {
+        typeFilter: opts.typeFilter || 'all',
+        subFilter: opts.subFilter || 'all',
+        query: opts.query || '',
+        yearFilter: opts.yearFilter || 'all',
+        sortOrder: opts.sortOrder || 'date-desc',
+        autoSelectFirst: false
+      });
+    }, 0);
   }
 
   if (root) {
