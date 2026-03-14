@@ -449,14 +449,26 @@ if (/\b(?:hoechst\w*|höchst\w*|groesst\w*|größt\w*)\b/i.test(lower)) {
     }
   }
 
-  if (rest.length > 1) {
-    filter.text = rest;
-    filter.textTokens = restTokens;
-    chips.push({ label: `"${rest}"`, type: 'text', key: 'text' });
-  } else {
-    filter.text = '';
-    filter.textTokens = [];
-  }
+ const cleanedRestTokens = restTokens.filter(t => {
+  if (!t) return false;
+  if (SEARCH_STOPWORDS.has(t)) return false;
+  if (Object.prototype.hasOwnProperty.call(getTypeAliases(), t)) return false;
+  if (Object.prototype.hasOwnProperty.call(SEARCH_MONTH_MAP, t)) return false;
+  if (/^(?:hoechst\w*|höchst\w*|groesst\w*|größt\w*|kleinst\w*|niedrigst\w*|neuest\w*|letzt\w*|ältest\w*|aeltest\w*|erst\w*)$/i.test(t)) return false;
+  if (/^\d+$/.test(t)) return false;
+  return true;
+});
+
+rest = cleanedRestTokens.join(' ').trim();
+
+if (rest.length > 1) {
+  filter.text = rest;
+  filter.textTokens = cleanedRestTokens;
+  chips.push({ label: `"${rest}"`, type: 'text', key: 'text' });
+} else {
+  filter.text = '';
+  filter.textTokens = [];
+}
 
   return { filter, chips };
 }
