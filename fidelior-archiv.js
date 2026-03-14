@@ -1804,7 +1804,14 @@ function injectButton() {
 
 function init() {
   injectCSS();
-  injectButton();
+window.addEventListener("load", () => {
+  try {
+    injectButton();
+  } catch(e) {
+    console.warn("Archiv Button Injection failed:", e);
+  }
+});
+
 
   document.addEventListener('keydown', e => {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
