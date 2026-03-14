@@ -757,21 +757,33 @@ function showArchiveView(opts = {}) {
 
   const ctx = normalizeArchiveContext(opts);
 
-  const existing = document.getElementById('fdl-av3');
+   const existing = document.getElementById('fdl-av3');
+
   if (existing) {
     if (existing.parentElement !== archView) archView.appendChild(existing);
     existing.classList.add('open');
-    existing.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;background:transparent;padding:0;';
+    existing.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;min-height:0;background:transparent;padding:0;';
   } else {
     window.fdlArchivOpen?.(ctx);
+
     setTimeout(() => {
-      const ov = document.getElementById('fdl-av3');
-      if (ov && ov.parentElement !== archView) {
-        ov.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;background:transparent;padding:0;';
-        archView.appendChild(ov);
+      let ov = document.getElementById('fdl-av3');
+
+      if (!ov) {
+        window.fdlArchivOpen?.(ctx);
+        ov = document.getElementById('fdl-av3');
       }
-    }, 100);
+
+      if (ov) {
+        ov.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;min-height:0;background:transparent;padding:0;';
+        if (ov.parentElement !== archView) archView.appendChild(ov);
+        ov.classList.add('open');
+      } else {
+        archView.innerHTML = '<div style="padding:24px;color:#6b7280;font-size:14px">Archiv konnte nicht geladen werden.</div>';
+      }
+    }, 160);
   }
+
 
   setTimeout(() => {
     if (ctx.obj) {

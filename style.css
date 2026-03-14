@@ -2215,3 +2215,10 @@ body.view-dash #fdl-view-dash{
     height:auto !important;
   }
 }
+/* Archiv-View darf nicht leer zusammenfallen */
+#fdl-view-archive,
+#fdl-view-archive .fdl-av3,
+#fdl-av3{
+  min-height:0 !important;
+  height:100% !important;
+}
