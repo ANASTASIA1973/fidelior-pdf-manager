@@ -1307,14 +1307,27 @@ window.__fdlIdx = {
   // Im Archiv öffnen
   openInArchiv(docId) {
     closeSearch();
-    if (typeof window.fdlArchivOpen === 'function') window.fdlArchivOpen();
-    // Archiv-Suche nach Dateiname
     dbGet(S_DOCS, docId).then(doc => {
       if (!doc) return;
-      const sf = document.getElementById('fdl-av3-search');
-      if (sf) {
-        sf.value = doc.fileName.replace(/\.pdf$/i, '').slice(0, 40);
-        sf.dispatchEvent(new Event('input', { bubbles: true }));
+      if (window.__fdlPro?.openIndexedDoc) {
+        window.__fdlPro.openIndexedDoc(doc);
+        return;
+      }
+      if (typeof window.fdlArchivOpen === 'function') {
+        const derive = window.fdlDeriveCategory ? window.fdlDeriveCategory(doc.objectCode) : '';
+        const typeFilter =
+          doc.docType === 'Rechnung' ? 'Rechnungen' :
+          doc.docType === 'Dokument' ? 'Dokumente' :
+          'all';
+        window.fdlArchivOpen({
+          obj: doc.objectCode || '',
+          code: doc.objectCode || '',
+          scopeCategory: derive || '',
+          typeFilter,
+          selectName: doc.fileName || '',
+          query: (doc.fileName || '').replace(/\.pdf$/i, ''),
+          sortOrder: 'date-desc'
+        });
       }
     });
   },

@@ -959,43 +959,30 @@ window.__av3 = {
       if (match) await window.__av3.file(encodeURIComponent(match.name + '||' + match.modified));
     }
   },
-  /* ── FILE SELECTION ──────────────────────────────────────────────────────
-     Called by every document row click:  onclick="window.__av3.file(key)"
-     key = encodeURIComponent(f.name + '||' + f.modified)
-     ──────────────────────────────────────────────────────────────────────── */
   async file(key) {
     const decoded = decodeURIComponent(key);
-    const sep     = decoded.lastIndexOf('||');
-    if (sep === -1) { console.warn('[FideliorArchiv] file(): bad key', key); return; }
+    const sep = decoded.lastIndexOf('||');
+    if (sep === -1) return;
 
-    const name        = decoded.slice(0, sep);
+    const name = decoded.slice(0, sep);
     const modifiedStr = decoded.slice(sep + 2);
-
-    // Search filtered list first, fall back to full list
     const file =
       S.filtered.find(f => f.name === name && String(f.modified) === modifiedStr) ||
       S.files.find(f => f.name === name && String(f.modified) === modifiedStr);
 
-    if (!file) { console.warn('[FideliorArchiv] file(): not found', name); return; }
+    if (!file) return;
 
     S.selected = file;
-
-    // Re-render list to show .active state on the clicked row
     renderList(S.filtered);
 
-    // Scroll selected item into view
     setTimeout(() => {
       const li = document.getElementById('fdl-av3-li');
-      if (li) {
-        const active = li.querySelector('.av3-file.active');
-        if (active) active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }
+      const active = li?.querySelector('.av3-file.active');
+      active?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }, 0);
 
-    // Load metadata + PDF preview in right panel
     await renderPanel(file);
   },
-
   render() {
     applyFilters();
   },
@@ -1189,9 +1176,19 @@ async function open(opts = {}) {
   if (opts.scopeCategory) S.scopeCategory = opts.scopeCategory;
   renderSidebar();
 
+  const targetObj = opts.obj || opts.code || '';
+  const sf = document.getElementById('fdl-av3-search');
+  const tf = document.getElementById('fdl-av3-type');
+  const yf = document.getElementById('fdl-av3-year');
+  const so = document.getElementById('fdl-av3-sort');
+  if (sf) sf.value = opts.query || '';
+  if (tf) tf.value = opts.typeFilter || 'all';
+  if (yf && !targetObj && !opts.scopeCategory) yf.value = opts.yearFilter || 'all';
+  if (so) so.value = opts.sortOrder || 'date-desc';
+
   const root = window.scopeRootHandle;
-  if (opts.obj) {
-    setTimeout(() => { window.__av3.obj(opts.obj, opts); }, 0);
+  if (targetObj) {
+    setTimeout(() => { window.__av3.obj(targetObj, opts); }, 0);
   } else if (opts.scopeCategory) {
     setTimeout(() => {
       window.__av3.setCategory(opts.scopeCategory, {

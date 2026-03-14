@@ -438,7 +438,22 @@ function openResult(doc) {
     window.__fdlPro.openIndexedDoc(doc);
     return;
   }
-  if (typeof window.fdlArchivOpen === 'function') window.fdlArchivOpen({ obj: doc.objectCode || null, selectName: doc.fileName || '' });
+  if (typeof window.fdlArchivOpen === 'function') {
+    const derive = window.fdlDeriveCategory ? window.fdlDeriveCategory(doc.objectCode) : '';
+    const typeFilter =
+      doc.docType === 'Rechnung' ? 'Rechnungen' :
+      doc.docType === 'Dokument' ? 'Dokumente' :
+      'all';
+    window.fdlArchivOpen({
+      obj: doc.objectCode || '',
+      code: doc.objectCode || '',
+      scopeCategory: derive || '',
+      typeFilter,
+      selectName: doc.fileName || '',
+      query: (doc.fileName || '').replace(/\.pdf$/i, ''),
+      sortOrder: 'date-desc'
+    });
+  }
 }
 
 /* ─────────────────────────────── PUBLIC ────────────────────────────────── */

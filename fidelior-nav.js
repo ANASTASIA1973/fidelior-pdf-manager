@@ -331,7 +331,7 @@ async function renderDash() {
     const fn = d.fileName||'';
     const short = fn.replace(/\.pdf$/i,'');
     const amt = d.amount ? fmtEuro(parseFloat(String(d.amount).replace(',','.').replace(/[^0-9.]/g,''))) : '';
-    return `<div class="fdl-ar" onclick="window.__fdlNav.openActivity('${encodeURIComponent(fn)}')" title="${fn}">
+    return `<div class="fdl-ar" onclick="window.__fdlNav.openActivity('${encodeURIComponent(JSON.stringify({ fileName: fn, objectCode: d.objectCode || '', docType: d.docType || '' }))}')" title="${fn}">
       <div class="fdl-ar-th">PDF</div>
       <div style="flex:1;min-width:0">
         <div class="fdl-ar-n">${short}</div>
@@ -457,19 +457,36 @@ window.__fdlNav = {
   goArchiv()     { activateTab('archiv'); },
   goTasks()      { window.fdlTasksOpen?.() || document.getElementById('fdl-btn-tasks')?.click(); },
   goArchivObj(code) {
-    if (typeof window.fdlArchivOpen === 'function') window.fdlArchivOpen();
-    setTimeout(() => {
-      // Klick auf Sidebar-Item mit matching code
-      document.querySelector(`[data-code="${code}"], [data-obj="${code}"]`)?.click();
-    }, 350);
+    if (window.__fdlPro?.goArchivObj) {
+      window.__fdlPro.goArchivObj(code);
+      return;
+    }
+    const scopeCategory = window.fdlDeriveCategory ? window.fdlDeriveCategory(code) : 'Objekte';
+    window.fdlArchivOpen?.({ obj: code, code, scopeCategory, sortOrder: 'date-desc' });
   },
   openActivity(encoded) {
-    const name = decodeURIComponent(encoded);
-    window.fdlArchivOpen?.();
-    setTimeout(() => {
-      const sf = document.getElementById('fdl-av3-search');
-      if (sf) { sf.value = name.replace(/\.pdf$/i,'').slice(0,50); sf.dispatchEvent(new Event('input',{bubbles:true})); }
-    }, 380);
+    let payload = null;
+    try { payload = JSON.parse(decodeURIComponent(encoded)); } catch { payload = { fileName: decodeURIComponent(encoded) }; }
+
+    if (window.__fdlPro?.openIndexedDoc) {
+      window.__fdlPro.openIndexedDoc({
+        objectCode: payload.objectCode || '',
+        docType: payload.docType || '',
+        fileName: payload.fileName || ''
+      });
+      return;
+    }
+
+    const name = payload.fileName || '';
+    const scopeCategory = window.fdlDeriveCategory ? window.fdlDeriveCategory(payload.objectCode || '') : '';
+    window.fdlArchivOpen?.({
+      obj: payload.objectCode || '',
+      code: payload.objectCode || '',
+      scopeCategory: scopeCategory || '',
+      selectName: name,
+      query: name.replace(/\.pdf$/i,'').slice(0,50),
+      sortOrder: 'date-desc'
+    });
   },
   loadInboxFile(encoded) {
     this.goAblage();
