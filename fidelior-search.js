@@ -84,15 +84,19 @@ function parseQuery(q) {
 
   const sel = document.getElementById('objectSelect');
   const objOptions = sel ? Array.from(sel.options).filter(o => o.value).map(o => ({ code: o.value, name: o.textContent || '' })) : [];
-  for (const obj of objOptions) {
-    const codeNorm = normalizeSearchValue(obj.code);
-    const nameNorm = normalizeSearchValue(obj.name);
-    if ((codeNorm && normalized.includes(codeNorm)) || (nameNorm && normalized.includes(nameNorm.split(' ').slice(0, 2).join(' ')))) {
-      filter.objectCode = obj.code.toUpperCase();
-      chips.push({ label: `Objekt: ${filter.objectCode}`, type:'obj' });
-      break;
-    }
+for (const obj of objOptions) {
+  const codeNorm = normalizeSearchValue(obj.code);
+  const nameNorm = normalizeSearchValue(obj.name);
+  const firstWords = nameNorm.split(' ').slice(0, 2).join(' ');
+  const hasCode = codeNorm && new RegExp(`(^|\\s)${codeNorm}(\\s|$)`, 'i').test(normalized);
+  const hasName = firstWords && new RegExp(`(^|\\s)${firstWords.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(\\s|$)`, 'i').test(normalized);
+
+  if (hasCode || hasName) {
+    filter.objectCode = obj.code.toUpperCase();
+    chips.push({ label: `Objekt: ${filter.objectCode}`, type:'obj' });
+    break;
   }
+}
 
   const ym = lower.match(/\b(20\d{2})\b/);
   if (ym) {
@@ -118,7 +122,11 @@ function parseQuery(q) {
     filter.amountLt = parseFloat(ltM[1].replace(',','.'));
     chips.push({label:`< ${fmtEuro(filter.amountLt)}`, type:'amt'});
   }
-
+const bareAmount = lower.match(/\b(\d{2,6}(?:[.,]\d{1,2})?)\s*(?:euro|€)?\b/i);
+if (bareAmount && filter.amountGt === undefined && filter.amountLt === undefined) {
+  filter.amountEq = parseFloat(bareAmount[1].replace(',','.'));
+  chips.push({label:`≈ ${fmtEuro(filter.amountEq)}`, type:'amt'});
+}
   const TYPES = { rechnung:'rechnung', rechnungen:'rechnung', eingangsrechnung:'rechnung', gutschrift:'gutschrift', vertrag:'vertrag', verträge:'vertrag', vertraege:'vertrag', angebot:'angebot', angebote:'angebot', dokument:'dokument', dokumente:'dokument' };
   for (const [kw, key] of Object.entries(TYPES)) {
     if (normalized.includes(normalizeSearchValue(kw))) { filter.docType = key; chips.push({label:key.charAt(0).toUpperCase()+key.slice(1), type:'type'}); break; }
@@ -139,14 +147,15 @@ function parseQuery(q) {
   }
 
   let rest = raw;
-  [
-    /\b20\d{2}\b/g,
-    /\b(?:ueber|über|ab|mehr als|mindestens|unter|bis|maximal|hoechstens|höchstens)\s+\d[\d.,]*\s*(?:euro|€)?/gi,
-    /\b(?:von|bei)\s+[a-zäöüß0-9&][a-zäöüß0-9&\-.\s]{1,40}/gi,
-    /\b(Rechnungen?|Eingangsrechnungen?|Gutschriften?|Verträge?|Vertraege?|Angebote?|Dokumente?)\b/gi,
-    /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
-    /\b(?:privat|persönlich|persoenlich|fidelior|objekte|objekt|liegenschaft|liegenschaften|immobilie|immobilien)\b/gi,
-  ].forEach(p => { rest = rest.replace(p,' '); });
+ [
+  /\b20\d{2}\b/g,
+  /\b(?:ueber|über|ab|mehr als|mindestens|unter|bis|maximal|hoechstens|höchstens)\s+\d[\d.,]*\s*(?:euro|€)?/gi,
+  /\b\d{2,6}(?:[.,]\d{1,2})?\s*(?:euro|€)?\b/gi,
+  /\b(?:von|bei)\s+[a-zäöüß0-9&][a-zäöüß0-9&\-.\s]{1,40}/gi,
+  /\b(Rechnungen?|Eingangsrechnungen?|Gutschriften?|Verträge?|Vertraege?|Angebote?|Dokumente?)\b/gi,
+  /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
+  /\b(?:privat|persönlich|persoenlich|fidelior|objekte|objekt|liegenschaft|liegenschaften|immobilie|immobilien)\b/gi,
+].forEach(p => { rest = rest.replace(p,' '); });
   for (const obj of objOptions) rest = rest.replace(new RegExp('\\b'+obj.code+'\\b','gi'),' ');
   rest = rest.replace(/\s{2,}/g,' ').trim();
   if (rest.length > 1) {
@@ -193,9 +202,10 @@ function normalizeSearchDoc(d, source) {
     serviceDesc: d.serviceDesc || '',
     keywords: d.keywords || [],
     year: d.year || '',
-    subfolder: d.subfolder || '',
-    selectName: d.selectName || d.fileName || d.name || '',
-    archiveRef: d.archiveRef || null
+   subfolder: d.subfolder || '',
+invoiceNo: d.invoiceNo || '',
+selectName: d.selectName || d.fileName || d.name || '',
+archiveRef: d.archiveRef || null
   };
 }
 
@@ -254,6 +264,10 @@ async function runSearch(filter, opts = {}) {
         if (tf.month && d.invoiceDate && !d.invoiceDate.slice(5,7).startsWith(tf.month)) return false;
         if (tf.amountGt !== undefined && d.amount <= tf.amountGt) return false;
         if (tf.amountLt !== undefined && d.amount >= tf.amountLt) return false;
+        if (tf.amountEq !== undefined) {
+  const amt = Number(d.amount || 0);
+  if (!amt || Math.abs(amt - tf.amountEq) > 0.01) return false;
+}
         if (tf.docType && d.docType !== tf.docType) return false;
         if (tf.sender && !(d.senderNorm||'').includes(tf.sender.toLowerCase())) return false;
         if (tf.text) {
@@ -337,23 +351,26 @@ function injectCSS() {
   display:flex;
   align-items:center;
   justify-content:space-between;
-  position:relative;
-  z-index:2;
+  position:sticky;
+  top:48px;
+  z-index:3;
   background:#fff;
   margin-top:2px;
+  overflow:visible;
 }
-  .fdl-srch-chips{
+.fdl-srch-chips{
   display:flex;
-  gap:5px;
+  gap:6px;
   flex-wrap:wrap;
   padding:8px 18px 8px;
-  min-height:32px;
+  min-height:34px;
   overflow:visible;
   align-items:center;
   position:sticky;
   top:0;
   background:#fff;
   z-index:4;
+  flex-shrink:0;
 }
 
 
@@ -370,10 +387,16 @@ function injectCSS() {
 .fdl-srch-chip.type  {background:#F3F4F6;color:#374151;border-color:#E5E7EB}
 .fdl-srch-chip.sender{background:#FEF3C7;color:#92400E;border-color:#FDE68A}
 .fdl-srch-chip.text  {background:#F3F4F6;color:#374151;border-color:#E5E7EB}
+.fdl-srch-chip.cat   {background:#E0F2FE;color:#075985;border-color:#BAE6FD}
 
 
 /* Results */
-.fdl-srch-results{flex:1;overflow-y:auto}
+.fdl-srch-results{
+  flex:1;
+  overflow-y:auto;
+  min-height:0;
+  scrollbar-gutter:stable;
+}
 .fdl-srch-result{
   display:flex;align-items:flex-start;gap:12px;padding:12px 18px;
   border-bottom:1px solid #F9FAFB;cursor:pointer;transition:background .1s;
