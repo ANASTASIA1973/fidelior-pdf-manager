@@ -181,11 +181,13 @@ function buildSidebar() {
 }
 
 function buildSidebarHTML() {
-  const objs     = getObjList();
-  const branches = objs.filter(o=>BRANCH_CODES.has(o.code));
-  const objects  = objs.filter(o=>!BRANCH_CODES.has(o.code));
+  const objs = getObjList();
+  const branchObjects = objs.filter(o => BRANCH_CODES.has(o.code));
+  const realObjects = objs.filter(o => !BRANCH_CODES.has(o.code));
 
-  const categoryItems = `
+  const categoryGroups = `
+    <div class="fdl-sb-section"><span class="fdl-sb-section-label">Kategorien</span></div>
+
     <div class="fdl-sb-group open" data-group="cat-objekte">
       <button class="fdl-sb-group-toggle">
         ${sbIcon('building')}
@@ -193,118 +195,108 @@ function buildSidebarHTML() {
         <span class="fdl-sb-chevron">${icon('chevron')}</span>
       </button>
       <div class="fdl-sb-sub">
-        <button class="fdl-sb-item" data-view="archive" data-scope="Objekte">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="Objekte" data-type="all">
           ${sbIcon('folder')}<span class="fdl-sb-label">Alle Objekte</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-scope="Objekte" data-folder="rechnung">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="Objekte" data-type="Rechnungen">
           ${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-scope="Objekte" data-folder="other">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="Objekte" data-type="Dokumente">
           ${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span>
         </button>
       </div>
     </div>
-    <div class="fdl-sb-group open" data-group="cat-fidelior">
+
+    <div class="fdl-sb-group" data-group="cat-fidelior">
       <button class="fdl-sb-group-toggle">
         ${sbIcon('receipt')}
         <span class="fdl-sb-label">Fidelior</span>
         <span class="fdl-sb-chevron">${icon('chevron')}</span>
       </button>
       <div class="fdl-sb-sub">
-        <button class="fdl-sb-item" data-view="archive" data-scope="Fidelior">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="Fidelior" data-type="all">
           ${sbIcon('folder')}<span class="fdl-sb-label">Alle</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-scope="Fidelior" data-folder="rechnung">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="Fidelior" data-type="Rechnungen">
           ${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-scope="Fidelior" data-folder="other">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="Fidelior" data-type="Dokumente">
           ${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span>
         </button>
       </div>
     </div>
-    <div class="fdl-sb-group open" data-group="cat-privat">
+
+    <div class="fdl-sb-group" data-group="cat-privat">
       <button class="fdl-sb-group-toggle">
         ${sbIcon('file')}
         <span class="fdl-sb-label">Privat</span>
         <span class="fdl-sb-chevron">${icon('chevron')}</span>
       </button>
       <div class="fdl-sb-sub">
-        <button class="fdl-sb-item" data-view="archive" data-scope="Privat">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="Privat" data-type="all">
           ${sbIcon('folder')}<span class="fdl-sb-label">Alle</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-scope="Privat" data-folder="rechnung">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="Privat" data-type="Rechnungen">
           ${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-scope="Privat" data-folder="other">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="Privat" data-type="Dokumente">
           ${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span>
         </button>
       </div>
     </div>
-    <div class="fdl-sb-group open" data-group="cat-arndtcie">
+
+    <div class="fdl-sb-group" data-group="cat-arndtcie">
       <button class="fdl-sb-group-toggle">
         ${sbIcon('folder')}
         <span class="fdl-sb-label">ARNDT & CIE</span>
         <span class="fdl-sb-chevron">${icon('chevron')}</span>
       </button>
       <div class="fdl-sb-sub">
-        <button class="fdl-sb-item" data-view="archive" data-scope="ARNDT & CIE">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="ARNDT & CIE" data-type="all">
           ${sbIcon('folder')}<span class="fdl-sb-label">Alle</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-scope="ARNDT & CIE" data-folder="rechnung">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="ARNDT & CIE" data-type="Rechnungen">
           ${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-scope="ARNDT & CIE" data-folder="other">
+        <button class="fdl-sb-item" data-view="archive" data-scopecat="ARNDT & CIE" data-type="Dokumente">
           ${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span>
         </button>
       </div>
-    </div>`;
+    </div>
+  `;
 
-  const branchItems = branches.map(b => {
-    const label = b.code === 'ARNDTCIE' ? 'ARNDT & CIE' : b.code;
+  const objectGroups = realObjects.map(o => {
+    const shortName = o.name.replace(/^[A-Z0-9]+ · /, '');
     return `
-    <div class="fdl-sb-section"><span class="fdl-sb-section-label">${label}</span></div>
-    <div class="fdl-sb-group open" data-group="${b.code}">
-      <div class="fdl-sb-sub" style="display:block">
-        <button class="fdl-sb-item" data-view="archive" data-obj="${b.code}" data-folder="rechnung" data-scope="${deriveCategory(b.code)}">
-          ${sbIcon('receipt')} <span class="fdl-sb-label">Rechnungen</span>
+      <div class="fdl-sb-group" data-group="${o.code}">
+        <button class="fdl-sb-group-toggle">
+          ${sbIcon('building')}
+          <span class="fdl-sb-label">${shortName || o.code}</span>
+          <span id="fdl-sbcnt-${o.code}" class="fdl-sb-count"></span>
+          <span class="fdl-sb-chevron">${icon('chevron')}</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-obj="${b.code}" data-folder="other" data-scope="${deriveCategory(b.code)}">
-          ${sbIcon('file')} <span class="fdl-sb-label">Dokumente</span>
-        </button>
+        <div class="fdl-sb-sub">
+          <button class="fdl-sb-item" data-view="archive" data-obj="${o.code}" data-type="all">
+            ${sbIcon('folder')}<span class="fdl-sb-label">Alle</span>
+          </button>
+          <button class="fdl-sb-item" data-view="archive" data-obj="${o.code}" data-type="Rechnungen">
+            ${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span>
+          </button>
+          <button class="fdl-sb-item" data-view="archive" data-obj="${o.code}" data-type="Dokumente">
+            ${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span>
+          </button>
+        </div>
       </div>
-    </div>`;
-  }).join('');
-
-  const objItems = objects.map(o => {
-    const shortName = o.name.replace(/^[A-Z0-9]+ · /,'');
-    const isB75 = o.code === 'B75';
-    const subItems = isB75
-      ? `<button class="fdl-sb-item" data-view="archive" data-obj="B75" data-folder="rechnung">${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span></button>
-         <div class="fdl-sb-sub">
-           <button class="fdl-sb-item" data-view="archive" data-obj="B75" data-folder="D1">${sbIcon('folder')}<span class="fdl-sb-label">D1</span></button>
-           <button class="fdl-sb-item" data-view="archive" data-obj="B75" data-folder="D4">${sbIcon('folder')}<span class="fdl-sb-label">D4</span></button>
-           <button class="fdl-sb-item" data-view="archive" data-obj="B75" data-folder="Allgemein">${sbIcon('folder')}<span class="fdl-sb-label">Allgemein</span></button>
-         </div>
-         <button class="fdl-sb-item" data-view="archive" data-obj="B75" data-folder="other">${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span></button>`
-      : `<button class="fdl-sb-item" data-view="archive" data-obj="${o.code}" data-folder="rechnung">${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span></button>
-         <button class="fdl-sb-item" data-view="archive" data-obj="${o.code}" data-folder="other">${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span></button>`;
-
-    return `
-    <div class="fdl-sb-group" data-group="${o.code}">
-      <button class="fdl-sb-group-toggle">
-        ${sbIcon('building')}
-        <span class="fdl-sb-label">${shortName||o.code}</span>
-        <span id="fdl-sbcnt-${o.code}" class="fdl-sb-count"></span>
-        <span class="fdl-sb-chevron">${icon('chevron')}</span>
-      </button>
-      <div class="fdl-sb-sub">${subItems}</div>
-    </div>`;
+    `;
   }).join('');
 
   return `
     <div class="fdl-sb-logo">
       <div class="fdl-sb-logo-mark">${icon('grid','width:14px;height:14px;')}</div>
-      <div><div class="fdl-sb-logo-text">Fidelior</div><div class="fdl-sb-logo-sub">DMS</div></div>
+      <div>
+        <div class="fdl-sb-logo-text">Fidelior</div>
+        <div class="fdl-sb-logo-sub">DMS</div>
+      </div>
     </div>
 
     <div class="fdl-sb-section"><span class="fdl-sb-section-label">Workspace</span></div>
@@ -314,14 +306,12 @@ function buildSidebarHTML() {
     <button class="fdl-sb-item" data-view="tasks">${sbIcon('check')}<span class="fdl-sb-label">Aufgaben</span><span class="fdl-sb-badge" id="fdl-sb-tasks-badge" style="display:none">0</span></button>
 
     <div class="fdl-sb-divider"></div>
-    <div class="fdl-sb-section"><span class="fdl-sb-section-label">Kategorien</span></div>
-    ${categoryItems}
+
+    ${categoryGroups}
 
     <div class="fdl-sb-divider"></div>
-    ${branchItems ? `${branchItems}<div class="fdl-sb-divider"></div>` : ''}
-
     <div class="fdl-sb-section"><span class="fdl-sb-section-label">Objekte</span></div>
-    ${objItems}
+    ${objectGroups}
 
     <div class="fdl-sb-divider"></div>
     <div class="fdl-sb-section"><span class="fdl-sb-section-label">System</span></div>
@@ -333,20 +323,34 @@ function buildSidebarHTML() {
     <div style="padding:8px 0 14px">
       <div class="fdl-conn-row"><span class="fdl-conn-dot off" id="fdl-conn-scope-dot"></span><span>Scopevisio</span></div>
       <div class="fdl-conn-row"><span class="fdl-conn-dot off" id="fdl-conn-pcloud-dot"></span><span>pCloud</span></div>
-    </div>`;
+    </div>
+  `;
 }
 
 function attachSidebarEvents() {
   const sb = document.getElementById('fdl-sidebar');
+  if (!sb) return;
+
   sb.querySelectorAll('.fdl-sb-group-toggle').forEach(btn => {
-    btn.addEventListener('click', () => btn.parentElement.classList.toggle('open'));
+    btn.addEventListener('click', () => {
+      btn.parentElement.classList.toggle('open');
+    });
   });
+
   sb.querySelectorAll('.fdl-sb-item[data-view]').forEach(btn => {
-    btn.addEventListener('click', () => activateView(btn.dataset.view, {
-      obj: btn.dataset.obj,
-      folder: btn.dataset.folder,
-      scopeCategory: btn.dataset.scope || undefined,
-    }));
+    btn.addEventListener('click', () => {
+      const view = btn.dataset.view;
+      const obj = btn.dataset.obj || '';
+      const scopeCategory = btn.dataset.scopecat || '';
+      const type = btn.dataset.type || 'all';
+
+      activateView(view, {
+        obj,
+        scopeCategory,
+        typeFilter: type,
+        autoLoad: true
+      });
+    });
   });
 }
 
@@ -455,16 +459,34 @@ function activateView(view, opts = {}) {
 /* ══════════════════════════════════════════════════════════════════════════
    ARCHIVE VIEW — reuse fidelior-archiv.js inline
    ══════════════════════════════════════════════════════════════════════════ */
+   function normalizeArchiveContext(opts = {}) {
+  const out = { ...opts };
+
+  if (out.typeFilter === 'Rechnungen') {
+    out.typeFilter = 'Rechnungen';
+    out.folder = 'rechnung';
+  } else if (out.typeFilter === 'Dokumente') {
+    out.typeFilter = 'Dokumente';
+    out.folder = 'other';
+  } else {
+    out.typeFilter = 'all';
+  }
+
+  return out;
+}
 function showArchiveView(opts = {}) {
   const archView = document.getElementById('fdl-view-archive');
   if (!archView) return;
+
+  const ctx = normalizeArchiveContext(opts);
+
   const existing = document.getElementById('fdl-av3');
   if (existing) {
     if (existing.parentElement !== archView) archView.appendChild(existing);
     existing.classList.add('open');
     existing.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;background:transparent;padding:0;';
   } else {
-    window.fdlArchivOpen?.(opts);
+    window.fdlArchivOpen?.(ctx);
     setTimeout(() => {
       const ov = document.getElementById('fdl-av3');
       if (ov && ov.parentElement !== archView) {
@@ -473,29 +495,37 @@ function showArchiveView(opts = {}) {
       }
     }, 100);
   }
-  const folderMap = { rechnung: 'Rechnungen', other: 'Dokumente' };
-  if (opts.obj) {
-    setTimeout(() => {
-      window.__av3?.obj?.(opts.obj, {
-        scopeCategory: opts.scopeCategory,
-        typeFilter: folderMap[opts.folder] || 'all',
-        subFilter: (opts.folder && !folderMap[opts.folder]) ? opts.folder : 'all',
-        selectName: opts.selectName || '',
-        query: opts.query || ''
+
+  setTimeout(() => {
+    // Kategorie + Typ sofort anwenden
+    if (ctx.obj) {
+      window.__av3?.obj?.(ctx.obj, {
+        scopeCategory: ctx.scopeCategory || '',
+        typeFilter: ctx.typeFilter || 'all',
+        selectName: ctx.selectName || '',
+        query: ctx.query || ''
       });
-    }, 180);
-  } else if (opts.scopeCategory) {
-    setTimeout(() => {
-      const typeFilter = folderMap[opts.folder] || 'all';
-      if (window.__av3?.setCategoryAndType) {
-        window.__av3.setCategoryAndType(opts.scopeCategory, typeFilter);
-      } else {
-        window.__av3?.setCategory?.(opts.scopeCategory);
-        if (typeFilter !== 'all') window.__av3?.setTypeFilter?.(typeFilter);
-      }
-    }, 180);
-  }
+      return;
+    }
+
+    if (ctx.scopeCategory) {
+      window.__av3?.setCategory?.(ctx.scopeCategory);
+    }
+
+    if (window.__av3?.filters) {
+      window.__av3.filters.typeFilter = ctx.typeFilter || 'all';
+      if (ctx.query) window.__av3.filters.query = ctx.query;
+      if (ctx.year) window.__av3.filters.year = ctx.year;
+    }
+
+    if (window.__av3?.render) {
+      window.__av3.render();
+    } else if (window.__av3?.refresh) {
+      window.__av3.refresh();
+    }
+  }, 180);
 }
+
 
 /* ══════════════════════════════════════════════════════════════════════════
    DASHBOARD RENDER
