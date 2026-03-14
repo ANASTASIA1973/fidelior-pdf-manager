@@ -26,15 +26,18 @@ function idbGetAll(dbName, store) {
 
 /* ─────────────────────────────── DATA ──────────────────────────────────── */
 async function loadAllData() {
-  const [activity, tasks, indexDocs] = await Promise.all([
+  const [activity, tasks, indexDocs, archiveStats] = await Promise.all([
     idbGetAll('fidelior_addon_v1','activity'),
     idbGetAll('fidelior_addon_v1','tasks'),
     idbGetAll('fidelior_index_v1','documents').catch(() => []),
+    typeof window.fdlArchivGetDashboardStats === 'function'
+      ? window.fdlArchivGetDashboardStats().catch(() => null)
+      : Promise.resolve(null),
   ]);
-  return { activity, tasks, indexDocs };
+  return { activity, tasks, indexDocs, archiveStats };
 }
 
-function computeStats({ activity, tasks, indexDocs }) {
+function computeStats({ activity, tasks, indexDocs, archiveStats }) {
   const now = new Date();
   const yr  = now.getFullYear();
   const mo  = now.getMonth();
@@ -42,9 +45,30 @@ function computeStats({ activity, tasks, indexDocs }) {
   const mst = new Date(yr, mo, 1).toISOString();
   const tod = now.toISOString().slice(0,10);
 
-  const docs = indexDocs.length ? indexDocs : activity;
   const openTasks    = tasks.filter(t => t.status !== 'done');
   const overdueTasks = openTasks.filter(t => t.dueDate && t.dueDate < tod);
+
+  if (archiveStats && typeof archiveStats.total === 'number') {
+    const byObj = { ...(archiveStats.byObj || {}) };
+    for (const t of openTasks) {
+      if (t.objectCode && byObj[t.objectCode]) byObj[t.objectCode].openTasks = (byObj[t.objectCode].openTasks || 0) + 1;
+    }
+    return {
+      total: archiveStats.total || 0,
+      weekCount: archiveStats.weekCount || 0,
+      monthCount: archiveStats.monthCount || 0,
+      openTasks: openTasks.length,
+      overdueTasks: overdueTasks.length,
+      monthAmount: archiveStats.monthAmount || 0,
+      byObj,
+      recent: archiveStats.recent || [],
+      openTasksList: openTasks.slice(0,8),
+      thisYear: archiveStats.thisYear || yr,
+      categoryCounts: archiveStats.categoryCounts || { Objekte:0, Fidelior:0, Privat:0 }
+    };
+  }
+
+  const docs = indexDocs.length ? indexDocs : activity;
   const recent = [...docs].sort((a,b) => (b.savedAt||'').localeCompare(a.savedAt||'')).slice(0,25);
   const weekDocs  = docs.filter(d => (d.savedAt||'') >= wk);
   const monthDocs = docs.filter(d => (d.savedAt||'') >= mst);
@@ -70,7 +94,8 @@ function computeStats({ activity, tasks, indexDocs }) {
 
   return { total:docs.length, weekCount:weekDocs.length, monthCount:monthDocs.length,
     openTasks:openTasks.length, overdueTasks:overdueTasks.length,
-    monthAmount, byObj, recent, openTasksList:openTasks.slice(0,8), thisYear:yr };
+    monthAmount, byObj, recent, openTasksList:openTasks.slice(0,8), thisYear:yr,
+    categoryCounts:{ Objekte:0, Fidelior:0, Privat:0 } };
 }
 
 /* ─────────────────────────────── FMT ───────────────────────────────────── */
@@ -290,7 +315,6 @@ async function renderDash() {
   const todISO  = now.toISOString().slice(0,10);
   const soonISO = new Date(now.getTime()+3*86400000).toISOString().slice(0,10);
 
-  /* STAT CARDS */
   const sc = (num, label, trendCls, trendTxt, onclick) => `
     <div class="fdl-sc" onclick="${onclick}">
       <div class="fdl-sc-n">${num}</div>
@@ -309,7 +333,6 @@ async function renderDash() {
     ${sc(s.monthAmount>0?fmtEuro(s.monthAmount):'—', 'Monatssumme', 'blue', `Belege ${s.thisYear}`, "window.__fdlNav.goArchiv()")}
   </div>`;
 
-  /* LIEGENSCHAFT CARDS */
   const objList = Object.values(s.byObj).filter(o => o.count>0||o.openTasks>0).sort((a,b)=>b.count-a.count);
   const liegCards = objList.length ? objList.map(o => {
     const shortName = o.name.replace(/^[A-Z0-9]+ · /,'').replace(/^[A-Z0-9]+$/,'');
@@ -326,7 +349,6 @@ async function renderDash() {
     </div>`;
   }).join('') : '<div class="fdl-empty">Noch keine Dokumente abgelegt</div>';
 
-  /* AKTIVITÄT */
   const actRows = s.recent.length ? s.recent.map(d => {
     const fn = d.fileName||'';
     const short = fn.replace(/\.pdf$/i,'');
@@ -345,7 +367,6 @@ async function renderDash() {
     </div>`;
   }).join('') : '<div class="fdl-empty">Noch keine Aktivität</div>';
 
-  /* AUFGABEN */
   const taskRows = s.openTasksList.length ? s.openTasksList.map(t => {
     const dc = !t.dueDate?'ok':t.dueDate<todISO?'ov':t.dueDate<=soonISO?'so':'ok';
     const dl = !t.dueDate?'':t.dueDate<todISO?`⚠ ${fmtShort(t.dueDate)}`:fmtShort(t.dueDate);
@@ -359,10 +380,8 @@ async function renderDash() {
     </div>`;
   }).join('') : '<div class="fdl-empty" style="padding:16px">Keine offenen Aufgaben ✓</div>';
 
-  /* INBOX */
   const inboxHtml = await buildInbox();
 
-  /* BALKEN */
   const objAmts = objList.filter(o=>o.amount>0).slice(0,6);
   const maxAmt  = Math.max(...objAmts.map(o=>o.amount),1);
   const barHtml = objAmts.length ? `<div class="fdl-bar-w">${objAmts.map(o=>`
@@ -372,7 +391,6 @@ async function renderDash() {
       <div class="fdl-bar-v">${fmtEuro(o.amount)}</div>
     </div>`).join('')}</div>` : '<div class="fdl-empty" style="padding:12px;font-size:12px">Noch keine Beträge</div>';
 
-  /* ASSEMBLE */
   root.innerHTML = `
     <div class="fdl-dw">
       <div>
@@ -504,7 +522,11 @@ window.__fdlNav = {
 const _prev = window.fdlOnFileSaved;
 window.fdlOnFileSaved = function(data) {
   try { _prev?.(data); } catch {}
-  setTimeout(() => { refreshBadge(); if (_tab==='dash') renderDash(); }, 900);
+  setTimeout(() => {
+    refreshBadge();
+    window.fdlArchivGetDashboardStats?.(true).catch(() => {});
+    if (_tab==='dash') renderDash();
+  }, 900);
 };
 
 /* ─────────────────────────────── ARCHIV CLOSE WATCHER ─────────────────── */

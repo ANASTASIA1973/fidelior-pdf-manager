@@ -1,4 +1,3 @@
-
 /* ==========================================================================
    Fidelior Archiv  v3.1  —  Dokument-Browser (vollständig überarbeitet)
    ==========================================================================
@@ -905,151 +904,6 @@ async function renderPDF(file) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   ARCHIV-SUCHE FÜR GLOBALE SUCHE
-   ══════════════════════════════════════════════════════════════════════════ */
-
-const _globalSearchCache = {
-  ts: 0,
-  rootKey: '',
-  files: []
-};
-
-function getRootCacheKey() {
-  const h = window.scopeRootHandle;
-  if (!h) return '';
-  return h.name || 'scope-root';
-}
-
-function toAmountNumber(raw) {
-  if (!raw) return 0;
-  const s = String(raw).replace(/[€\s]/g, '').replace(/\./g, '').replace(',', '.').replace(/[^0-9.\-]/g, '');
-  const n = parseFloat(s);
-  return isFinite(n) ? n : 0;
-}
-
-function toArchiveSearchDoc(f) {
-  const category = window.fdlDeriveCategory ? window.fdlDeriveCategory(f.objectCode) : '';
-  const folderType = fmtFolderType(f.folderType);
-  return {
-    source: 'archive',
-    id: `archive:${f.objectCode || ''}:${f.name}:${f.modified}`,
-    fileName: f.name || '',
-    objectCode: f.objectCode || '',
-    objectName: f.objectName || '',
-    category: category || '',
-    docType: folderType,
-    amount: toAmountNumber(f.meta?.betrag || ''),
-    amountRaw: f.meta?.betrag || '',
-    invoiceDate: f.meta?.datum ? f.meta.datum.replace(/\./g, '-') : '',
-    year: f.year || '',
-    sender: f.meta?.absender || '',
-    senderNorm: (f.meta?.absender || '').toLowerCase(),
-    ocrText: '',
-    serviceDesc: '',
-    keywords: [],
-    subfolder: f.subfolder || '',
-    modified: f.modified || 0,
-    selectName: f.name || '',
-    archiveRef: {
-      code: f.objectCode || '',
-      scopeCategory: category || '',
-      modified: f.modified || 0
-    }
-  };
-}
-
-async function getAllArchiveFilesFresh() {
-  await loadObjectsConfig();
-  const objs = getObjList();
-  let all = [];
-  for (const o of objs) {
-    const files = await loadFiles(o.code);
-    all.push(...files);
-  }
-  return all;
-}
-
-async function getAllArchiveFilesCached(maxAgeMs = 30000) {
-  const now = Date.now();
-  const rootKey = getRootCacheKey();
-  if (_globalSearchCache.files.length && _globalSearchCache.rootKey === rootKey && (now - _globalSearchCache.ts) < maxAgeMs) {
-    return _globalSearchCache.files;
-  }
-  const all = await getAllArchiveFilesFresh();
-  _globalSearchCache.ts = now;
-  _globalSearchCache.rootKey = rootKey;
-  _globalSearchCache.files = all;
-  return all;
-}
-
-function matchesArchiveFilter(doc, tf) {
-  if (tf.objectCode && doc.objectCode !== tf.objectCode) return false;
-  if (tf.year && doc.year !== String(tf.year)) return false;
-  if (tf.month && doc.invoiceDate) {
-    const month = doc.invoiceDate.slice(5, 7);
-    if (month !== tf.month) return false;
-  }
-  if (tf.amountGt !== undefined && doc.amount <= tf.amountGt) return false;
-  if (tf.amountLt !== undefined && doc.amount >= tf.amountLt) return false;
-
-  if (tf.docType) {
-    const wanted = String(tf.docType).toLowerCase();
-    const actual = String(doc.docType || '').toLowerCase();
-    if (wanted === 'rechnung' || wanted === 'rechnungen') {
-      if (actual !== 'rechnungen') return false;
-    } else if (wanted === 'dokument' || wanted === 'dokumente') {
-      if (actual !== 'dokumente') return false;
-    } else if (wanted === 'abrechnungsbelege') {
-      if (actual !== 'abrechnungsbelege') return false;
-    } else if (actual !== wanted) {
-      return false;
-    }
-  }
-
-  if (tf.sender) {
-    const senderNeedle = String(tf.sender).toLowerCase();
-    if (!(doc.senderNorm || '').includes(senderNeedle)) return false;
-  }
-
-  if (tf.text) {
-    const haystack = [
-      doc.fileName,
-      doc.sender,
-      doc.amountRaw,
-      doc.docType,
-      doc.category,
-      doc.objectCode,
-      doc.objectName,
-      doc.subfolder,
-      doc.year
-    ].join(' ').toLowerCase();
-    if (!haystack.includes(String(tf.text).toLowerCase())) return false;
-  }
-
-  return true;
-}
-
-async function searchArchiveGlobal(filter, opts = {}) {
-  if (!window.scopeRootHandle) return { results: [], total: 0, source: 'archive' };
-
-  const files = await getAllArchiveFilesCached(opts.maxAgeMs || 30000);
-  const mapped = files.map(toArchiveSearchDoc);
-  const results = mapped.filter(doc => matchesArchiveFilter(doc, filter));
-
-  results.sort((a, b) => {
-    const am = a.modified || 0;
-    const bm = b.modified || 0;
-    return bm - am;
-  });
-
-  return {
-    results: results.slice(0, opts.limit || 200),
-    total: results.length,
-    source: 'archive'
-  };
-}
-
-/* ══════════════════════════════════════════════════════════════════════════
    AKTIONEN
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -1105,30 +959,43 @@ window.__av3 = {
       if (match) await window.__av3.file(encodeURIComponent(match.name + '||' + match.modified));
     }
   },
+  /* ── FILE SELECTION ──────────────────────────────────────────────────────
+     Called by every document row click:  onclick="window.__av3.file(key)"
+     key = encodeURIComponent(f.name + '||' + f.modified)
+     ──────────────────────────────────────────────────────────────────────── */
   async file(key) {
     const decoded = decodeURIComponent(key);
-    const sep = decoded.lastIndexOf('||');
-    if (sep === -1) return;
+    const sep     = decoded.lastIndexOf('||');
+    if (sep === -1) { console.warn('[FideliorArchiv] file(): bad key', key); return; }
 
-    const name = decoded.slice(0, sep);
+    const name        = decoded.slice(0, sep);
     const modifiedStr = decoded.slice(sep + 2);
+
+    // Search filtered list first, fall back to full list
     const file =
       S.filtered.find(f => f.name === name && String(f.modified) === modifiedStr) ||
       S.files.find(f => f.name === name && String(f.modified) === modifiedStr);
 
-    if (!file) return;
+    if (!file) { console.warn('[FideliorArchiv] file(): not found', name); return; }
 
     S.selected = file;
+
+    // Re-render list to show .active state on the clicked row
     renderList(S.filtered);
 
+    // Scroll selected item into view
     setTimeout(() => {
       const li = document.getElementById('fdl-av3-li');
-      const active = li?.querySelector('.av3-file.active');
-      active?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      if (li) {
+        const active = li.querySelector('.av3-file.active');
+        if (active) active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
     }, 0);
 
+    // Load metadata + PDF preview in right panel
     await renderPanel(file);
   },
+
   render() {
     applyFilters();
   },
@@ -1322,19 +1189,9 @@ async function open(opts = {}) {
   if (opts.scopeCategory) S.scopeCategory = opts.scopeCategory;
   renderSidebar();
 
-  const targetObj = opts.obj || opts.code || '';
-  const sf = document.getElementById('fdl-av3-search');
-  const tf = document.getElementById('fdl-av3-type');
-  const yf = document.getElementById('fdl-av3-year');
-  const so = document.getElementById('fdl-av3-sort');
-  if (sf) sf.value = opts.query || '';
-  if (tf) tf.value = opts.typeFilter || 'all';
-  if (yf && !targetObj && !opts.scopeCategory) yf.value = opts.yearFilter || 'all';
-  if (so) so.value = opts.sortOrder || 'date-desc';
-
   const root = window.scopeRootHandle;
-  if (targetObj) {
-    setTimeout(() => { window.__av3.obj(targetObj, opts); }, 0);
+  if (opts.obj) {
+    setTimeout(() => { window.__av3.obj(opts.obj, opts); }, 0);
   } else if (opts.scopeCategory) {
     setTimeout(() => {
       window.__av3.setCategory(opts.scopeCategory, {
@@ -1368,6 +1225,169 @@ function close() {
   }
 }
 
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   ARCHIV HELPERS  — globale Suche + Dashboard-Stats
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function parseMetaAmount(raw) {
+  if (!raw) return 0;
+  const n = parseFloat(String(raw).replace(/\./g, '').replace(',', '.').replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function dispDateToISO(s) {
+  if (!s) return '';
+  const m = String(s).match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return '';
+}
+
+function archiveFileToSearchDoc(f) {
+  return {
+    __source: 'archive',
+    fileName: f.name || '',
+    objectCode: f.objectCode || '',
+    docType: fmtFolderType(f.folderType || ''),
+    amount: parseMetaAmount(f.meta?.betrag),
+    invoiceDate: dispDateToISO(f.meta?.datum),
+    savedAt: new Date(f.modified || docDateMs(f) || Date.now()).toISOString(),
+    sender: f.meta?.absender || '',
+    senderNorm: (f.meta?.absender || '').toLowerCase(),
+    serviceDesc: f.subfolder || '',
+    keywords: [],
+    ocrText: '',
+    archiveKey: encodeURIComponent((f.name || '') + '||' + (f.modified || '')),
+    archiveModified: f.modified || 0
+  };
+}
+
+async function searchArchiveGlobal(query, opts = {}) {
+  await loadObjectsConfig();
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return { results: [], total: 0 };
+
+  let objs = getObjList();
+  if (opts.scopeCategory) {
+    objs = objs.filter(o => {
+      const cat = window.fdlDeriveCategory ? window.fdlDeriveCategory(o.code) : o.code;
+      return cat === opts.scopeCategory;
+    });
+  }
+
+  const results = [];
+  for (const o of objs) {
+    const files = await loadFiles(o.code);
+    for (const f of files) {
+      const hay = [
+        f.name || '',
+        f.objectCode || '',
+        f.objectName || '',
+        f.folderType || '',
+        fmtFolderType(f.folderType || ''),
+        f.year || '',
+        f.subfolder || '',
+        f.meta?.absender || '',
+        f.meta?.betrag || '',
+        f.meta?.datum || ''
+      ].join(' ').toLowerCase();
+
+      if (!hay.includes(q)) continue;
+      results.push(archiveFileToSearchDoc(f));
+    }
+  }
+
+  results.sort((a, b) => (b.archiveModified || 0) - (a.archiveModified || 0));
+  const limit = opts.limit || 100;
+  return { results: results.slice(0, limit), total: results.length };
+}
+
+const __fdlArchivStatsCache = { ts: 0, data: null, pending: null };
+
+async function getArchiveDashboardStats(force = false) {
+  const nowTs = Date.now();
+  if (!force && __fdlArchivStatsCache.data && (nowTs - __fdlArchivStatsCache.ts) < 30000) {
+    return __fdlArchivStatsCache.data;
+  }
+  if (__fdlArchivStatsCache.pending) return __fdlArchivStatsCache.pending;
+
+  __fdlArchivStatsCache.pending = (async () => {
+    await loadObjectsConfig();
+    if (!window.scopeRootHandle) return null;
+
+    const now = new Date();
+    const weekStartMs = nowTs - (7 * 86400000);
+    const monthStartMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+    const out = {
+      total: 0,
+      weekCount: 0,
+      monthCount: 0,
+      monthAmount: 0,
+      byObj: {},
+      recent: [],
+      categoryCounts: { Objekte: 0, Fidelior: 0, Privat: 0 },
+      thisYear: now.getFullYear()
+    };
+
+    const objs = getObjList();
+    for (const o of objs) {
+      const files = await loadFiles(o.code);
+      let objAmount = 0;
+      let objLastSaved = null;
+
+      for (const f of files) {
+        const ms = docDateMs(f);
+        const amt = parseMetaAmount(f.meta?.betrag);
+
+        out.total++;
+        if (ms >= weekStartMs) out.weekCount++;
+        if (ms >= monthStartMs) {
+          out.monthCount++;
+          out.monthAmount += amt;
+        }
+
+        objAmount += amt;
+        if (!objLastSaved || ms > objLastSaved) objLastSaved = ms;
+
+        out.recent.push({
+          fileName: f.name || '',
+          objectCode: f.objectCode || '',
+          docType: fmtFolderType(f.folderType || ''),
+          amount: amt,
+          savedAt: new Date(f.modified || ms || Date.now()).toISOString()
+        });
+      }
+
+      out.byObj[o.code] = {
+        code: o.code,
+        name: o.name,
+        count: files.length,
+        amount: objAmount,
+        lastSaved: objLastSaved ? new Date(objLastSaved).toISOString() : null,
+        openTasks: 0
+      };
+
+      const cat = window.fdlDeriveCategory ? window.fdlDeriveCategory(o.code) : 'Objekte';
+      out.categoryCounts[cat] = (out.categoryCounts[cat] || 0) + files.length;
+    }
+
+    out.recent.sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
+    out.recent = out.recent.slice(0, 25);
+
+    __fdlArchivStatsCache.ts = Date.now();
+    __fdlArchivStatsCache.data = out;
+    return out;
+  })();
+
+  try {
+    return await __fdlArchivStatsCache.pending;
+  } finally {
+    __fdlArchivStatsCache.pending = null;
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    INIT
    ══════════════════════════════════════════════════════════════════════════ */
@@ -1398,5 +1418,6 @@ function init() {
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 window.fdlArchivOpen = open;
 window.fdlArchivSearch = searchArchiveGlobal;
+window.fdlArchivGetDashboardStats = getArchiveDashboardStats;
 
 })();
