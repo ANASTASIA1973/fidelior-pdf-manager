@@ -1284,7 +1284,18 @@ function buildOverlay() {
 }
 
 async function open(opts = {}) {
+  if (opts && typeof opts.preventDefault === 'function') {
+    opts.preventDefault();
+    opts = {};
+  } else if (typeof opts === 'string') {
+    opts = { scopeCategory: opts };
+  } else if (!opts || typeof opts !== 'object' || Array.isArray(opts)) {
+    opts = {};
+  }
+
   buildOverlay();
+
+  
   await loadObjectsConfig();
   renderSidebar();
   document.getElementById('fdl-av3').classList.add('open');
@@ -1793,24 +1804,37 @@ function injectButton() {
 
   const addon = document.getElementById('fdl-addon-btns');
   const hdr   = document.querySelector('.header-inner, header');
+
   if (addon) {
-    addon.insertBefore(btn, addon.firstChild);
-  } else if (hdr) {
+    if (addon.firstChild) addon.insertBefore(btn, addon.firstChild);
+    else addon.appendChild(btn);
+    return;
+  }
+
+  if (hdr) {
     const s = document.getElementById('settingsBtn');
-    if (s) hdr.insertBefore(btn, s);
+    if (s && s.parentNode === hdr) hdr.insertBefore(btn, s);
     else hdr.appendChild(btn);
   }
+
 }
 
 function init() {
   injectCSS();
-window.addEventListener("load", () => {
+try {
+  injectButton();
+} catch (e) {
+  console.warn("Archiv Button Injection failed:", e);
+}
+
+window.addEventListener('load', () => {
   try {
     injectButton();
-  } catch(e) {
-    console.warn("Archiv Button Injection failed:", e);
+  } catch (e) {
+    console.warn("Archiv Button Injection failed after load:", e);
   }
 });
+
 
 
   document.addEventListener('keydown', e => {
