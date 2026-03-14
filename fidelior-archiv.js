@@ -197,6 +197,13 @@ function fmtDate(ts) {
   if (!ts) return '—';
   return new Date(ts).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
+function formatFilterDate(ms) {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 function fmtSize(b) {
   if (!b) return '';
   return b < 1048576 ? Math.round(b / 1024) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
@@ -527,17 +534,19 @@ function injectCSS() {
 
 const S = {
   obj:        null,
-  files:      [],     // all loaded files for current object
-  filtered:   [],     // after applying all filters
+  files:      [],
+  filtered:   [],
   selected:   null,
   query:      '',
-  typeFilter: 'all',  // 'all' | 'Rechnungen' | 'Dokumente' | 'Abrechnungsbelege'
-  yearFilter: 'all',  // 'all' | '2026' | '2025' | ...
+  typeFilter: 'all',
+  yearFilter: 'all',
   sortOrder:  'date-desc',
   blobUrl:    null,
   counts:     {},
   subFilter:  'all',
   scopeCategory: null,
+  dateFrom:   '',
+  dateTo:     '',
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -576,7 +585,22 @@ function applyFilters() {
     result = result.filter(f => f.year === S.yearFilter);
   }
 
-  // 5. Sortierung
+  // 5. Datumsspanne
+  if (S.dateFrom || S.dateTo) {
+    result = result.filter(f => {
+      const ms = docDateMs(f);
+      if (!ms) return false;
+
+      const iso = formatFilterDate(ms);
+
+      if (S.dateFrom && iso < S.dateFrom) return false;
+      if (S.dateTo && iso > S.dateTo) return false;
+
+      return true;
+    });
+  }
+
+  // 6. Sortierung
   result = sortFiles(result, S.sortOrder);
 
   S.filtered = result;
@@ -889,11 +913,15 @@ window.__av3 = {
     if (!o) return;
     S.obj = { ...o, ...(objectsMap[code] || {}) };
     S.scopeCategory = opts.scopeCategory || (window.fdlDeriveCategory ? window.fdlDeriveCategory(code) : null);
-    S.selected = null; S.files = []; S.filtered = [];
-    S.query = (opts.query || '').trim().toLowerCase();
+     S.selected = null;
+    S.files = [];
+    S.filtered = [];
+    S.query      = (opts.query || '').trim().toLowerCase();
     S.typeFilter = opts.typeFilter || 'all';
-    S.subFilter = opts.subFilter || 'all';
+    S.subFilter  = opts.subFilter || 'all';
     S.yearFilter = opts.yearFilter || 'all';
+    S.dateFrom   = opts.dateFrom || '';
+    S.dateTo     = opts.dateTo || '';
 
     const sf = document.getElementById('fdl-av3-search'); if (sf) sf.value = opts.query || '';
     const tf = document.getElementById('fdl-av3-type');   if (tf) tf.value = S.typeFilter;
@@ -945,11 +973,13 @@ window.__av3 = {
     S.files = [];
     S.filtered = [];
 
-    S.query      = (opts.query || '').trim().toLowerCase();
+     S.query      = (opts.query || '').trim().toLowerCase();
     S.typeFilter = opts.typeFilter || 'all';
     S.subFilter  = opts.subFilter || 'all';
     S.yearFilter = opts.yearFilter || 'all';
     S.sortOrder  = opts.sortOrder || 'date-desc';
+    S.dateFrom   = opts.dateFrom || '';
+    S.dateTo     = opts.dateTo || '';
 
     const sf = document.getElementById('fdl-av3-search');
     const tf = document.getElementById('fdl-av3-type');
@@ -1133,6 +1163,8 @@ async function open(opts = {}) {
         query: opts.query || '',
         yearFilter: opts.yearFilter || 'all',
         sortOrder: opts.sortOrder || 'date-desc',
+        dateFrom: opts.dateFrom || '',
+        dateTo: opts.dateTo || '',
         autoSelectFirst: false
       });
     }, 0);
