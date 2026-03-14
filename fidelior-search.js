@@ -750,14 +750,15 @@ async function runSearch(filter, opts = {}) {
   merged = applyClientFilters(merged, filter);
   merged = merged.map(d => ({ ...d, searchScore: computeClientBoost(d, filter) }));
   merged = sortMergedResults(merged, filter);
+const finalLimit = Math.max(1, Math.min(100, Number(filter.limit || opts.limit || 100)));
+const visibleResults = merged.slice(0, finalLimit);
 
-  const finalLimit = Math.max(1, Math.min(100, Number(filter.limit || opts.limit || 100)));
-
-  return {
-    results: merged.slice(0, finalLimit),
-    total: merged.length,
-    filter
-  };
+return {
+  results: visibleResults,
+  total: merged.length,
+  visibleTotal: visibleResults.length,
+  filter
+};
 }
 
 /* ─────────────────────────────── CSS ───────────────────────────────────── */
