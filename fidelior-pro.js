@@ -185,16 +185,79 @@ function buildSidebarHTML() {
   const branches = objs.filter(o=>BRANCH_CODES.has(o.code));
   const objects  = objs.filter(o=>!BRANCH_CODES.has(o.code));
 
-  const categoryItems = [
-    { key: 'Objekte', iconName: 'building', label: 'Objekte' },
-    { key: 'Fidelior', iconName: 'receipt', label: 'Fidelior' },
-    { key: 'Privat', iconName: 'file', label: 'Privat' },
-    { key: 'ARNDT & CIE', iconName: 'folder', label: 'ARNDT & CIE' },
-  ].map(c => `
-    <button class="fdl-sb-item" data-view="archive" data-scope="${c.key}">
-      ${sbIcon(c.iconName)}
-      <span class="fdl-sb-label">${c.label}</span>
-    </button>`).join('');
+  const categoryItems = `
+    <div class="fdl-sb-group open" data-group="cat-objekte">
+      <button class="fdl-sb-group-toggle">
+        ${sbIcon('building')}
+        <span class="fdl-sb-label">Objekte</span>
+        <span class="fdl-sb-chevron">${icon('chevron')}</span>
+      </button>
+      <div class="fdl-sb-sub">
+        <button class="fdl-sb-item" data-view="archive" data-scope="Objekte">
+          ${sbIcon('folder')}<span class="fdl-sb-label">Alle Objekte</span>
+        </button>
+        <button class="fdl-sb-item" data-view="archive" data-scope="Objekte" data-folder="rechnung">
+          ${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span>
+        </button>
+        <button class="fdl-sb-item" data-view="archive" data-scope="Objekte" data-folder="other">
+          ${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span>
+        </button>
+      </div>
+    </div>
+    <div class="fdl-sb-group open" data-group="cat-fidelior">
+      <button class="fdl-sb-group-toggle">
+        ${sbIcon('receipt')}
+        <span class="fdl-sb-label">Fidelior</span>
+        <span class="fdl-sb-chevron">${icon('chevron')}</span>
+      </button>
+      <div class="fdl-sb-sub">
+        <button class="fdl-sb-item" data-view="archive" data-scope="Fidelior">
+          ${sbIcon('folder')}<span class="fdl-sb-label">Alle</span>
+        </button>
+        <button class="fdl-sb-item" data-view="archive" data-scope="Fidelior" data-folder="rechnung">
+          ${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span>
+        </button>
+        <button class="fdl-sb-item" data-view="archive" data-scope="Fidelior" data-folder="other">
+          ${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span>
+        </button>
+      </div>
+    </div>
+    <div class="fdl-sb-group open" data-group="cat-privat">
+      <button class="fdl-sb-group-toggle">
+        ${sbIcon('file')}
+        <span class="fdl-sb-label">Privat</span>
+        <span class="fdl-sb-chevron">${icon('chevron')}</span>
+      </button>
+      <div class="fdl-sb-sub">
+        <button class="fdl-sb-item" data-view="archive" data-scope="Privat">
+          ${sbIcon('folder')}<span class="fdl-sb-label">Alle</span>
+        </button>
+        <button class="fdl-sb-item" data-view="archive" data-scope="Privat" data-folder="rechnung">
+          ${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span>
+        </button>
+        <button class="fdl-sb-item" data-view="archive" data-scope="Privat" data-folder="other">
+          ${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span>
+        </button>
+      </div>
+    </div>
+    <div class="fdl-sb-group open" data-group="cat-arndtcie">
+      <button class="fdl-sb-group-toggle">
+        ${sbIcon('folder')}
+        <span class="fdl-sb-label">ARNDT & CIE</span>
+        <span class="fdl-sb-chevron">${icon('chevron')}</span>
+      </button>
+      <div class="fdl-sb-sub">
+        <button class="fdl-sb-item" data-view="archive" data-scope="ARNDT & CIE">
+          ${sbIcon('folder')}<span class="fdl-sb-label">Alle</span>
+        </button>
+        <button class="fdl-sb-item" data-view="archive" data-scope="ARNDT & CIE" data-folder="rechnung">
+          ${sbIcon('receipt')}<span class="fdl-sb-label">Rechnungen</span>
+        </button>
+        <button class="fdl-sb-item" data-view="archive" data-scope="ARNDT & CIE" data-folder="other">
+          ${sbIcon('file')}<span class="fdl-sb-label">Dokumente</span>
+        </button>
+      </div>
+    </div>`;
 
   const branchItems = branches.map(b => {
     const label = b.code === 'ARNDTCIE' ? 'ARNDT & CIE' : b.code;
@@ -422,7 +485,15 @@ function showArchiveView(opts = {}) {
       });
     }, 180);
   } else if (opts.scopeCategory) {
-    setTimeout(() => window.__av3?.setCategory?.(opts.scopeCategory), 180);
+    setTimeout(() => {
+      const typeFilter = folderMap[opts.folder] || 'all';
+      if (window.__av3?.setCategoryAndType) {
+        window.__av3.setCategoryAndType(opts.scopeCategory, typeFilter);
+      } else {
+        window.__av3?.setCategory?.(opts.scopeCategory);
+        if (typeFilter !== 'all') window.__av3?.setTypeFilter?.(typeFilter);
+      }
+    }, 180);
   }
 }
 
