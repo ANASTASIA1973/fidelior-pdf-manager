@@ -2076,3 +2076,119 @@ dialog .dialog-close{
 [data-view="dashboard"] #leftPane{
   display:flex;
 }
+/* ==========================================================================
+   FIX: nur EINE Shell aktiv
+   Bestehende Fidelior-Pro-Shell behält Layout-Kontrolle
+   ========================================================================== */
+
+/* neue HTML-Sidebar deaktivieren */
+.app-sidebar{
+  display:none !important;
+}
+
+/* Wrapper neutralisieren */
+.app-shell{
+  display:block !important;
+  min-height:0 !important;
+  background:transparent !important;
+}
+
+.app-main{
+  display:block !important;
+  min-width:0 !important;
+}
+
+/* Header bleibt, aber ohne eigenes Flächen-Layout */
+.app-workspace.container{
+  max-width:none !important;
+  width:auto !important;
+  height:auto !important;
+  margin:0 !important;
+  padding:0 !important;
+}
+
+/* Bestehende JS-Shell bekommt volle Breite */
+#fdl-main{
+  width:calc(100vw - 236px) !important;
+  max-width:none !important;
+}
+
+/* Dashboard/Archiv nicht künstlich begrenzen */
+#fdl-content,
+#fdl-view-dash,
+#fdl-view-archive{
+  width:100% !important;
+  max-width:none !important;
+}
+
+/* Haupt-Container im Filing-Modus großzügiger */
+body.view-filing main.container{
+  max-width:none !important;
+  width:calc(100vw - 236px) !important;
+  height:calc(100vh - 72px) !important;
+  margin:0 !important;
+  padding:16px 18px !important;
+}
+
+/* Filing-Grid breiter und ruhiger */
+body.view-filing #mainGrid.grid{
+  grid-template-columns:minmax(470px, 560px) minmax(0, 1fr) !important;
+  gap:18px !important;
+  height:100% !important;
+}
+
+/* linkes Formularpanel sauberer */
+body.view-filing #leftPane{
+  min-width:0 !important;
+  width:100% !important;
+}
+
+/* rechte Vorschau soll dominant werden */
+body.view-filing #previewPane{
+  min-width:0 !important;
+  width:100% !important;
+}
+
+body.view-filing #previewPane .preview-wrap{
+  min-height:calc(100vh - 190px) !important;
+}
+
+/* Dashboard ebenfalls voller nutzen */
+body.view-dash #fdl-view-dash{
+  padding:16px 18px 22px !important;
+}
+
+/* große Screens: noch mehr Luft */
+@media (min-width: 1500px){
+  body.view-filing #mainGrid.grid{
+    grid-template-columns:minmax(520px, 620px) minmax(0, 1fr) !important;
+    gap:20px !important;
+  }
+
+  #fdl-main{
+    width:calc(100vw - 236px) !important;
+  }
+}
+
+/* Mobile / kleinere Fenster */
+@media (max-width: 980px){
+  #fdl-main{
+    width:100vw !important;
+  }
+
+  body.view-filing main.container{
+    width:100% !important;
+    padding:12px !important;
+    height:auto !important;
+  }
+
+  body.view-filing #mainGrid.grid{
+    grid-template-columns:1fr !important;
+    gap:14px !important;
+    height:auto !important;
+  }
+
+  body.view-filing #previewPane .preview-wrap{
+    min-height:68vh !important;
+  }
+}
