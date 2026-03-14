@@ -328,16 +328,19 @@ function injectCSS() {
 }
 .fdl-srch-close:hover{background:#E5E7EB}
 
-/* Chips */
-.fdl-srch-chips{
+/* Meta */
+.fdl-srch-meta{
+  padding:6px 18px 8px;
+  font-size:11px;
+  color:#9CA3AF;
+  border-bottom:1px solid #F9FAFB;
   display:flex;
-  gap:5px;
-  flex-wrap:wrap;
-  padding:8px 18px 6px;
-  min-height:0;
-  transition:all .15s;
+  align-items:center;
+  justify-content:space-between;
   position:relative;
-  z-index:1;
+  z-index:2;
+  background:#fff;
+  margin-top:2px;
 }
 .fdl-srch-chips:empty{display:none}
 .fdl-srch-chip{
