@@ -539,10 +539,11 @@ function parseNaturalQuery(q) {
   const amtLtM = lower.match(/\b(?:unter|bis|maximal|hoechstens|höchstens)\s+(\d+[\.,]?\d*)\s*(?:euro|€)?/i);
   if (amtLtM) filter.amountLt = parseFloat(amtLtM[1].replace(',', '.'));
 
-  if (/\brechnungen?\b/.test(lower)) filter.docType = 'rechnung';
-  else if (/\bverträge?\b|\bvertraege?\b|\bdokumente?\b/.test(lower)) filter.docType = 'vertrag';
-  else if (/\bgutschriften?\b/.test(lower)) filter.docType = 'gutschrift';
-  else if (/\bangebote?\b/.test(lower)) filter.docType = 'angebot';
+ if (/\brechnungen?\b/.test(lower)) filter.docType = 'rechnung';
+else if (/\bverträge?\b|\bvertraege?\b/.test(lower)) filter.docType = 'vertrag';
+else if (/\bdokumente?\b/.test(lower)) filter.docType = 'dokument';
+else if (/\bgutschriften?\b/.test(lower)) filter.docType = 'gutschrift';
+else if (/\bangebote?\b/.test(lower)) filter.docType = 'angebot';
 
   const senderM = lower.match(/\b(?:von|bei)\s+([a-zäöüß0-9&][a-zäöüß0-9&\s\-.]{1,40}?)(?:\s+20\d{2}\b|\s+(?:im|in|aus|ueber|über)\b|$)/i);
   if (senderM) filter.sender = senderM[1].trim();
@@ -552,16 +553,23 @@ function parseNaturalQuery(q) {
     if (normSearch(lower).includes(normSearch(cw))) { filter.collectionHint = cw; break; }
   }
 
-  let stripped = raw;
-  [
-    /\b(Rechnungen?|Dokumente?|Verträge?|Vertraege?|Gutschriften?|Angebote?|von|bei|über|unter|ab|bis|im|im Jahr)\b/gi,
-    /\b20\d{2}\b/g,
-    /\b(?:ueber|über|ab|mehr als|mindestens|unter|bis|maximal|hoechstens|höchstens)\s+\d+[\.,]?\d*\s*(?:euro|€)?/gi,
-    /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
-  ].forEach(pattern => stripped = stripped.replace(pattern, ' '));
-  stripped = stripped.replace(/[€]/g, ' ').replace(/\s+/g, ' ').trim();
-  filter.text = stripped;
-  filter.textTokens = tokenizeSearch(stripped);
+ let stripped = raw;
+[
+  /\b(Rechnungen?|Dokumente?|Verträge?|Vertraege?|Gutschriften?|Angebote?|von|bei|über|unter|ab|bis|im|im Jahr)\b/gi,
+  /\b20\d{2}\b/g,
+  /\b(?:ueber|über|ab|mehr als|mindestens|unter|bis|maximal|hoechstens|höchstens)\s+\d+[\.,]?\d*\s*(?:euro|€)?/gi,
+  /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
+].forEach(pattern => stripped = stripped.replace(pattern, ' '));
+
+for (const o of objList) {
+  if (!o.code) continue;
+  const escCode = String(o.code).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  stripped = stripped.replace(new RegExp(`\\b${escCode}\\b`, 'gi'), ' ');
+}
+
+stripped = stripped.replace(/[€]/g, ' ').replace(/\s+/g, ' ').trim();
+filter.text = stripped;
+filter.textTokens = tokenizeSearch(stripped);
 
   return filter;
 }
@@ -1162,7 +1170,7 @@ function readCurrentForm() {
     invoiceDate: document.getElementById('invoiceDate')?.value || '',
     sender:      document.getElementById('senderInput')?.value || '',
     invoiceNo:   document.getElementById('invoiceNo')?.value || '',
-    year:        new Date().getFullYear(),
+   year:        ((document.getElementById('invoiceDate')?.value || '').match(/\b(20\d{2})\b/) || [])[1] || String(new Date().getFullYear()),
     scopePath:   [],
     folderType:  'Rechnungsbelege',
   };
