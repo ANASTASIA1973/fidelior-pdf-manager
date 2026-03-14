@@ -7258,3 +7258,36 @@ function fdlMakeAllDialogsWindowed() {
   const conn = document.getElementById("fdlConnDlg");
   if (conn) makeDialogWindow(conn, ".dialog-titlebar");
 }
+// ============================================================
+// Öffnet eine Inbox-Datei direkt im Arbeitsbereich
+// ============================================================
+
+window.__fdlOpenInboxFile = async function(fileName){
+
+  try{
+
+    const inboxRoot = window.inboxRootHandle || inboxRootHandle;
+    if(!inboxRoot){
+      toast("Inbox nicht verbunden",3000);
+      return;
+    }
+
+    const handle = await inboxRoot.getFileHandle(fileName,{create:false});
+    const file   = await handle.getFile();
+
+    currentInboxFileHandle = handle;
+    currentInboxFileName   = fileName;
+    currentInboxRelPath    = [fileName];
+
+    if(window.__fdl_takeFile){
+      await window.__fdl_takeFile(file,{fromInbox:true});
+    }
+
+  }catch(e){
+
+    console.error(e);
+    toast("Datei konnte nicht geöffnet werden",3000);
+
+  }
+
+}

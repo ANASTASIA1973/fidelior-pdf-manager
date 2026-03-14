@@ -1263,10 +1263,84 @@ function archiveFileToSearchDoc(f) {
   };
 }
 
+function normalizeArchiveSearchFilter(query) {
+  if (query && typeof query === 'object' && !Array.isArray(query)) {
+    return { ...query };
+  }
+  const raw = String(query || '').trim();
+  if (!raw) return { raw: '', text: '' };
+  return { raw, text: raw };
+}
+
+function archiveMonthFromFile(f) {
+  const iso = dispDateToISO(f.meta?.datum);
+  if (iso) return iso.slice(5, 7);
+  return '';
+}
+
+function archiveAmountFromFile(f) {
+  return parseMetaAmount(f.meta?.betrag);
+}
+
+function archiveHaystack(f) {
+  return [
+    f.name || '',
+    f.objectCode || '',
+    f.objectName || '',
+    f.folderType || '',
+    fmtFolderType(f.folderType || ''),
+    f.year || '',
+    f.subfolder || '',
+    f.meta?.absender || '',
+    f.meta?.betrag || '',
+    f.meta?.datum || ''
+  ].join(' ').toLowerCase();
+}
+
+function matchArchiveFileByFilter(f, filter) {
+  const hay = archiveHaystack(f);
+  const sender = String(filter.sender || '').trim().toLowerCase();
+  const text = String(filter.text || filter.raw || '').trim().toLowerCase();
+  const amount = archiveAmountFromFile(f);
+  const month = archiveMonthFromFile(f);
+  const folderType = fmtFolderType(f.folderType || '');
+  const folderTypeLower = folderType.toLowerCase();
+  const rawFolderTypeLower = String(f.folderType || '').toLowerCase();
+
+  if (filter.objectCode && String(f.objectCode || '').toUpperCase() !== String(filter.objectCode).toUpperCase()) return false;
+  if (filter.year && String(f.year || '') !== String(filter.year)) return false;
+  if (filter.month && month && month !== String(filter.month).padStart(2, '0')) return false;
+  if (filter.month && !month) return false;
+  if (filter.amountGt !== undefined && amount <= Number(filter.amountGt)) return false;
+  if (filter.amountLt !== undefined && amount >= Number(filter.amountLt)) return false;
+  if (filter.sender && !(String(f.meta?.absender || '').toLowerCase().includes(sender) || hay.includes(sender))) return false;
+
+  if (filter.docType) {
+    const wanted = String(filter.docType).toLowerCase();
+    if (wanted === 'rechnung') {
+      const ok = folderTypeLower.includes('rechnung') || rawFolderTypeLower.includes('rechnungsbelege') || rawFolderTypeLower.includes('eingangsrechnungen');
+      if (!ok) return false;
+    } else if (wanted === 'dokument') {
+      const ok = folderTypeLower.includes('dokument') || rawFolderTypeLower.includes('objektdokumente');
+      if (!ok) return false;
+    } else if (!(folderTypeLower.includes(wanted) || hay.includes(wanted))) {
+      return false;
+    }
+  }
+
+  if (text) {
+    const terms = text.split(/\s+/).filter(Boolean);
+    if (terms.length && !terms.every(t => hay.includes(t))) return false;
+  }
+
+  return true;
+}
+
 async function searchArchiveGlobal(query, opts = {}) {
   await loadObjectsConfig();
-  const q = String(query || '').trim().toLowerCase();
-  if (!q) return { results: [], total: 0 };
+  const filter = normalizeArchiveSearchFilter(query);
+  const hasFilter = Object.values(filter).some(v => v !== undefined && v !== null && String(v).trim() !== '');
+  if (!hasFilter) return { results: [], total: 0, filter };
 
   let objs = getObjList();
   if (opts.scopeCategory) {
@@ -1275,32 +1349,32 @@ async function searchArchiveGlobal(query, opts = {}) {
       return cat === opts.scopeCategory;
     });
   }
+  if (filter.objectCode) {
+    objs = objs.filter(o => String(o.code || '').toUpperCase() === String(filter.objectCode).toUpperCase());
+  }
 
   const results = [];
   for (const o of objs) {
     const files = await loadFiles(o.code);
     for (const f of files) {
-      const hay = [
-        f.name || '',
-        f.objectCode || '',
-        f.objectName || '',
-        f.folderType || '',
-        fmtFolderType(f.folderType || ''),
-        f.year || '',
-        f.subfolder || '',
-        f.meta?.absender || '',
-        f.meta?.betrag || '',
-        f.meta?.datum || ''
-      ].join(' ').toLowerCase();
-
-      if (!hay.includes(q)) continue;
-      results.push(archiveFileToSearchDoc(f));
+      if (!matchArchiveFileByFilter(f, filter)) continue;
+      results.push({
+        ...archiveFileToSearchDoc(f),
+        selectName: f.name || '',
+        archiveRef: {
+          code: f.objectCode || o.code || '',
+          scopeCategory: window.fdlDeriveCategory ? window.fdlDeriveCategory(f.objectCode || o.code || '') : '',
+          folderType: fmtFolderType(f.folderType || ''),
+          year: f.year || '',
+          subfolder: f.subfolder || ''
+        }
+      });
     }
   }
 
   results.sort((a, b) => (b.archiveModified || 0) - (a.archiveModified || 0));
   const limit = opts.limit || 100;
-  return { results: results.slice(0, limit), total: results.length };
+  return { results: results.slice(0, limit), total: results.length, filter };
 }
 
 const __fdlArchivStatsCache = { ts: 0, data: null, pending: null };

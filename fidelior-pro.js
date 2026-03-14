@@ -970,17 +970,27 @@ async function renderDash() {
 
 async function buildInboxWidget() {
   try {
-    const scopeRoot = window.scopeRootHandle;
-    if (!scopeRoot) return '<div class="fdl-empty-state" style="font-size:12px;padding:12px">Scopevisio nicht verbunden</div>';
-    const inbox = await scopeRoot.getDirectoryHandle('Inbox', { create: false }).catch(() => null);
-    if (!inbox) return '<div class="fdl-empty-state" style="font-size:12px;padding:12px">Inbox nicht verfügbar</div>';
+    const inboxRoot = window.inboxRootHandle || inboxRootHandle || null;
+    if (!inboxRoot) return '<div class="fdl-empty-state" style="font-size:12px;padding:12px">Inbox nicht verbunden</div>';
+
     const files = [];
-    for await (const e of inbox.values()) if (e.kind === 'file' && e.name.toLowerCase().endsWith('.pdf')) files.push(e.name);
+    for await (const e of inboxRoot.values()) {
+      if (e.kind === 'file' && e.name.toLowerCase().endsWith('.pdf')) {
+        files.push(e.name);
+      }
+    }
+
     if (!files.length) return '<div class="fdl-empty-state" style="font-size:12px;padding:12px">Inbox ist leer</div>';
+
     const badge = document.getElementById('fdl-sb-inbox-badge');
-    if (badge) { badge.textContent = files.length; badge.style.display = 'inline-flex'; badge.className = 'fdl-sb-badge muted'; }
+    if (badge) {
+      badge.textContent = files.length;
+      badge.style.display = 'inline-flex';
+      badge.className = 'fdl-sb-badge muted';
+    }
+
     return files.slice(0, 6).map(n => `
-      <div class="fdl-inbox-row" onclick="window.__fdlPro.goFiling()">
+      <div class="fdl-inbox-row" onclick="window.__fdlOpenInboxFile('${String(n).replace(/'/g, "\\'")}')">
         <div class="fdl-inbox-icon">${icon('file')}</div>
         <div class="fdl-inbox-name" title="${n}">${n.replace(/\.pdf$/i, '')}</div>
       </div>`).join('') +
@@ -989,7 +999,6 @@ async function buildInboxWidget() {
     return '<div class="fdl-empty-state" style="font-size:12px;padding:12px">Nicht verfügbar</div>';
   }
 }
-
 function updateBadges(s) {
   const tb = document.getElementById('fdl-sb-tasks-badge');
   if (tb) {
