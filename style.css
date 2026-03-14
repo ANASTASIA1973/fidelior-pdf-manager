@@ -2222,6 +2222,4 @@ body.view-dash #fdl-view-dash{
   min-height:0 !important;
   height:100% !important;
 }
-body.view-archive #fdl-view-archive{
-  display:none !important;
-}
+

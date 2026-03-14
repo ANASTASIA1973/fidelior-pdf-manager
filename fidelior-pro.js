@@ -752,12 +752,25 @@ function normalizeArchiveContext(opts = {}) {
 }
 
 function showArchiveView(opts = {}) {
+  const archView = document.getElementById('fdl-view-archive');
+  if (!archView) return;
+
   const ctx = normalizeArchiveContext(opts);
 
-  try {
+  const existing = document.getElementById('fdl-av3');
+  if (existing) {
+    if (existing.parentElement !== archView) archView.appendChild(existing);
+    existing.classList.add('open');
+    existing.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;background:transparent;padding:0;';
+  } else {
     window.fdlArchivOpen?.(ctx);
-  } catch (e) {
-    console.error('Archiv konnte nicht geöffnet werden', e);
+    setTimeout(() => {
+      const ov = document.getElementById('fdl-av3');
+      if (ov && ov.parentElement !== archView) {
+        ov.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;background:transparent;padding:0;';
+        archView.appendChild(ov);
+      }
+    }, 100);
   }
 
   setTimeout(() => {
@@ -788,16 +801,18 @@ function showArchiveView(opts = {}) {
       return;
     }
 
-    window.__av3?.setCategory?.(null, {
-      typeFilter: ctx.typeFilter || 'all',
-      yearFilter: ctx.yearFilter || 'all',
-      sortOrder: ctx.sortOrder || 'date-desc',
-      dateFrom: ctx.dateFrom || '',
-      dateTo: ctx.dateTo || '',
-      query: ctx.query || '',
-      autoSelectFirst: false
-    });
-  }, 220);
+    if (window.__av3?.setCategory) {
+      window.__av3.setCategory(null, {
+        typeFilter: ctx.typeFilter || 'all',
+        yearFilter: ctx.yearFilter || 'all',
+        sortOrder: ctx.sortOrder || 'date-desc',
+        dateFrom: ctx.dateFrom || '',
+        dateTo: ctx.dateTo || '',
+        query: ctx.query || '',
+        autoSelectFirst: false
+      });
+    }
+  }, 180);
 }
 
 
