@@ -654,6 +654,32 @@ function buildMain() {
 function activateView(view, opts = {}) {
   _view = view;
   document.body.classList.remove('view-dash', 'view-archive', 'view-filing', 'view-tasks');
+  document.body.setAttribute('data-view',
+  view === 'dash' ? 'dashboard' :
+  view === 'archive' ? 'archive' :
+  'document'
+);
+
+const appTitle = document.getElementById('appTitle');
+if (appTitle) {
+  appTitle.textContent =
+    view === 'dash' ? 'Fidelior DMS – Dashboard' :
+    view === 'archive' ? 'Fidelior DMS – Archiv' :
+    'Fidelior DMS';
+}
+
+const shellButtons = document.querySelectorAll('.app-nav-btn');
+shellButtons.forEach(btn => {
+  const btnView = btn.dataset.view || '';
+  const active =
+    (view === 'dash' && btnView === 'dashboard') ||
+    (view === 'archive' && btnView === 'archive') ||
+    ((view === 'filing' || view === 'inbox') && btnView === 'document');
+
+  btn.classList.toggle('is-active', active);
+  btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+});
+
   document.querySelectorAll('.fdl-sb-item').forEach(b => b.classList.remove('active'));
 
   if (opts.obj && opts.folder) {
@@ -1258,6 +1284,16 @@ function init() {
   buildSidebar();
   buildMain();
   buildTopbar();
+  document.querySelectorAll('.app-nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const target = btn.dataset.view || 'document';
+
+    if (target === 'dashboard') activateView('dash');
+    else if (target === 'archive') activateView('archive');
+    else activateView('filing');
+  });
+});
+
   attachKeyboard();
   updateConnStatus();
 
