@@ -185,20 +185,27 @@ function buildSidebarHTML() {
   const branches = objs.filter(o=>BRANCH_CODES.has(o.code));
   const objects  = objs.filter(o=>!BRANCH_CODES.has(o.code));
 
+  const categoryItems = [
+    { key: 'Objekte', iconName: 'building', label: 'Objekte' },
+    { key: 'Fidelior', iconName: 'receipt', label: 'Fidelior' },
+    { key: 'Privat', iconName: 'file', label: 'Privat' },
+    { key: 'ARNDT & CIE', iconName: 'folder', label: 'ARNDT & CIE' },
+  ].map(c => `
+    <button class="fdl-sb-item" data-view="archive" data-scope="${c.key}">
+      ${sbIcon(c.iconName)}
+      <span class="fdl-sb-label">${c.label}</span>
+    </button>`).join('');
+
   const branchItems = branches.map(b => {
     const label = b.code === 'ARNDTCIE' ? 'ARNDT & CIE' : b.code;
     return `
-    <div class="fdl-sb-group" data-group="${b.code}">
-      <button class="fdl-sb-group-toggle">
-        ${sbIcon('receipt')}
-        <span class="fdl-sb-label">${label}</span>
-        <span class="fdl-sb-chevron">${icon('chevron')}</span>
-      </button>
-      <div class="fdl-sb-sub">
-        <button class="fdl-sb-item" data-view="archive" data-obj="${b.code}" data-folder="rechnung">
+    <div class="fdl-sb-section"><span class="fdl-sb-section-label">${label}</span></div>
+    <div class="fdl-sb-group open" data-group="${b.code}">
+      <div class="fdl-sb-sub" style="display:block">
+        <button class="fdl-sb-item" data-view="archive" data-obj="${b.code}" data-folder="rechnung" data-scope="${deriveCategory(b.code)}">
           ${sbIcon('receipt')} <span class="fdl-sb-label">Rechnungen</span>
         </button>
-        <button class="fdl-sb-item" data-view="archive" data-obj="${b.code}" data-folder="other">
+        <button class="fdl-sb-item" data-view="archive" data-obj="${b.code}" data-folder="other" data-scope="${deriveCategory(b.code)}">
           ${sbIcon('file')} <span class="fdl-sb-label">Dokumente</span>
         </button>
       </div>
@@ -244,7 +251,11 @@ function buildSidebarHTML() {
     <button class="fdl-sb-item" data-view="tasks">${sbIcon('check')}<span class="fdl-sb-label">Aufgaben</span><span class="fdl-sb-badge" id="fdl-sb-tasks-badge" style="display:none">0</span></button>
 
     <div class="fdl-sb-divider"></div>
-    ${branchItems ? `<div class="fdl-sb-section"><span class="fdl-sb-section-label">Buchhaltung</span></div>${branchItems}<div class="fdl-sb-divider"></div>` : ''}
+    <div class="fdl-sb-section"><span class="fdl-sb-section-label">Kategorien</span></div>
+    ${categoryItems}
+
+    <div class="fdl-sb-divider"></div>
+    ${branchItems ? `${branchItems}<div class="fdl-sb-divider"></div>` : ''}
 
     <div class="fdl-sb-section"><span class="fdl-sb-section-label">Objekte</span></div>
     ${objItems}
@@ -268,7 +279,11 @@ function attachSidebarEvents() {
     btn.addEventListener('click', () => btn.parentElement.classList.toggle('open'));
   });
   sb.querySelectorAll('.fdl-sb-item[data-view]').forEach(btn => {
-    btn.addEventListener('click', () => activateView(btn.dataset.view, { obj: btn.dataset.obj, folder: btn.dataset.folder }));
+    btn.addEventListener('click', () => activateView(btn.dataset.view, {
+      obj: btn.dataset.obj,
+      folder: btn.dataset.folder,
+      scopeCategory: btn.dataset.scope || undefined,
+    }));
   });
 }
 
@@ -329,8 +344,10 @@ function activateView(view, opts = {}) {
     document.querySelector(`.fdl-sb-item[data-view="${view}"][data-obj="${opts.obj}"][data-folder="${opts.folder}"]`)?.classList.add('active');
   } else if (opts.obj) {
     document.querySelector(`.fdl-sb-item[data-view="${view}"][data-obj="${opts.obj}"]:not([data-folder])`)?.classList.add('active');
+  } else if (opts.scopeCategory) {
+    document.querySelector(`.fdl-sb-item[data-view="${view}"][data-scope="${opts.scopeCategory}"]:not([data-obj])`)?.classList.add('active');
   } else {
-    document.querySelector(`.fdl-sb-item[data-view="${view}"]:not([data-obj])`)?.classList.add('active');
+    document.querySelector(`.fdl-sb-item[data-view="${view}"]:not([data-obj]):not([data-scope])`)?.classList.add('active');
   }
 
   document.getElementById('fdl-view-dash')?.classList.remove('active');
