@@ -372,47 +372,49 @@ function parseQuery(q) {
   }
 
   /* Superlative / Sortierung */
-  if (/\b(?:hoechste|höchste|groesste|größte)\b/i.test(lower)) {
-    filter.sortBy = 'amount';
-    filter.sortDir = 'desc';
-    if (!filter.limit) filter.limit = 1;
-    chips.push({ label: 'Betrag ↓', type: 'sort', key: 'sort' });
-    if (!chips.some(c => c.key === 'limit')) chips.push({ label: `Limit: ${filter.limit}`, type: 'limit', key: 'limit' });
-  } else if (/\b(?:kleinste|niedrigste)\b/i.test(lower)) {
-    filter.sortBy = 'amount';
-    filter.sortDir = 'asc';
-    if (!filter.limit) filter.limit = 1;
-    chips.push({ label: 'Betrag ↑', type: 'sort', key: 'sort' });
-    if (!chips.some(c => c.key === 'limit')) chips.push({ label: `Limit: ${filter.limit}`, type: 'limit', key: 'limit' });
-  } else if (/\b(?:neueste|letzte)\b/i.test(lower)) {
-    filter.sortBy = 'date';
-    filter.sortDir = 'desc';
-    if (!filter.limit) filter.limit = 1;
-    chips.push({ label: 'Datum ↓', type: 'sort', key: 'sort' });
-    if (!chips.some(c => c.key === 'limit')) chips.push({ label: `Limit: ${filter.limit}`, type: 'limit', key: 'limit' });
-  } else if (/\b(?:älteste|erste)\b/i.test(lower)) {
-    filter.sortBy = 'date';
-    filter.sortDir = 'asc';
-    if (!filter.limit) filter.limit = 1;
-    chips.push({ label: 'Datum ↑', type: 'sort', key: 'sort' });
-    if (!chips.some(c => c.key === 'limit')) chips.push({ label: `Limit: ${filter.limit}`, type: 'limit', key: 'limit' });
-  }
+if (/\b(?:hoechst\w*|höchst\w*|groesst\w*|größt\w*)\b/i.test(lower)) {
+  filter.sortBy = 'amount';
+  filter.sortDir = 'desc';
+  if (!filter.limit) filter.limit = 1;
+  chips.push({ label: 'Betrag ↓', type: 'sort', key: 'sort' });
+  if (!chips.some(c => c.key === 'limit')) chips.push({ label: `Limit: ${filter.limit}`, type: 'limit', key: 'limit' });
+} else if (/\b(?:kleinst\w*|niedrigst\w*)\b/i.test(lower)) {
+  filter.sortBy = 'amount';
+  filter.sortDir = 'asc';
+  if (!filter.limit) filter.limit = 1;
+  chips.push({ label: 'Betrag ↑', type: 'sort', key: 'sort' });
+  if (!chips.some(c => c.key === 'limit')) chips.push({ label: `Limit: ${filter.limit}`, type: 'limit', key: 'limit' });
+} else if (/\b(?:neuest\w*|letzt\w*)\b/i.test(lower)) {
+  filter.sortBy = 'date';
+  filter.sortDir = 'desc';
+  if (!filter.limit) filter.limit = 1;
+  chips.push({ label: 'Datum ↓', type: 'sort', key: 'sort' });
+  if (!chips.some(c => c.key === 'limit')) chips.push({ label: `Limit: ${filter.limit}`, type: 'limit', key: 'limit' });
+} else if (/\b(?:ältest\w*|aeltest\w*|erst\w*)\b/i.test(lower)) {
+  filter.sortBy = 'date';
+  filter.sortDir = 'asc';
+  if (!filter.limit) filter.limit = 1;
+  chips.push({ label: 'Datum ↑', type: 'sort', key: 'sort' });
+  if (!chips.some(c => c.key === 'limit')) chips.push({ label: `Limit: ${filter.limit}`, type: 'limit', key: 'limit' });
+}
 
   /* Resttext bereinigen */
   let rest = raw;
-  [
-    /\b20\d{2}\b/g,
-    /\bq[1-4]\s*(?:20\d{2})?\b/gi,
-    /\b(?:dieses jahr|letztes jahr|dieser monat|letzter monat|vorletzter monat|dieses quartal|erstes halbjahr|zweites halbjahr)\b/gi,
-    /\b(?:ueber|über|ab|mehr als|mindestens|unter|bis|maximal|hoechstens|höchstens)\s+\d[\d.,]*\s*(?:euro|€)?/gi,
-    /\b\d{2,6}(?:[.,]\d{1,2})?\s*(?:euro|€)?\b/gi,
-    /\b(?:von|bei)\s+[a-zäöüß0-9&][a-zäöüß0-9&\-.\s]{1,50}/gi,
-    /\b(Rechnungen?|Eingangsrechnungen?|Gutschriften?|Verträge?|Vertraege?|Angebote?|Dokumente?|PDFs?)\b/gi,
-    /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
-    /\b(?:privat|persönlich|persoenlich|fidelior|objekte|objekt|liegenschaft|liegenschaften|immobilie|immobilien)\b/gi,
-    /\b(?:hoechste|höchste|groesste|größte|kleinste|niedrigste|neueste|letzte|älteste|erste)\b/gi,
-    /\b(?:top)\s+\d{1,2}\b/gi
-  ].forEach(p => { rest = rest.replace(p, ' '); });
+[
+  /\b20\d{2}\b/g,
+  /\bq[1-4]\s*(?:20\d{2})?\b/gi,
+  /\b(?:dieses jahr|letztes jahr|dieser monat|letzter monat|vorletzter monat|dieses quartal|erstes halbjahr|zweites halbjahr)\b/gi,
+  /\b(?:ueber|über|ab|mehr als|mindestens|unter|bis|maximal|hoechstens|höchstens)\s+\d[\d.,]*\s*(?:euro|€)?/gi,
+  /\b\d{2,6}(?:[.,]\d{1,2})?\s*(?:euro|€)?\b/gi,
+  /\b(?:von|bei)\s+[a-zäöüß0-9&][a-zäöüß0-9&\-.\s]{1,50}/gi,
+  /\b(Rechnungen?|Eingangsrechnungen?|Gutschriften?|Verträge?|Vertraege?|Angebote?|Dokumente?|PDFs?)\b/gi,
+  /\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\b/gi,
+  /\b(?:privat|persönlich|persoenlich|fidelior|objekte|objekt|liegenschaft|liegenschaften|immobilie|immobilien)\b/gi,
+  /\b(?:hoechst\w*|höchst\w*|groesst\w*|größt\w*|kleinst\w*|niedrigst\w*|neuest\w*|letzt\w*|ältest\w*|aeltest\w*|erst\w*)\b/gi,
+  /\b(?:top)\s+\d{1,2}\b/gi,
+  /\b(?:welche|welcher|welches|zeige|zeig|mir|bitte|hat|haben|den|die|das|dem|des|ein|eine|einen)\b/gi,
+  /\b(?:betrag|betraege|beträge)\b/gi
+].forEach(p => { rest = rest.replace(p, ' '); });
 
   for (const obj of objOptions) {
     rest = rest.replace(new RegExp(`\\b${escapeRegExp(obj.code)}\\b`, 'gi'), ' ');
@@ -567,18 +569,23 @@ function computeClientBoost(doc, filter) {
     else if (haystack.includes(want)) score += 28;
   }
 
-  if (filter.textTokens?.length) {
-    let matched = 0;
-    for (const token of filter.textTokens) {
-      if (!token || token.length < 2) continue;
-      if (haystack.includes(token)) {
-        matched += 1;
-        score += 18;
-      }
+if (filter.textTokens?.length) {
+  let matched = 0;
+  for (const token of filter.textTokens) {
+    if (!token || token.length < 2) continue;
+    if (haystack.includes(token)) {
+      matched += 1;
+      score += 22;
     }
-    if (!matched) score -= 30;
-    if (matched === filter.textTokens.length) score += 28;
   }
+
+  if (!matched) return -1;
+
+  const minNeeded = filter.textTokens.length >= 2 ? Math.ceil(filter.textTokens.length / 2) : 1;
+  if (matched < minNeeded) return -1;
+
+  if (matched === filter.textTokens.length) score += 36;
+}
 
   if (filter.amountEq !== undefined) {
     const amt = Number(doc.amount || 0);
