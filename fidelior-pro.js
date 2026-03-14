@@ -752,38 +752,13 @@ function normalizeArchiveContext(opts = {}) {
 }
 
 function showArchiveView(opts = {}) {
-  const archView = document.getElementById('fdl-view-archive');
-  if (!archView) return;
-
   const ctx = normalizeArchiveContext(opts);
 
-   const existing = document.getElementById('fdl-av3');
-
-  if (existing) {
-    if (existing.parentElement !== archView) archView.appendChild(existing);
-    existing.classList.add('open');
-    existing.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;min-height:0;background:transparent;padding:0;';
-  } else {
+  try {
     window.fdlArchivOpen?.(ctx);
-
-    setTimeout(() => {
-      let ov = document.getElementById('fdl-av3');
-
-      if (!ov) {
-        window.fdlArchivOpen?.(ctx);
-        ov = document.getElementById('fdl-av3');
-      }
-
-      if (ov) {
-        ov.style.cssText = 'position:static;opacity:1;pointer-events:all;display:flex;height:100%;min-height:0;background:transparent;padding:0;';
-        if (ov.parentElement !== archView) archView.appendChild(ov);
-        ov.classList.add('open');
-      } else {
-        archView.innerHTML = '<div style="padding:24px;color:#6b7280;font-size:14px">Archiv konnte nicht geladen werden.</div>';
-      }
-    }, 160);
+  } catch (e) {
+    console.error('Archiv konnte nicht geöffnet werden', e);
   }
-
 
   setTimeout(() => {
     if (ctx.obj) {
@@ -813,19 +788,18 @@ function showArchiveView(opts = {}) {
       return;
     }
 
-    if (window.__av3?.setCategory) {
-      window.__av3.setCategory(null, {
-        typeFilter: ctx.typeFilter || 'all',
-        yearFilter: ctx.yearFilter || 'all',
-        sortOrder: ctx.sortOrder || 'date-desc',
-        dateFrom: ctx.dateFrom || '',
-        dateTo: ctx.dateTo || '',
-        query: ctx.query || '',
-        autoSelectFirst: false
-      });
-    }
-  }, 180);
+    window.__av3?.setCategory?.(null, {
+      typeFilter: ctx.typeFilter || 'all',
+      yearFilter: ctx.yearFilter || 'all',
+      sortOrder: ctx.sortOrder || 'date-desc',
+      dateFrom: ctx.dateFrom || '',
+      dateTo: ctx.dateTo || '',
+      query: ctx.query || '',
+      autoSelectFirst: false
+    });
+  }, 220);
 }
+
 
 /* ══════════════════════════════════════════════════════════════════════════
    DASHBOARD RENDER
