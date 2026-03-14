@@ -485,7 +485,12 @@ function normSearch(v) {
 }
 
 function tokenizeSearch(v) {
-  return normSearch(v).split(' ').filter(Boolean);
+  const STOP = new Set([
+    'alle','und','oder','mit','von','bei','im','in','am','für','der','die','das'
+  ]);
+  return normSearch(v)
+    .split(' ')
+    .filter(t => t && !STOP.has(t));
 }
 
 /**

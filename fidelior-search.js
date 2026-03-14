@@ -376,9 +376,25 @@ function injectCSS() {
 
 .fdl-srch-chips:empty{display:none}
 .fdl-srch-chip{
-  display:inline-flex;align-items:center;gap:4px;
-  font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:20px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:11.5px;
+  font-weight:600;
+  padding:3px 9px;
+  border-radius:20px;
   border:1px solid transparent;
+  cursor:pointer;
+  appearance:none;
+  background-clip:padding-box;
+}
+.fdl-srch-chip:hover{
+  filter:brightness(.98);
+}
+.fdl-srch-chip-x{
+  font-size:12px;
+  line-height:1;
+  opacity:.7;
 }
 .fdl-srch-chip.obj   {background:#F5EEF8;color:#5B1B70;border-color:#E8D5F5}
 .fdl-srch-chip.year  {background:#EFF6FF;color:#1E40AF;border-color:#BFDBFE}
@@ -548,11 +564,61 @@ function onKeyDown(e) {
 }
 
 function renderChips(chips) {
-  _chips.innerHTML = chips.map(c =>
-    `<span class="fdl-srch-chip ${c.type}">${c.label}</span>`
+  _chips.innerHTML = chips.map((c, i) =>
+    `<button type="button" class="fdl-srch-chip ${c.type}" data-chip-idx="${i}" title="Filter entfernen">
+      <span>${c.label}</span>
+      <span class="fdl-srch-chip-x" aria-hidden="true">×</span>
+    </button>`
   ).join('');
-}
 
+  _chips.querySelectorAll('[data-chip-idx]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.getAttribute('data-chip-idx'));
+      removeChipAt(idx);
+    });
+  });
+}
+function removeChipAt(idx) {
+  const q = String(_input?.value || '').trim();
+  if (!q) return;
+
+  const { chips } = parseQuery(q);
+  const chip = chips[idx];
+  if (!chip) return;
+
+  let next = q;
+
+  if (chip.type === 'obj') {
+    next = next.replace(new RegExp(`\\b${chip.label.replace('Objekt: ','').replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`, 'i'), ' ');
+  } else if (chip.type === 'year') {
+    const year = chip.label.replace('Jahr: ','').trim();
+    next = next.replace(new RegExp(`\\b${year}\\b`, 'i'), ' ');
+  } else if (chip.type === 'month') {
+    next = next.replace(new RegExp(`\\b${chip.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`, 'i'), ' ');
+  } else if (chip.type === 'amt') {
+    const amountLabel = chip.label
+      .replace(/[<>≈]/g, '')
+      .replace(/\./g, '\\.')
+      .replace(',', '[,.]')
+      .replace(/\s*€?/, '')
+      .trim();
+    next = next.replace(new RegExp(`\\b(?:ueber|über|ab|mehr als|mindestens|unter|bis|maximal|hoechstens|höchstens)?\\s*${amountLabel}\\s*(?:euro|€)?\\b`, 'i'), ' ');
+  } else if (chip.type === 'type') {
+    next = next.replace(/\b(Rechnungen?|Eingangsrechnungen?|Gutschriften?|Verträge?|Vertraege?|Angebote?|Dokumente?)\b/i, ' ');
+  } else if (chip.type === 'sender') {
+    const sender = chip.label.replace(/^Von:\s*/i, '').trim().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    next = next.replace(new RegExp(`\\b(?:von|bei)\\s+${sender}\\b`, 'i'), ' ');
+  } else if (chip.type === 'cat') {
+    next = next.replace(/\b(?:privat|persönlich|persoenlich|fidelior|objekte|objekt|liegenschaft|liegenschaften|immobilie|immobilien)\b/i, ' ');
+  } else if (chip.type === 'text') {
+    const txt = chip.label.replace(/^"/, '').replace(/"$/, '').trim().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    next = next.replace(new RegExp(txt, 'i'), ' ');
+  }
+
+  next = next.replace(/\s{2,}/g, ' ').trim();
+  _input.value = next;
+  _input.dispatchEvent(new Event('input', { bubbles:true }));
+}
 function hideMeta() { _meta.style.display = 'none'; }
 function showMeta(total, ms) {
   _meta.style.display = 'flex';
