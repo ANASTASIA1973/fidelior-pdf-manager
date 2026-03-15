@@ -624,9 +624,9 @@ function applyFilters() {
     result = result.filter(f => f.year === S.yearFilter);
   }
 
-  if (S.collectionId) {
-    result = result.filter(f => matchesCollectionByDefaultRules(f, S.collectionId));
-  }
+   // collectionId wurde bereits beim Laden über filterFilesByCollection(...) angewendet.
+  // Hier nicht erneut mit Default-Regeln filtern, sonst würden keyword/objectCode-Treffer verloren gehen.
+
 
   if (S.dateFrom || S.dateTo) {
 
@@ -1107,10 +1107,15 @@ window.__av3 = {
     const so = document.getElementById('fdl-av3-sort');   if (so) so.value = opts.sortOrder || 'date-desc';
     S.sortOrder = opts.sortOrder || 'date-desc';
 
-    const bc = document.getElementById('fdl-av3-bc');
+     const bc = document.getElementById('fdl-av3-bc');
     if (bc) {
       const scope = S.scopeCategory ? `<span class="av3-bc-current">${S.scopeCategory}</span><span class="av3-bc-sep">/</span>` : '';
-      bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span>${scope}<span class="av3-bc-current">${o.name}</span>`;
+      const collectionLabel =
+        S.collectionId === 'steuererklarung' ? 'Steuererklärung' :
+        S.collectionId === 'betriebskosten' ? 'Betriebskosten' :
+        '';
+
+      bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span>${scope}<span class="av3-bc-current">${o.name}</span>${collectionLabel ? `<span class="av3-bc-sep">/</span><span class="av3-bc-current">${collectionLabel}</span>` : ''}`;
     }
 
     renderSidebar();
