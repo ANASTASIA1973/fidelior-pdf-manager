@@ -587,9 +587,11 @@ const S = {
   counts:     {},
   subFilter:  'all',
   scopeCategory: null,
+  collectionId: '',
   dateFrom:   '',
   dateTo:     '',
 };
+
 
 /* ══════════════════════════════════════════════════════════════════════════
    FILTER PIPELINE
@@ -622,7 +624,12 @@ function applyFilters() {
     result = result.filter(f => f.year === S.yearFilter);
   }
 
+  if (S.collectionId) {
+    result = result.filter(f => matchesCollectionByDefaultRules(f, S.collectionId));
+  }
+
   if (S.dateFrom || S.dateTo) {
+
     result = result.filter(f => {
       const ms = docDateMs(f);
       if (!ms) return false;
@@ -692,6 +699,123 @@ function getShortName(o) {
   const obj = objectsMap[o.code];
   if (obj?.displayName) return obj.displayName.replace(o.code + ' · ', '').trim();
   return o.name.replace(o.code + ' · ', '').trim() || o.code;
+}
+async function getCollectionById(collectionId) {
+  if (!collectionId) return null;
+
+  try {
+    const db = await new Promise((res, rej) => {
+      const r = indexedDB.open('fidelior_index_v1');
+      r.onsuccess = e => res(e.target.result);
+      r.onerror = e => rej(e);
+    });
+
+    if (!db.objectStoreNames.contains('collections')) return null;
+
+    return await new Promise(res => {
+      const req = db.transaction('collections', 'readonly').objectStore('collections').get(collectionId);
+      req.onsuccess = e => res(e.target.result || null);
+      req.onerror = () => res(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function normalizeCollectionText(v) {
+  return String(v || '')
+    .toLowerCase()
+    .replace(/[ä]/g, 'ae')
+    .replace(/[ö]/g, 'oe')
+    .replace(/[ü]/g, 'ue')
+    .replace(/[ß]/g, 'ss')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildCollectionHaystack(f) {
+  return normalizeCollectionText([
+    f.name || '',
+    f.objectCode || '',
+    f.objectName || '',
+    f.folderType || '',
+    fmtFolderType(f.folderType || ''),
+    f.subfolder || '',
+    f.year || '',
+    f.meta?.absender || '',
+    f.meta?.betrag || '',
+    f.meta?.datum || ''
+  ].join(' '));
+}
+
+function matchesCollectionByDefaultRules(file, collectionId) {
+  const hay = buildCollectionHaystack(file);
+
+  if (collectionId === 'steuererklarung') {
+    return [
+      'steuer',
+      'steuererklaerung',
+      'steuerberatung',
+      'finanzamt',
+      'lohnbuchfuehrung',
+      'lohnbuchhaltung',
+      'zinnikus',
+      'sevdesk',
+      'datev'
+    ].some(token => hay.includes(token));
+  }
+
+  if (collectionId === 'betriebskosten') {
+    return [
+      'betriebskosten',
+      'nebenkosten',
+      'hausgeld',
+      'abrechnung',
+      'abrechnungsbeleg',
+      'heizung',
+      'wasser',
+      'strom',
+      'muell',
+      'mull',
+      'reinigung',
+      'wartung'
+    ].some(token => hay.includes(token));
+  }
+
+  return false;
+}
+
+async function filterFilesByCollection(files, collectionId) {
+  if (!collectionId) return files;
+
+  const collection = await getCollectionById(collectionId);
+
+  if (!collection) {
+    return files.filter(f => matchesCollectionByDefaultRules(f, collectionId));
+  }
+
+  const keywords = Array.isArray(collection.keywords)
+    ? collection.keywords.map(normalizeCollectionText).filter(Boolean)
+    : [];
+
+  const objectCodes = Array.isArray(collection.objectCodes)
+    ? collection.objectCodes.map(v => String(v).toUpperCase())
+    : [];
+
+  return files.filter(f => {
+    const hay = buildCollectionHaystack(f);
+
+    if (objectCodes.length && objectCodes.includes(String(f.objectCode || '').toUpperCase())) {
+      return true;
+    }
+
+    if (keywords.length && keywords.some(k => hay.includes(k))) {
+      return true;
+    }
+
+    return matchesCollectionByDefaultRules(f, collectionId);
+  });
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -968,12 +1092,14 @@ window.__av3 = {
     S.selected = null;
     S.files = [];
     S.filtered = [];
-    S.query      = (opts.query || '').trim().toLowerCase();
-    S.typeFilter = opts.typeFilter || 'all';
-    S.subFilter  = opts.subFilter || 'all';
-    S.yearFilter = opts.yearFilter || 'all';
-    S.dateFrom   = opts.dateFrom || '';
-    S.dateTo     = opts.dateTo || '';
+      S.query        = (opts.query || '').trim().toLowerCase();
+    S.typeFilter   = opts.typeFilter || 'all';
+    S.subFilter    = opts.subFilter || 'all';
+    S.yearFilter   = opts.yearFilter || 'all';
+    S.collectionId = opts.collectionId || '';
+    S.dateFrom     = opts.dateFrom || '';
+    S.dateTo       = opts.dateTo || '';
+
 
     const sf = document.getElementById('fdl-av3-search'); if (sf) sf.value = opts.query || '';
     const tf = document.getElementById('fdl-av3-type');   if (tf) tf.value = S.typeFilter;
@@ -997,10 +1123,13 @@ window.__av3 = {
       return;
     }
 
-    const files = await loadFiles(code);
+     let files = await loadFiles(code);
+    files = await filterFilesByCollection(files, S.collectionId);
+
     S.files   = files;
     S.filtered = files;
     S.counts[code] = files.length;
+
     const ce = document.getElementById(`av3c-${code}`);
     if (ce) ce.textContent = files.length;
 
@@ -1062,13 +1191,15 @@ window.__av3 = {
     S.files = [];
     S.filtered = [];
 
-    S.query      = (opts.query || '').trim().toLowerCase();
-    S.typeFilter = opts.typeFilter || 'all';
-    S.subFilter  = opts.subFilter || 'all';
-    S.yearFilter = opts.yearFilter || 'all';
-    S.sortOrder  = opts.sortOrder || 'date-desc';
-    S.dateFrom   = opts.dateFrom || '';
-    S.dateTo     = opts.dateTo || '';
+       S.query        = (opts.query || '').trim().toLowerCase();
+    S.typeFilter   = opts.typeFilter || 'all';
+    S.subFilter    = opts.subFilter || 'all';
+    S.yearFilter   = opts.yearFilter || 'all';
+    S.sortOrder    = opts.sortOrder || 'date-desc';
+    S.collectionId = opts.collectionId || '';
+    S.dateFrom     = opts.dateFrom || '';
+    S.dateTo       = opts.dateTo || '';
+
 
     const sf = document.getElementById('fdl-av3-search');
     const tf = document.getElementById('fdl-av3-type');
@@ -1084,10 +1215,16 @@ window.__av3 = {
       yf.value = 'all';
     }
 
-    const bc = document.getElementById('fdl-av3-bc');
+      const bc = document.getElementById('fdl-av3-bc');
     if (bc) {
-      bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${category || 'Alle Liegenschaften'}</span>`;
+      const collectionLabel =
+        S.collectionId === 'steuererklarung' ? 'Steuererklärung' :
+        S.collectionId === 'betriebskosten' ? 'Betriebskosten' :
+        '';
+
+      bc.innerHTML = `<span style="color:#9CA3AF">Archiv</span><span class="av3-bc-sep">/</span><span class="av3-bc-current">${category || 'Alle Liegenschaften'}</span>${collectionLabel ? `<span class="av3-bc-sep">/</span><span class="av3-bc-current">${collectionLabel}</span>` : ''}`;
     }
+
 
     renderSidebar();
     renderPanel(null);
@@ -1106,8 +1243,9 @@ window.__av3 = {
       }
       return;
     }
+    let files = await loadFilesForCategory(category);
+    files = await filterFilesByCollection(files, S.collectionId);
 
-    const files = await loadFilesForCategory(category);
     S.files = files;
     S.filtered = files;
 
@@ -1306,20 +1444,22 @@ async function open(opts = {}) {
   const root = window.scopeRootHandle;
   if (opts.obj) {
     setTimeout(() => { window.__av3.obj(opts.obj, opts); }, 0);
-  } else if (opts.scopeCategory) {
+  } else if (opts.scopeCategory || opts.collectionId) {
     setTimeout(() => {
-      window.__av3.setCategory(opts.scopeCategory, {
+      window.__av3.setCategory(opts.scopeCategory || null, {
         typeFilter: opts.typeFilter || 'all',
         subFilter: opts.subFilter || 'all',
         query: opts.query || '',
         yearFilter: opts.yearFilter || 'all',
         sortOrder: opts.sortOrder || 'date-desc',
+        collectionId: opts.collectionId || '',
         dateFrom: opts.dateFrom || '',
         dateTo: opts.dateTo || '',
         autoSelectFirst: false
       });
     }, 0);
   }
+
 
   if (root) {
     for (const o of getObjList()) {
