@@ -133,20 +133,24 @@ async function dbCount(store) {
 /* ══════════════════════════════════════════════════════════════════════════
    DOKUMENTEN-RECORD STRUCTURE
    ══════════════════════════════════════════════════════════════════════════ */
-
 /**
  * DocumentRecord – wird pro abgelegtem Dokument gespeichert
  * @typedef {Object} DocumentRecord
  * @prop {number}   id           - auto-increment PK
  * @prop {string}   fileName     - z.B. 128,52_FIDELIOR_workingbits_2026.03.12.pdf
  * @prop {string}   objectCode   - FIDELIOR | EGYO | B75 …
- * @prop {string}   docType      - rechnung | vertrag | sonstiges …
- * @prop {number}   amount       - 128.52 (float)
+ * @prop {string}   docType      - rechnung | dokument | vertrag | sonstiges …
+ * @prop {number}   amount       - Legacy/Fallback-Betrag
  * @prop {string}   amountRaw    - "128,52"
+ * @prop {number}   amountNet    - Netto
+ * @prop {number}   amountVat    - MwSt
+ * @prop {number}   amountGross  - Brutto/Gesamt
  * @prop {string}   invoiceDate  - ISO: 2026-03-12
+ * @prop {string}   dueDate      - ISO: 2026-03-16
  * @prop {string}   savedAt      - ISO datetime
  * @prop {string}   sender       - KI-extrahierter oder manueller Absender
  * @prop {string}   senderNorm   - toLowerCase für Index
+ * @prop {string}   title        - erkannter Dokumenttitel / Kurzbeschreibung
  * @prop {string[]} scopePath    - ['FIDELIOR','Eingangsrechnungen','2026']
  * @prop {string}   folderType   - Rechnungsbelege | Objektdokumente …
  * @prop {string}   year         - "2026"
@@ -155,46 +159,75 @@ async function dbCount(store) {
  * @prop {string[]} keywords     - auto-extrahiert
  * @prop {string}   serviceDesc  - Dienstleistungs-Beschreibung
  * @prop {string}   iban         - erkannte IBAN
- * @prop {string}   dueDate      - Fälligkeitsdatum ISO
- * @prop {number}   size         - Dateigröße bytes
+ * @prop {string}   ustId        - erkannte USt-IdNr.
+ * @prop {string}   email        - erkannte E-Mail
+ * @prop {string[]} emailsFound  - alle erkannten E-Mails
+ * @prop {string[]} ibansFound   - alle erkannten IBANs
  * @prop {string[]} targets      - Ablage-Ziele ['Scopevisio', 'pCloud']
  * @prop {string[]} emailsSent   - Empfänger-IDs wenn E-Mail versendet
  * @prop {string}   invoiceNo    - Rechnungsnummer
+ * @prop {Object}   confidence   - einfache Feld-Sicherheiten
  */
+
 function makeDocRecord(data, ocrData) {
   const amount = parseAmountFloat(data.amount);
   const sn     = (data.sender || data.senderRaw || '').trim();
   const date   = data.invoiceDate ? dispToISO(data.invoiceDate) : null;
   const year   = date ? date.slice(0, 4) : String(new Date().getFullYear());
 
+  const ocrText = ocrData?.text || '';
+  const inferredDocType = detectDocTypeFromText(ocrText, data.docType || '');
+  const amountNet = Number(ocrData?.amountNet || 0) || 0;
+  const amountVat = Number(ocrData?.amountVat || 0) || 0;
+  const amountGross = Number(ocrData?.amountGross || 0) || amount || 0;
+  const collections = detectCollectionsFromText(ocrText, sn, ocrData?.keywords || []);
+
   return {
     // Kernfelder aus fdlOnFileSaved
     fileName:    data.fileName    || '',
     objectCode:  data.objectCode  || '',
-    docType:     data.docType     || '',
-    amount:      amount,
+    docType:     inferredDocType,
+    amount:      amountGross || amount,
     amountRaw:   data.amount      || '',
+    amountNet,
+    amountVat,
+    amountGross,
     invoiceDate: date || '',
     savedAt:     new Date().toISOString(),
     sender:      sn,
     senderNorm:  sn.toLowerCase(),
+    title:       ocrData?.title || ocrData?.serviceDesc || '',
     scopePath:   data.scopePath   || [],
     folderType:  data.folderType  || 'Rechnungsbelege',
     year,
-    collections: [],
+    collections,
     targets:     data.targets     || [],
     emailsSent:  data.emailsSent  || [],
-    invoiceNo:   data.invoiceNo   || '',
+    invoiceNo:   data.invoiceNo   || ocrData?.invoiceNo || '',
     size:        data.size        || 0,
 
-    // OCR-Felder (später via fdlKiOnOcr nachgepflegt)
-    ocrText:     ocrData?.text    || '',
+    // OCR-Felder
+    ocrText,
     keywords:    ocrData?.keywords || [],
     serviceDesc: ocrData?.serviceDesc || '',
     iban:        ocrData?.iban    || '',
+    ibansFound:  ocrData?.ibansFound || [],
     dueDate:     ocrData?.dueDate || '',
+    ustId:       ocrData?.ustId || '',
+    email:       ocrData?.email || '',
+    emailsFound: ocrData?.emailsFound || [],
+
+    confidence: {
+      type:        inferredDocType ? 0.85 : 0,
+      collections: collections.length ? 0.75 : 0,
+      sender:      sn ? 0.9 : 0,
+      amountGross: amountGross ? 0.85 : 0,
+      invoiceDate: date ? 0.8 : 0,
+      invoiceNo:   (data.invoiceNo || ocrData?.invoiceNo) ? 0.75 : 0
+    }
   };
 }
+
 
 /* ══════════════════════════════════════════════════════════════════════════
    HILFSFUNKTIONEN
@@ -256,6 +289,134 @@ function extractKeywords(text) {
     .slice(0, 12)
     .map(([w]) => w);
 }
+function extractEmails(text) {
+  if (!text) return [];
+  const matches = text.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi) || [];
+  return [...new Set(matches.map(s => String(s).trim().toLowerCase()))].slice(0, 10);
+}
+
+function extractEmail(text) {
+  return extractEmails(text)[0] || '';
+}
+
+function extractUstId(text) {
+  if (!text) return '';
+  const patterns = [
+    /\b(?:USt-IdNr\.?|USt IdNr\.?|Umsatzsteuer-Identifikationsnummer|VAT ID)[:\s]*([A-Z]{2}[A-Z0-9]{8,14})\b/i,
+    /\b(DE[0-9]{9})\b/
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) return String(m[1] || '').replace(/\s/g, '');
+  }
+  return '';
+}
+
+function extractInvoiceNo(text) {
+  if (!text) return '';
+  const patterns = [
+    /\b(?:Rechnungsnummer|Rechnung Nr\.?|Rechnung-Nr\.?|Invoice No\.?|Invoice Number|Belegnr\.?)[:\s#-]*([A-Z0-9\-\/]{2,40})\b/i,
+    /\bNr\.?\s*([A-Z0-9\-\/]{2,20})\b/i
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) return String(m[1] || '').trim();
+  }
+  return '';
+}
+
+function extractMoneyCandidates(text) {
+  if (!text) return [];
+  const matches = text.match(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g) || [];
+  const values = matches
+    .map(v => parseAmountFloat(v))
+    .filter(v => isFinite(v) && v > 0);
+  return [...new Set(values)].sort((a, b) => b - a);
+}
+
+function extractVatAmount(text) {
+  if (!text) return 0;
+  const patterns = [
+    /\b(?:MwSt\.?|USt\.?|Mehrwertsteuer|VAT)[:\s]*([\d\.,]+)\b/i,
+    /\b19%\s*[:\-]?\s*([\d\.,]+)\b/i,
+    /\b7%\s*[:\-]?\s*([\d\.,]+)\b/i
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) {
+      const n = parseAmountFloat(m[1]);
+      if (n > 0) return n;
+    }
+  }
+  return 0;
+}
+
+function extractNetAmount(text) {
+  if (!text) return 0;
+  const patterns = [
+    /\b(?:Netto|Nettobetrag|Zwischensumme)[:\s]*([\d\.,]+)\b/i
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) {
+      const n = parseAmountFloat(m[1]);
+      if (n > 0) return n;
+    }
+  }
+  return 0;
+}
+
+function extractGrossAmount(text) {
+  if (!text) return 0;
+  const patterns = [
+    /\b(?:Gesamtbetrag|Rechnungsbetrag|Brutto|Bruttobetrag|Endbetrag|Zu zahlen|Zahlbetrag|Summe)[:\s]*([\d\.,]+)\b/i
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) {
+      const n = parseAmountFloat(m[1]);
+      if (n > 0) return n;
+    }
+  }
+  const fallback = extractMoneyCandidates(text);
+  return fallback[0] || 0;
+}
+
+function detectCollectionsFromText(text, sender, keywords) {
+  const hay = [text || '', sender || '', ...(keywords || [])].join(' ').toLowerCase();
+
+  const map = {
+    steuererklarung: [
+      'finanzamt', 'steuer', 'steuerberater', 'steuerberatung', 'elster', 'datev',
+      'einkommensteuer', 'umsatzsteuer', 'gewerbesteuer', 'grundsteuer', 'bescheid',
+      'zinniikus'
+    ],
+    betriebskosten: [
+      'betriebskosten', 'nebenkosten', 'heizkosten', 'wasser', 'abwasser', 'müll',
+      'hausmeister', 'schornsteinfeger', 'wartung', 'allgemeinstrom',
+      'treppenhausreinigung'
+    ]
+  };
+
+  const found = [];
+  for (const [colId, terms] of Object.entries(map)) {
+    if (terms.some(t => hay.includes(t))) found.push(colId);
+  }
+  return found;
+}
+
+function detectDocTypeFromText(text, fallbackType) {
+  const hay = String(text || '').toLowerCase();
+
+  const invoiceSignals = [
+    'rechnung', 'invoice', 'rechnungsnummer', 'zahlbetrag', 'gesamtbetrag',
+    'fälligkeit', 'netto', 'brutto', 'mwst', 'ust'
+  ].filter(t => hay.includes(t)).length;
+
+  if (invoiceSignals >= 2) return 'rechnung';
+  if (fallbackType) return String(fallbackType).toLowerCase();
+  return 'dokument';
+}
 
 function extractIBAN(text) {
   if (!text) return '';
@@ -297,14 +458,38 @@ function extractServiceDesc(lines) {
 }
 
 function analyzeOcrData(text, lines) {
+  const safeText = (text || '').slice(0, 12000);
+  const keywords = extractKeywords(safeText);
+  const email = extractEmail(safeText);
+  const emailsFound = extractEmails(safeText);
+  const iban = extractIBAN(safeText);
+  const ibansFound = iban ? [iban] : [];
+  const dueDate = extractDueDate(safeText);
+  const serviceDesc = extractServiceDesc(lines || []);
+  const ustId = extractUstId(safeText);
+  const invoiceNo = extractInvoiceNo(safeText);
+  const amountNet = extractNetAmount(safeText);
+  const amountVat = extractVatAmount(safeText);
+  const amountGross = extractGrossAmount(safeText);
+
   return {
-    text:        (text || '').slice(0, 8000),   // Max 8K Zeichen
-    keywords:    extractKeywords(text),
-    iban:        extractIBAN(text),
-    dueDate:     extractDueDate(text),
-    serviceDesc: extractServiceDesc(lines || []),
+    text: safeText,
+    keywords,
+    iban,
+    ibansFound,
+    dueDate,
+    serviceDesc,
+    email,
+    emailsFound,
+    ustId,
+    invoiceNo,
+    amountNet,
+    amountVat,
+    amountGross,
+    title: serviceDesc || '',
   };
 }
+
 
 /* ══════════════════════════════════════════════════════════════════════════
    LERNHISTORIE
@@ -698,12 +883,10 @@ async function search(query, opts = {}) {
 
 async function initDefaultCollections() {
   const defaults = [
-    { id: 'steuererklarung', name: 'Steuererklärung',       icon: '📑', color: '#5B1B70' },
-    { id: 'betriebskosten',  name: 'Betriebskosten',        icon: '🏢', color: '#0D6E3E' },
-    { id: 'lohnbuch-egyo',   name: 'Lohnbuchführung EGYO',  icon: '⚓', color: '#1E3A8A' },
-    { id: 'versicherungen',  name: 'Versicherungen',         icon: '🛡', color: '#92400E' },
-    { id: 'wartung',         name: 'Wartung & Reparatur',    icon: '🔧', color: '#374151' },
+    { id: 'steuererklarung', name: 'Steuererklärung', icon: '📑', color: '#5B1B70' },
+    { id: 'betriebskosten',  name: 'Betriebskosten',  icon: '🏢', color: '#0D6E3E' },
   ];
+
   for (const col of defaults) {
     const existing = await dbGet(S_COLLECTIONS, col.id).catch(() => null);
     if (!existing) {

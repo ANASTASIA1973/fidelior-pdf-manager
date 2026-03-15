@@ -398,6 +398,14 @@ function fmtR(iso) {
    ══════════════════════════════════════════════════════════════════════════ */
 
 let _view = 'dash';
+async function getCollectionList() {
+  try {
+    const cols = await idbGetAll('fidelior_index_v1', 'collections');
+    return (cols || []).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'de'));
+  } catch {
+    return [];
+  }
+}
 
 function getObjList() {
   const sel = document.getElementById('objectSelect');
@@ -409,19 +417,23 @@ function getObjList() {
    SIDEBAR
    ══════════════════════════════════════════════════════════════════════════ */
 
-function buildSidebar() {
+async function buildSidebar() {
   if (document.getElementById('fdl-sidebar')) return;
   const sb = document.createElement('div');
   sb.id = 'fdl-sidebar';
-  sb.innerHTML = buildSidebarHTML();
+  sb.innerHTML = await buildSidebarHTML();
   document.body.appendChild(sb);
   document.body.classList.add('fdl-pro');
   attachSidebarEvents();
 }
 
-function buildSidebarHTML() {
-  const objs = getObjList();
+
+async function buildSidebarHTML() {
+
+   const objs = getObjList();
   const realObjects = objs.filter(o => !BRANCH_CODES.has(o.code));
+  const collections = await getCollectionList();
+
 
   const categoryGroups = `
     <div class="fdl-sb-section"><span class="fdl-sb-section-label">Kategorien</span></div>
@@ -502,6 +514,18 @@ function buildSidebarHTML() {
       </div>
     </div>
   `;
+  const collectionGroups = collections.length ? `
+    <div class="fdl-sb-divider"></div>
+    <div class="fdl-sb-section"><span class="fdl-sb-section-label">Sammlungen</span></div>
+
+    ${collections.map(col => `
+      <button class="fdl-sb-item" data-view="archive" data-collection="${col.id}">
+        ${sbIcon('receipt')}
+        <span class="fdl-sb-label">${col.name || col.id}</span>
+        <span id="fdl-colcnt-${col.id}" class="fdl-sb-count"></span>
+      </button>
+    `).join('')}
+  ` : '';
 
   const objectGroups = realObjects.map(o => {
     const shortName = o.name.replace(/^[A-Z0-9]+ · /, '');
@@ -545,10 +569,13 @@ function buildSidebarHTML() {
 
     <div class="fdl-sb-divider"></div>
 
-    ${categoryGroups}
+     ${categoryGroups}
+
+    ${collectionGroups}
 
     <div class="fdl-sb-divider"></div>
     <div class="fdl-sb-section"><span class="fdl-sb-section-label">Objekte</span></div>
+
     ${objectGroups}
 
     <div class="fdl-sb-divider"></div>
@@ -577,17 +604,20 @@ function attachSidebarEvents() {
 
   sb.querySelectorAll('.fdl-sb-item[data-view]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const view = btn.dataset.view;
+        const view = btn.dataset.view;
       const obj = btn.dataset.obj || '';
       const scopeCategory = btn.dataset.scopecat || '';
+      const collectionId = btn.dataset.collection || '';
       const type = btn.dataset.type || 'all';
 
       activateView(view, {
         obj,
         scopeCategory,
+        collectionId,
         typeFilter: type,
         autoLoad: true
       });
+
     });
   });
 }
@@ -658,15 +688,18 @@ function activateView(view, opts = {}) {
 
   document.querySelectorAll('.fdl-sb-item').forEach(b => b.classList.remove('active'));
 
-  if (opts.obj && opts.folder) {
+  if (opts.collectionId) {
+    document.querySelector(`.fdl-sb-item[data-view="${view}"][data-collection="${opts.collectionId}"]`)?.classList.add('active');
+  } else if (opts.obj && opts.folder) {
     document.querySelector(`.fdl-sb-item[data-view="${view}"][data-obj="${opts.obj}"][data-folder="${opts.folder}"]`)?.classList.add('active');
   } else if (opts.obj) {
     document.querySelector(`.fdl-sb-item[data-view="${view}"][data-obj="${opts.obj}"]:not([data-folder])`)?.classList.add('active');
   } else if (opts.scopeCategory) {
     document.querySelector(`.fdl-sb-item[data-view="${view}"][data-scopecat="${opts.scopeCategory}"]:not([data-obj])`)?.classList.add('active');
   } else {
-    document.querySelector(`.fdl-sb-item[data-view="${view}"]:not([data-obj]):not([data-scopecat])`)?.classList.add('active');
+    document.querySelector(`.fdl-sb-item[data-view="${view}"]:not([data-obj]):not([data-scopecat]):not([data-collection])`)?.classList.add('active');
   }
+
 
   document.getElementById('fdl-view-dash')?.classList.remove('active');
   document.getElementById('fdl-view-archive')?.classList.remove('active');
@@ -713,6 +746,7 @@ function activateView(view, opts = {}) {
 
 function normalizeArchiveContext(opts = {}) {
   const out = { ...opts };
+  out.collectionId = out.collectionId || '';
 
   if (out.typeFilter === 'Rechnungen') {
     out.typeFilter = 'Rechnungen';
@@ -751,7 +785,7 @@ function showArchiveView(opts = {}) {
 
   setTimeout(() => {
     if (ctx.obj) {
-      window.__av3?.obj?.(ctx.obj, {
+         window.__av3?.obj?.(ctx.obj, {
         scopeCategory: ctx.scopeCategory || '',
         typeFilter: ctx.typeFilter || 'all',
         yearFilter: ctx.yearFilter || 'all',
@@ -759,34 +793,40 @@ function showArchiveView(opts = {}) {
         dateFrom: ctx.dateFrom || '',
         dateTo: ctx.dateTo || '',
         selectName: ctx.selectName || '',
-        query: ctx.query || ''
+        query: ctx.query || '',
+        collectionId: ctx.collectionId || ''
       });
+
       return;
     }
 
     if (ctx.scopeCategory) {
-      window.__av3?.setCategory?.(ctx.scopeCategory, {
+         window.__av3?.setCategory?.(ctx.scopeCategory, {
         typeFilter: ctx.typeFilter || 'all',
         yearFilter: ctx.yearFilter || 'all',
         sortOrder: ctx.sortOrder || 'date-desc',
         dateFrom: ctx.dateFrom || '',
         dateTo: ctx.dateTo || '',
         query: ctx.query || '',
+        collectionId: ctx.collectionId || '',
         autoSelectFirst: false
       });
+
       return;
     }
 
     if (window.__av3?.setCategory) {
-      window.__av3.setCategory(null, {
+        window.__av3.setCategory(null, {
         typeFilter: ctx.typeFilter || 'all',
         yearFilter: ctx.yearFilter || 'all',
         sortOrder: ctx.sortOrder || 'date-desc',
         dateFrom: ctx.dateFrom || '',
         dateTo: ctx.dateTo || '',
         query: ctx.query || '',
+        collectionId: ctx.collectionId || '',
         autoSelectFirst: false
       });
+
     }
   }, 180);
 }
@@ -1105,6 +1145,7 @@ function goArchivFiltered(opts = {}) {
   activateView('archive', {
     scopeCategory: opts.scopeCategory || '',
     obj: opts.obj || '',
+    collectionId: opts.collectionId || '',
     typeFilter: opts.typeFilter || 'all',
     yearFilter: opts.yearFilter || 'all',
     sortOrder: opts.sortOrder || 'date-desc',
@@ -1115,6 +1156,7 @@ function goArchivFiltered(opts = {}) {
     autoLoad: true
   });
 }
+
 
 /* ══════════════════════════════════════════════════════════════════════════
    PUBLIC API
@@ -1136,6 +1178,12 @@ window.__fdlPro = {
   goArchivCategory(category) {
     goArchivFiltered({
       scopeCategory: category,
+      sortOrder: 'date-desc'
+    });
+  },
+  goArchivCollection(collectionId) {
+    goArchivFiltered({
+      collectionId,
       sortOrder: 'date-desc'
     });
   },
@@ -1257,11 +1305,10 @@ function attachKeyboard() {
    INIT
    ══════════════════════════════════════════════════════════════════════════ */
 
-function init() {
-  buildSidebar();
+async function init() {
+  await buildSidebar();
   buildMain();
   buildTopbar();
-
 
   attachKeyboard();
   updateConnStatus();
@@ -1279,6 +1326,7 @@ function init() {
 
   console.info('[FideliorPro v2.2] bereit — Dashboard nutzt primär echte Archivdaten');
 }
+
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
 else init();
