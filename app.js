@@ -1853,26 +1853,50 @@ function detectInvoiceDateSmart(txt, lines){
   return valid.length ? isoToDisp(valid[valid.length - 1]) : "";
 }
 function detectSenderSmart(txt, lines){
-  const companyHints = [
-    /gmbh/i, /ag/i, /kg/i, /ug/i, /ltd/i, /inc/i, /company/i
-  ];
+  const STRONG_COMPANY_RX = /\b(gmbh|ag|kg|ug|ohg|mbh|ltd|inc|company|corp|llc)\b/i;
 
-  for (const lineObj of (lines || []).slice(0, 10)) {
-    const line = String(lineObj?.text || "").trim();
+const WEAK_BLACKLIST_RX = new RegExp(
+  "\\b(" +
+    [
+      "rechnung",
+      "invoice",
+      "datum",
+      "kundennr",
+      "kundenummer",
+      "tarif",
+      "rufnummer",
+      "fragen\\s+zur\\s+rechnung",
+      "nutzen\\s+sie\\s+das",
+      "hotline",
+      "service",
+      "kundenservice",
+      "kontakt",
+      "e-?mail",
+      "telefon",
+      "fax",
+      "internet",
+      "website",
+      "www\\.",
+      "ihr\\s+vertrag",
+      "zahlbar",
+      "sepa",
+      "iban",
+      "ust-id",
+      "mwst",
+      "brutto",
+      "netto"
+    ].join("|") +
+  ")\\b",
+  "i"
+);
+
+  for (const lineObj of (lines || []).slice(0, 12)) {
+    const line = String(lineObj?.text || "").replace(/\s+/g, " ").trim();
     if (!line) continue;
+    if (line.length < 4 || line.length > 80) continue;
+    if (WEAK_BLACKLIST_RX.test(line)) continue;
 
-    for (const hint of companyHints) {
-      if (hint.test(line)) return line;
-    }
-  }
-
-  for (const lineObj of (lines || []).slice(0, 5)) {
-    const line = String(lineObj?.text || "").trim();
-    if (
-      line.length > 5 &&
-      /[A-Za-zÄÖÜäöüß]/.test(line) &&
-      !/tel|fax|rechnung|invoice|kundennr|kundenummer|an:|herrn|frau/i.test(line)
-    ) {
+    if (STRONG_COMPANY_RX.test(line)) {
       return line;
     }
   }
@@ -1926,12 +1950,13 @@ async function autoRecognize() {
         invNoEl.classList.remove("auto");
       }
     }
-/* Absender */
+/* Absender – nur bei starkem Treffer setzen */
 if (senderEl && !senderEl.dataset.userTyped) {
   if (analysis.sender) {
     senderEl.value = analysis.sender;
     senderEl.classList.add("auto");
   } else {
+    senderEl.value = "";
     senderEl.classList.remove("auto");
   }
 }
