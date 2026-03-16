@@ -1505,7 +1505,33 @@ async function extractTextAndLinesFirstPages(pdf, maxPages = 3){
   const text = lines.map(l => l.text).join("\n");
   return { text, lines };
 }
+/* ======================================================
+   DOCUMENT FINGERPRINT STORAGE
+   erkennt doppelte Dokumente
+====================================================== */
 
+function storeDocumentFingerprint(fp){
+
+  if(!fp) return;
+
+  try{
+
+    const db = JSON.parse(localStorage.getItem("fdl_fingerprints") || "{}");
+
+    if(db[fp]){
+      toast("⚠️ Dokument könnte bereits existieren", 4000);
+      console.warn("Duplicate fingerprint", fp);
+    }
+
+    db[fp] = Date.now();
+
+    localStorage.setItem("fdl_fingerprints", JSON.stringify(db));
+
+  }catch(e){
+    console.warn("fingerprint store failed", e);
+  }
+
+}
 // — Betrag erkennen (Fälliger Betrag > Gesamt brutto) —
 function detectTotalAmountFromLines(lines){
   if (!Array.isArray(lines) || !lines.length) return NaN;
@@ -1591,6 +1617,37 @@ function createDocumentSummary(meta){
   }
 
   return parts.join(" ");
+}
+function extractStructuredFacts(text){
+  const t = String(text || "");
+  const facts = {};
+
+  const invoiceNo =
+    t.match(/\bRechnungs(?:nummer|nr)?[:\s#-]*([A-Z0-9._/-]{3,24})/i) ||
+    t.match(/\bInvoice\s*(?:No|Number|Nr)?[:\s#-]*([A-Z0-9._/-]{3,24})/i);
+  if (invoiceNo) facts.invoiceNumber = invoiceNo[1];
+
+  const vat =
+    t.match(/\bMwSt\b[^0-9\-]*(-?\d+[.,]\d{2})/i) ||
+    t.match(/\bUSt\b[^0-9\-]*(-?\d+[.,]\d{2})/i) ||
+    t.match(/\bVAT\b[^0-9\-]*(-?\d+[.,]\d{2})/i);
+  if (vat) facts.vat = vat[1];
+
+  const net =
+    t.match(/\bnetto\b[^0-9\-]*(-?\d+[.,]\d{2})/i) ||
+    t.match(/\bnet\b[^0-9\-]*(-?\d+[.,]\d{2})/i);
+  if (net) facts.net = net[1];
+
+  const gross =
+    t.match(/\bbrutto\b[^0-9\-]*(-?\d+[.,]\d{2})/i) ||
+    t.match(/\bgesamtbetrag\b[^0-9\-]*(-?\d+[.,]\d{2})/i) ||
+    t.match(/\btotal\b[^0-9\-]*(-?\d+[.,]\d{2})/i);
+  if (gross) facts.gross = gross[1];
+
+  const date = detectInvoiceDateSmart(t, []);
+  if (date) facts.date = date;
+
+  return facts;
 }
 function createDocumentFingerprint(text){
 
@@ -1730,79 +1787,115 @@ function euroToNum(s){
 ========================================================= */
 
 function analyzeDocument(txt, lines){
+  const smartType = detectDocTypeSmart(txt);
 
-  const result = {
-    type: detectDocTypeSmart(txt),
-    amount: detectAmountSmart(lines),
+  return {
+    type: (smartType === "rechnung" || smartType === "gutschrift") ? "rechnung" : "dokument",
+    semanticType: smartType,
+    amount: detectTotalAmountFromLines(lines),
     date: detectInvoiceDateSmart(txt, lines),
     sender: detectSenderSmart(txt, lines),
-    reference: detectReferenceSmart(lines)
+    reference: (() => {
+      let autoInv = "";
+      if (lines && lines.length) autoInv = findInvoiceNumberFromLines(lines);
+      if (!autoInv) autoInv = findInvoiceNumberStrict(txt);
+      return autoInv && !isMaskedIbanLike(autoInv) ? autoInv : "";
+    })()
   };
-
-  return result;
 }
 /* =========================================================
    SMART DOCUMENT TYPE DETECTION
 ========================================================= */
 
 function detectDocTypeSmart(txt){
+  const t = String(txt || "").toLowerCase();
 
-  const t = txt.toLowerCase();
-
-  if(/gutschrift|credit note|refund/i.test(t)){
+  if (/\bgutschrift\b|\bcredit note\b|\brefund\b/i.test(t)) {
     return "gutschrift";
   }
 
-  if(/angebot|offer|quotation/i.test(t)){
+  if (/\bangebot\b|\boffer\b|\bquotation\b/i.test(t)) {
     return "angebot";
   }
 
-  if(/rechnung|invoice|bill/i.test(t)){
+  if (/\brechnung\b|\binvoice\b|\bbill\b/i.test(t)) {
     return "rechnung";
   }
 
   return "dokument";
 }
-function detectDocTypeSmart(txt){
 
-  const t = txt.toLowerCase();
+function detectInvoiceDateSmart(txt, lines){
+  const labelPatterns = [
+    /rechnungsdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+    /invoice date[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+    /datum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i
+  ];
 
-  if(/gutschrift|credit note|refund/i.test(t)){
-    return "gutschrift";
+  for (const rx of labelPatterns) {
+    const m = String(txt || "").match(rx);
+    if (m) return m[1];
   }
 
-  if(/angebot|offer|quotation/i.test(t)){
-    return "angebot";
+  const isoFromDMY = (d,m,y) => {
+    const yy = String(y).length === 2 ? (+y < 50 ? 2000 + +y : 1900 + +y) : +y;
+    return `${yy}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  };
+
+  const hits = [];
+  for (const m of String(txt || "").matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
+    hits.push(isoFromDMY(+m[1], +m[2], m[3]));
   }
 
-  if(/rechnung|invoice|bill/i.test(t)){
-    return "rechnung";
+  const todayIso = new Date().toISOString().slice(0,10);
+  const valid = hits.filter(d => d <= todayIso).sort();
+
+  return valid.length ? isoToDisp(valid[valid.length - 1]) : "";
+}
+function detectSenderSmart(txt, lines){
+  const companyHints = [
+    /gmbh/i, /ag/i, /kg/i, /ug/i, /ltd/i, /inc/i, /company/i
+  ];
+
+  for (const lineObj of (lines || []).slice(0, 10)) {
+    const line = String(lineObj?.text || "").trim();
+    if (!line) continue;
+
+    for (const hint of companyHints) {
+      if (hint.test(line)) return line;
+    }
   }
 
-  return "dokument";
+  for (const lineObj of (lines || []).slice(0, 5)) {
+    const line = String(lineObj?.text || "").trim();
+    if (
+      line.length > 5 &&
+      /[A-Za-zÄÖÜäöüß]/.test(line) &&
+      !/tel|fax|rechnung|invoice|kundennr|kundenummer|an:|herrn|frau/i.test(line)
+    ) {
+      return line;
+    }
+  }
+
+  return "";
 }
 // ====== ERSATZ: autoRecognize (Block 2) ======
 async function autoRecognize() {
-  const meta = {
-  docType: isInvoice() ? "rechnung" : "dokument",
-  company: senderEl?.value || "",
-  date: invDateEl?.value || recvDateEl?.value || "",
-  amount: amountEl?.dataset?.raw || amountEl?.value || "",
-  service: ""
-};
-
-const summary = createDocumentSummary(meta);
-
-console.log("Document summary:", summary);
   try {
     const { text: txt, lines } = await extractTextAndLinesFirstPages(pdfDoc, 3);
 
+    const fp = createDocumentFingerprint(txt);
+    storeDocumentFingerprint(fp);
 
-      /* Betrag – Priorität statt „größter Wert“ */
-    const total = detectTotalAmountFromLines(lines);
+    const facts = extractStructuredFacts(txt);
+    console.log("Document facts:", facts);
+
+    const analysis = analyzeDocument(txt, lines);
+
+    /* Betrag */
     if (amountEl && !amountEl.dataset.userTyped) {
-      if (isFinite(total) && !isNaN(total)) {
-        const euro = numToEuro(total);
+      if (isFinite(analysis.amount) && !isNaN(analysis.amount)) {
+        const euro = numToEuro(analysis.amount);
         amountEl.dataset.raw = euro;
         amountEl.value = euro;
         amountEl.classList.add("auto");
@@ -1812,163 +1905,127 @@ console.log("Document summary:", summary);
         amountEl.classList.remove("auto");
       }
 
-      // Pflicht/Fehler-Style nachziehen
       if (typeof updateAmountRequiredUI === "function") {
         updateAmountRequiredUI();
       }
     }
 
- 
-/* Datum – Label hat Vorrang */
-const labelPatterns = [
-  /rechnungsdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
-  /invoice date[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
-  /datum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i
-];
-
-let detectedDate = null;
-
-for(const rx of labelPatterns){
-
-  const m = txt.match(rx);
-
-  if(m){
-    detectedDate = m[1];
-    break;
-  }
-
-}
-
-if(!detectedDate){
-
-  const MONTHS = { januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12 };
-  const isoFromDMY = (d,m,y)=>{ const yy=String(y).length===2?(+y<50?2000+ +y:1900+ +y):+y; return `${yy}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; };
-
-  const hits=[];
-
-  for (const m of txt.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
-    hits.push(isoFromDMY(+m[1],+m[2],m[3]));
-  }
-
-  const todayIso = new Date().toISOString().slice(0,10);
-
-  const valid = hits.filter(d=>d<=todayIso).sort();
-
-  if(valid.length){
-    detectedDate = isoToDisp(valid[valid.length-1]);
-  }
-
-}
-
-if (invDateEl && !invDateEl.value.trim() && detectedDate) {
-  invDateEl.value = detectedDate;
-  invDateEl.classList.add('auto');
-}
-
-
- /* Rechnungsnummer (nur setzen, wenn plausibel; sonst leer lassen) */
-/* Rechnungsnummer zuerst aus Zeilen lesen; Fallback: strikter Parser */
-let autoInv = "";
-if (lines && lines.length) autoInv = findInvoiceNumberFromLines(lines);
-if (!autoInv) autoInv = findInvoiceNumberStrict(txt);
-
-if (invNoEl && !invNoEl.dataset.userTyped) {
-  if (autoInv && !isMaskedIbanLike(autoInv)) {
-    invNoEl.value = autoInv;
-    invNoEl.classList.add('auto');
-  } else {
-    invNoEl.value = "";
-    invNoEl.classList.remove('auto');
-  }
-}
-
-
-   /* 1) Dokumenttyp automatisch erkennen */
-if (typeSel && !typeSel.value) {
-
-  const detected = detectDocTypeSmart(txt);
-
-  const exists = Array.from(typeSel.options).some(o => o.value === detected);
-
-  if (exists) {
-    typeSel.value = detected;
-    toast(`Dokumentenart erkannt: <strong>${detected}</strong>`, 2000);
-    updateAmountRequiredUI();
-  }
-
-}
-
-   /* 2) AUTO-ASSIGN: Objekt & (optional) Unterordner (robuste Scoring-Engine) */
-let appliedMsg = null;
-if (assignmentsCfg && Array.isArray(assignmentsCfg.patterns) && assignmentsCfg.patterns.length) {
-  const hit = evaluateAssignmentRules(txt, assignmentsCfg);
-
-  if (hit) {
-    if (hit.object) {
-      const before = objSel.value;
-      objSel.value = String(hit.object);
-      if (objSel.value !== before) {
-        appliedMsg = `Zuordnung: <strong>${hit.object}</strong>`;
-      }
+    /* Datum */
+    if (invDateEl && !invDateEl.value.trim() && analysis.date) {
+      invDateEl.value = analysis.date;
+      invDateEl.classList.add("auto");
     }
 
-       if (typeof updateSubfolderOptions === "function") {
-      // Aktuell gesetzte Liegenschaft ermitteln
-      const codeNow    = (objSel?.value || "").trim();
-
-      // Sonderfall: wenn durch Auto-Zuordnung B75 gesetzt ist und es sich um eine Rechnung handelt,
-      // soll das B75-Dropdown (D1/D4) IMMER angezeigt werden – auch ohne hit.subfolder.
-      const forceShow  = (codeNow === "B75" && isInvoice());
-
-      // silent nur dann, wenn KEIN Unterordner aus der Regel kommt UND nicht B75-Rechnung:
-      const wantSilent = !hit.subfolder && !forceShow;
-
-      await updateSubfolderOptions({ silent: wantSilent });
-    }
-
-
-    if (hit.subfolder && subSel) {
-      const wanted = String(hit.subfolder).trim();
-      const has = Array.from(subSel.options).some(o => o.value === wanted);
-      if (has) {
-        subSel.value = wanted;
-        if (subRow) subRow.style.display = "grid";
-        appliedMsg = appliedMsg
-          ? `${appliedMsg} · Unterordner: <strong>${wanted}</strong>`
-          : `Unterordner: <strong>${wanted}</strong>`;
+    /* Rechnungsnummer */
+    if (invNoEl && !invNoEl.dataset.userTyped) {
+      if (analysis.reference) {
+        invNoEl.value = analysis.reference;
+        invNoEl.classList.add("auto");
       } else {
-        toast(`Hinweis: Unterordner „<code>${wanted}</code>“ ist für <strong>${hit.object}</strong> nicht bekannt.`, 3500);
+        invNoEl.value = "";
+        invNoEl.classList.remove("auto");
       }
     }
+/* Absender */
+if (senderEl && !senderEl.dataset.userTyped) {
+  if (analysis.sender) {
+    senderEl.value = analysis.sender;
+    senderEl.classList.add("auto");
+  } else {
+    senderEl.classList.remove("auto");
   }
 }
+    /* Dokumenttyp
+       WICHTIG: nur setzen, wenn leer ODER auf neutralem Platzhalter */
+    if (typeSel) {
+      const current = String(typeSel.value || "").trim();
+      const neutral = current === "" || current === "dokument";
 
+      if (neutral) {
+        const detected = analysis.type;
+        const exists = Array.from(typeSel.options).some(o => o.value === detected);
 
-    /* Mail-Vorbelegung & Meta */
+        if (exists) {
+          typeSel.value = detected;
+          toast(`Dokumentenart erkannt: <strong>${detected}</strong>`, 2000);
+          updateAmountRequiredUI();
+        }
+      }
+    }
+
+    /* AUTO-ASSIGN */
+    let appliedMsg = null;
+    if (assignmentsCfg && Array.isArray(assignmentsCfg.patterns) && assignmentsCfg.patterns.length) {
+      const hit = evaluateAssignmentRules(txt, assignmentsCfg);
+
+      if (hit) {
+        if (hit.object) {
+          const before = objSel.value;
+          objSel.value = String(hit.object);
+          if (objSel.value !== before) {
+            appliedMsg = `Zuordnung: <strong>${hit.object}</strong>`;
+          }
+        }
+
+        if (typeof updateSubfolderOptions === "function") {
+          const codeNow = (objSel?.value || "").trim();
+          const forceShow = (codeNow === "B75" && isInvoice());
+          const wantSilent = !hit.subfolder && !forceShow;
+          await updateSubfolderOptions({ silent: wantSilent });
+        }
+
+        if (hit.subfolder && subSel) {
+          const wanted = String(hit.subfolder).trim();
+          const has = Array.from(subSel.options).some(o => o.value === wanted);
+          if (has) {
+            subSel.value = wanted;
+            if (subRow) subRow.style.display = "grid";
+            appliedMsg = appliedMsg
+              ? `${appliedMsg} · Unterordner: <strong>${wanted}</strong>`
+              : `Unterordner: <strong>${wanted}</strong>`;
+          } else {
+            toast(`Hinweis: Unterordner „<code>${wanted}</code>“ ist für <strong>${hit.object}</strong> nicht bekannt.`, 3500);
+          }
+        }
+      }
+    }
+
+    /* Mail */
     applyPerObjectMailRules();
     prefillMail();
     updateStatusPillsVisibility();
 
     const found = [];
-    if (amountEl.value)  found.push("Betrag");
+    if (amountEl.value) found.push("Betrag");
     if (invDateEl.value) found.push("Rechnungsdatum");
-    if (invNoEl?.value)  found.push("Rechnungsnr.");
-    if (found.length)    toast(`<strong>Automatisch erkannt</strong><br>${found.join(" · ")}`, 2800);
-    if (appliedMsg)      toast(appliedMsg, 2200);
+    if (invNoEl?.value) found.push("Rechnungsnr.");
+    if (found.length) toast(`<strong>Automatisch erkannt</strong><br>${found.join(" · ")}`, 2800);
+    if (appliedMsg) toast(appliedMsg, 2200);
 
-    // KI-Absender-Erkennung (sicher – tut nichts wenn nicht geladen)
+    /* KI-Absender-Erkennung */
     try { window.fdlKiOnOcr?.(txt, lines, assignmentsCfg); } catch {}
 
-    // am Ende UI aktualisieren
+    /* Summary erst GANZ am Ende bauen */
+    const meta = {
+      docType: isInvoice() ? "rechnung" : "dokument",
+      company: senderEl?.value || analysis.sender || "",
+      date: invDateEl?.value || recvDateEl?.value || "",
+      amount: amountEl?.dataset?.raw || amountEl?.value || "",
+      service: ""
+    };
+
+    const summary = createDocumentSummary(meta);
+    console.log("Document summary:", summary);
+
     refreshPreview();
   } catch (e) {
     console.warn("Auto-Erkennung fehlgeschlagen", e);
     toast("Auto-Erkennung fehlgeschlagen.", 2500);
   }
 }
+ 
 
-
-  /* ----------------------------- Name + Ziel ------------------------------- */
+/* ----------------------------- Name + Ziel ------------------------------- */
   function currentYear(){ const s = invDateEl?.value || recvDateEl?.value || today(); const iso = dispToIso(s); return iso ? +iso.slice(0,4) : (new Date()).getFullYear(); }
 
   // Editable file name inline
