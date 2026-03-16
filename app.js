@@ -1400,31 +1400,30 @@ function findInvoiceNumberStrict(rawText){
   }
 
   // 4) harte Negativ-Filter (weg damit)
-  const BAD = {
+const BAD = {
+  maskedIbanLike: /^DE[\dxX*]{6,}$/i,
 
-    
-maskedIbanLike: /^DE[\dxX*]{6,}$/i,
-    
+  // Daten
+  date1: /^(\d{1,2}[.\-/]){2}\d{2,4}$/i,
+  date2: /^(20\d{2}[.\-/]?\d{2}[.\-/]?\d{2})$/,
 
-    // Daten
-    date1: /^(\d{1,2}[.\-/]){2}\d{2,4}$/i,
-    date2: /^(20\d{2}[.\-/]?\d{2}[.\-/]?\d{2})$/,     // 20251031 / 2025-10-31
-    // USt-Id
-    ustid: /^DE[\s-]?\d{9}$/i,
-    // IBAN sehr grob
-    iban: /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i,
-    // Telefonnr. grob
-    phone: /^\+?\d{2,3}[\s/-]?(?:\d{2,4}[\s/-]?){2,4}\d{2,}$/i,
-    // PLZ
-    zip: /^\d{5}$/,
+  // Steuer / Bank
+  ustid: /^DE[\s-]?\d{9}$/i,
+  iban: /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i,
+  bic: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/i,   // z. B. BICCOLSDE33 / SWBKDDE33
+  bankWord: /^(BIC|IBAN|SWIFT)$/i,
 
-    // Offenkundige Nicht-Rechnungs-IDs
-    uuid: /^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i,
-    money: /(?:€|\bEUR\b)\s*\d/i,
+  // Telefon / Adresse
+  phone: /^\+?\d{2,3}[\s/-]?(?:\d{2,4}[\s/-]?){2,4}\d{2,}$/i,
+  zip: /^\d{5}$/,
 
-    // Prefixe, die wir nicht wollen
-    badPrefix: /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC)\b/i,
-  };
+  // Sonstiges
+  uuid: /^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i,
+  money: /(?:€|\bEUR\b)\s*\d/i,
+
+  // Offensichtlich falsche Prefixe
+  badPrefix: /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT)\b/i,
+};
 
   const clean = s => String(s||"")
     .trim()
@@ -1890,9 +1889,10 @@ const WEAK_BLACKLIST_RX = new RegExp(
   "i"
 );
 
-  for (const lineObj of (lines || []).slice(0, 12)) {
+  for (const lineObj of (lines || []).slice(0, 5)) {
     const line = String(lineObj?.text || "").replace(/\s+/g, " ").trim();
-    if (!line) continue;
+    // Empfängerblöcke vermeiden (Name + Straße)
+if (/\b\d{5}\s+[A-Za-zÄÖÜäöüß]/.test(line)) continue;
     if (line.length < 4 || line.length > 80) continue;
     if (WEAK_BLACKLIST_RX.test(line)) continue;
 
