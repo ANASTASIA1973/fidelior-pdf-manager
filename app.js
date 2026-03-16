@@ -1437,7 +1437,7 @@ maskedIbanLike: /^DE[\dxX*]{6,}$/i,
     // invalid(x):
 if (BAD.maskedIbanLike.test(x)) return true;
 // NEU: mindestens 6 aufeinanderfolgende Ziffern erzwingen
-if (!/\d{6,}/.test(x)) return true;
+if (x.length < 4) return true;
 
     // Länge & Zusammensetzung
     if (x.length < 4 || x.length > 24) return true;
@@ -1510,10 +1510,17 @@ async function extractTextAndLinesFirstPages(pdf, maxPages = 3){
 function detectTotalAmountFromLines(lines){
   if (!Array.isArray(lines) || !lines.length) return NaN;
 
- const PRI = [
-  /Zu\s+zahlender\s+Betrag|Zahlungsbetrag|Fälliger Betrag|Zahlbetrag|Amount due|Total due/i,
-  /Gesamtsumme\s+brutto|Grand total|Gesamtbetrag|Brutto\s+gesamt/i,
-  /Gesamtsumme(?!.*netto)/i
+const PRI = [
+
+/Zu\s+zahlender\s+Betrag/i,
+/Zahlbetrag/i,
+/Amount due/i,
+/Total amount due/i,
+/Gesamtbetrag/i,
+/Invoice total/i,
+/Total/i,
+/Summe/i
+
 ];
 
   const IGN = /Zwischensumme|Subtotal|Netto\b|Rabatt|Discount|USt|MwSt|Steuer|Versand/i;
@@ -1667,8 +1674,63 @@ function euroToNum(s){
   else if(x.includes(",")) x=x.replace(",",".");
   const v=Number(x); return isFinite(v)?v:NaN;
 }
+/* =========================================================
+   FIDELIOR DOCUMENT ANALYSIS PIPELINE
+   zentrale Analysefunktion
+========================================================= */
 
+function analyzeDocument(txt, lines){
 
+  const result = {
+    type: detectDocTypeSmart(txt),
+    amount: detectAmountSmart(lines),
+    date: detectInvoiceDateSmart(txt, lines),
+    sender: detectSenderSmart(txt, lines),
+    reference: detectReferenceSmart(lines)
+  };
+
+  return result;
+}
+/* =========================================================
+   SMART DOCUMENT TYPE DETECTION
+========================================================= */
+
+function detectDocTypeSmart(txt){
+
+  const t = txt.toLowerCase();
+
+  if(/gutschrift|credit note|refund/i.test(t)){
+    return "gutschrift";
+  }
+
+  if(/angebot|offer|quotation/i.test(t)){
+    return "angebot";
+  }
+
+  if(/rechnung|invoice|bill/i.test(t)){
+    return "rechnung";
+  }
+
+  return "dokument";
+}
+function detectDocTypeSmart(txt){
+
+  const t = txt.toLowerCase();
+
+  if(/gutschrift|credit note|refund/i.test(t)){
+    return "gutschrift";
+  }
+
+  if(/angebot|offer|quotation/i.test(t)){
+    return "angebot";
+  }
+
+  if(/rechnung|invoice|bill/i.test(t)){
+    return "rechnung";
+  }
+
+  return "dokument";
+}
 // ====== ERSATZ: autoRecognize (Block 2) ======
 async function autoRecognize() {
   try {
@@ -1696,29 +1758,50 @@ async function autoRecognize() {
     }
 
  
-   /* Datum (konservativ; nur plausibles jüngstes Datum ≤ heute, sonst leer) */
-const MONTHS = { januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12 };
-const isoFromDMY = (d,m,y)=>{ const yy=String(y).length===2?(+y<50?2000+ +y:1900+ +y):+y; return `${yy}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; };
+/* Datum – Label hat Vorrang */
+const labelPatterns = [
+  /rechnungsdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+  /invoice date[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+  /datum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i
+];
 
-const dateHits=[];
-for (const m of txt.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
-  dateHits.push(isoFromDMY(+m[1],+m[2],m[3]));
-}
-for (const m of txt.matchAll(/\b(\d{1,2})\.\s*(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b/gi)){
-  const mon = MONTHS[m[2].toLowerCase()]; if (mon) dateHits.push(isoFromDMY(+m[1],mon,m[3]));
-}
-const todayIso = new Date().toISOString().slice(0,10);
-const uniq = Array.from(new Set(dateHits)).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
-const nonFuture = uniq.filter(d => d <= todayIso).sort();
-if (invDateEl && !invDateEl.value.trim()) {
-  if (nonFuture.length) {
-    const picked = nonFuture[nonFuture.length - 1];
-    invDateEl.value = isoToDisp(picked);
-    invDateEl.classList.add('auto');
-  } else {
-    invDateEl.value = '';                      // nichts Plausibles → leer
-    invDateEl.classList.remove('auto');
+let detectedDate = null;
+
+for(const rx of labelPatterns){
+
+  const m = txt.match(rx);
+
+  if(m){
+    detectedDate = m[1];
+    break;
   }
+
+}
+
+if(!detectedDate){
+
+  const MONTHS = { januar:1,februar:2,maerz:3,märz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12 };
+  const isoFromDMY = (d,m,y)=>{ const yy=String(y).length===2?(+y<50?2000+ +y:1900+ +y):+y; return `${yy}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`; };
+
+  const hits=[];
+
+  for (const m of txt.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
+    hits.push(isoFromDMY(+m[1],+m[2],m[3]));
+  }
+
+  const todayIso = new Date().toISOString().slice(0,10);
+
+  const valid = hits.filter(d=>d<=todayIso).sort();
+
+  if(valid.length){
+    detectedDate = isoToDisp(valid[valid.length-1]);
+  }
+
+}
+
+if (invDateEl && !invDateEl.value.trim() && detectedDate) {
+  invDateEl.value = detectedDate;
+  invDateEl.classList.add('auto');
 }
 
 
@@ -1739,12 +1822,20 @@ if (invNoEl && !invNoEl.dataset.userTyped) {
 }
 
 
-    /* 1) Dokumenttyp früh setzen → Unterordner können korrekt geladen werden */
-    if (typeSel && typeSel.value !== "rechnung") {
-      typeSel.value = "rechnung";
-      toast('Dokumentenart gesetzt: <strong>Rechnung</strong>', 2000);
-          updateAmountRequiredUI();   // <<< neu
-    }
+   /* 1) Dokumenttyp automatisch erkennen */
+if (typeSel && !typeSel.value) {
+
+  const detected = detectDocTypeSmart(txt);
+
+  const exists = Array.from(typeSel.options).some(o => o.value === detected);
+
+  if (exists) {
+    typeSel.value = detected;
+    toast(`Dokumentenart erkannt: <strong>${detected}</strong>`, 2000);
+    updateAmountRequiredUI();
+  }
+
+}
 
    /* 2) AUTO-ASSIGN: Objekt & (optional) Unterordner (robuste Scoring-Engine) */
 let appliedMsg = null;
