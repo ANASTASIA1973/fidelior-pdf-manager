@@ -1430,34 +1430,35 @@ const BAD = {
     .replace(/^[#:.,\-\s]+/, "")
     .replace(/[,:.;]+$/, "");
 
-  const invalid = s => {
-    if (!s) return true;
-    const x = s.toUpperCase();
-    // invalid(x):
-if (BAD.maskedIbanLike.test(x)) return true;
-// NEU: mindestens 6 aufeinanderfolgende Ziffern erzwingen
-if (x.length < 4) return true;
+const invalid = s => {
+  if (!s) return true;
 
-    // Länge & Zusammensetzung
-    if (x.length < 4 || x.length > 24) return true;
-    if (!/\d/.test(x)) return true;                 // muss mind. eine Ziffer haben
+  const x = String(s).toUpperCase().trim();
 
-    // harte Muster
-    if (BAD.date1.test(x) || BAD.date2.test(x)) return true;
-    if (BAD.ustid.test(x)) return true;
-    if (BAD.iban.test(x)) return true;
-    if (BAD.phone.test(x)) return true;
-    if (BAD.zip.test(x)) return true;
-    if (BAD.uuid.test(x)) return true;
-    if (BAD.money.test(x)) return true;
-    if (BAD.badPrefix.test(x)) return true;
+  if (BAD.maskedIbanLike.test(x)) return true;
+  if (BAD.bankWord.test(x)) return true;
+  if (BAD.bic.test(x)) return true;
 
-    // reine große Zahl mit 10–15 Stellen → eher Kunden-/Vertrags-/Telefonnummer
-    if (/^\d{10,15}$/.test(x)) return true;
+  if (x.length < 4 || x.length > 24) return true;
+  if (!/\d/.test(x)) return true;
 
-    return false;
-  };
+  // Nur Buchstaben + ein paar Ziffern => oft Bankcode / Kürzel, keine Rechnungsnummer
+  if (/^[A-Z]{6,}\d{2,5}$/.test(x)) return true;
 
+  if (BAD.date1.test(x) || BAD.date2.test(x)) return true;
+  if (BAD.ustid.test(x)) return true;
+  if (BAD.iban.test(x)) return true;
+  if (BAD.phone.test(x)) return true;
+  if (BAD.zip.test(x)) return true;
+  if (BAD.uuid.test(x)) return true;
+  if (BAD.money.test(x)) return true;
+  if (BAD.badPrefix.test(x)) return true;
+
+  // reine große Zahl mit 10–15 Stellen → eher Kunden-/Vertrags-/Telefonnummer
+  if (/^\d{10,15}$/.test(x)) return true;
+
+  return false;
+};
   // 5) Scoring & Auswahl
   const pool = [];
 for (const k of candidates){
