@@ -1687,27 +1687,39 @@ function isMaskedIbanLike(tok){
 function findInvoiceNumberFromLines(lines){
   if (!Array.isArray(lines)) return "";
 
-  const LABEL = /(Rechnungs\s*nummer|Rechnungs-?Nr\.?|Invoice\s*(number|no\.?)?)/i;
-  const BAN   = /(Kunden\s*nummer|Vertrags\s*nummer|Customer|Contract)/i;
+  const LABEL = /(Rechnungs\s*(nummer|nr|no)|Rechnungs-?Nr\.?|Invoice\s*(number|no\.?|nr\.?)|Beleg(nr|nummer))/i;
+  const BAN   = /(Kunden\s*(nummer|nr)|Vertrags\s*(nummer|nr)|Customer|Contract|BIC|IBAN|SWIFT)/i;
 
-  for (let i=0;i<lines.length;i++){
+  const extractCandidates = (text) => {
+    return String(text || "").match(/\b[A-Z0-9][A-Z0-9._/-]{2,23}\b/gi) || [];
+  };
+
+  for (let i = 0; i < lines.length; i++) {
     const L = lines[i];
     if (!LABEL.test(L.text) || BAN.test(L.text)) continue;
 
-    // gleiche Zeile: rechteste 6+stellige Zahl
-    let tok = rightMostNumberToken(L.text);
-    if (tok && tok.length >= 6) return tok;
+    const sameLine = extractCandidates(L.text).filter(x => !BAN.test(x));
+    for (const tok of sameLine) {
+      const cleanTok = String(tok).trim();
+      if (cleanTok && !isMaskedIbanLike(cleanTok) && !/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/i.test(cleanTok)) {
+        return cleanTok;
+      }
+    }
 
-    // sonst nächste Zeile (typisch bei tabellarischem Layout)
-    const N = lines[i+1];
-    if (N && !BAN.test(N.text)){
-      tok = rightMostNumberToken(N.text);
-      if (tok && tok.length >= 6) return tok;
+    const N = lines[i + 1];
+    if (N && !BAN.test(N.text)) {
+      const nextLine = extractCandidates(N.text).filter(x => !BAN.test(x));
+      for (const tok of nextLine) {
+        const cleanTok = String(tok).trim();
+        if (cleanTok && !isMaskedIbanLike(cleanTok) && !/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/i.test(cleanTok)) {
+          return cleanTok;
+        }
+      }
     }
   }
+
   return "";
 }
-
 // Robust: bewertet Regeln gegen 3 Text-Varianten, mit Fallback auf .includes()
 function evaluateAssignmentRules(rawText, cfg){
   if (!cfg || !Array.isArray(cfg.patterns)) return null;
