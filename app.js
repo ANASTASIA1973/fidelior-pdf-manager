@@ -1559,7 +1559,57 @@ const PRI = [
   }
   return NaN;
 }
+/* ======================================================
+   DOCUMENT SUMMARY GENERATOR
+   erzeugt eine natürliche Dokumentbeschreibung
+====================================================== */
 
+function createDocumentSummary(meta){
+
+  if(!meta) return "";
+
+  const parts = [];
+
+  if(meta.docType === "rechnung"){
+    parts.push("Rechnung");
+  }
+
+  if(meta.service){
+    parts.push("für " + meta.service);
+  }
+
+  if(meta.company){
+    parts.push("von " + meta.company);
+  }
+
+  if(meta.date){
+    parts.push("vom " + meta.date);
+  }
+
+  if(meta.amount){
+    parts.push("über " + meta.amount + " EUR");
+  }
+
+  return parts.join(" ");
+}
+function createDocumentFingerprint(text){
+
+  if(!text) return null;
+
+  const cleaned = text
+    .toLowerCase()
+    .replace(/\s+/g,' ')
+    .slice(0,1000);
+
+  let hash = 0;
+
+  for(let i=0;i<cleaned.length;i++){
+    hash = ((hash<<5)-hash) + cleaned.charCodeAt(i);
+    hash |= 0;
+  }
+
+  return hash.toString();
+}
 
 function rightMostNumberToken(s){
   const nums = String(s||"").match(/\b\d{6,}\b/g); // mind. 6-stellig
@@ -1733,6 +1783,17 @@ function detectDocTypeSmart(txt){
 }
 // ====== ERSATZ: autoRecognize (Block 2) ======
 async function autoRecognize() {
+  const meta = {
+  docType: isInvoice() ? "rechnung" : "dokument",
+  company: senderEl?.value || "",
+  date: invDateEl?.value || recvDateEl?.value || "",
+  amount: amountEl?.dataset?.raw || amountEl?.value || "",
+  service: ""
+};
+
+const summary = createDocumentSummary(meta);
+
+console.log("Document summary:", summary);
   try {
     const { text: txt, lines } = await extractTextAndLinesFirstPages(pdfDoc, 3);
 
@@ -3309,6 +3370,9 @@ async function loadJson(rel){
 
 // JSON im verbundenen Config-Ordner speichern
 async function saveJson(rel, data){
+  if(data && data.text){
+  data.fingerprint = createDocumentFingerprint(data.text);
+}
   // rel kann "config/assignments.json", "assignments.json" oder "assignments" sein
   const raw0 = String(rel || "").replace(/^\.\//, "");
   let segs = raw0.split("/").filter(Boolean);
