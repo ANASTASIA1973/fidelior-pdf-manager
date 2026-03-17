@@ -2000,7 +2000,38 @@ async function autoRecognize() {
     const facts = extractStructuredFacts(txt);
     console.log("Document facts:", facts);
 
-    const analysis = analyzeDocument(txt, lines);
+let analysis = null;
+
+try {
+  if (
+    window.FideliorDocAnalyzer &&
+    window.FideliorDocumentValidator &&
+    window.FideliorDocumentPresenter
+  ) {
+    const analyzed = window.FideliorDocAnalyzer.analyze(txt, lines);
+    const validated = window.FideliorDocumentValidator.validate(analyzed);
+    const uiModel = window.FideliorDocumentPresenter.buildUiModel(validated);
+
+    analysis = {
+      type: /^(rechnung|gutschrift)$/.test(uiModel.docType) ? "rechnung" : "dokument",
+      semanticType: uiModel.docType || "dokument",
+      sender: uiModel.fields.sender || "",
+      reference: uiModel.fields.invoiceNumber || "",
+      date: uiModel.fields.invoiceDate || "",
+      amount: uiModel.fields.amount
+        ? Number(String(uiModel.fields.amount).replace(",", "."))
+        : NaN,
+      summary: uiModel.summary || "",
+      warnings: uiModel.warnings || [],
+      confidence: uiModel.confidence || 0
+    };
+  } else {
+    analysis = analyzeDocument(txt, lines);
+  }
+} catch (e) {
+  console.warn("New document analyzer failed, fallback active:", e);
+  analysis = analyzeDocument(txt, lines);
+}
 
     /* Betrag */
     if (amountEl && !amountEl.dataset.userTyped) {
