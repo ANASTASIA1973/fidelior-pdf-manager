@@ -862,15 +862,21 @@ function init() {
   patchAssignmentsDialog();
 
   const origHardReset = window.hardReset;
-  if (typeof origHardReset === 'function' && !origHardReset._kiWrapped) {
-    const wrapped = function(...args) {
-      clearKiUi();
+   if (typeof origHardReset === 'function') {
+    window.hardReset = function(...args) {
+      removeSenderBadge();
+      removeLearnPanel();
+
       const senderEl = getSenderEl();
       if (senderEl) {
         delete senderEl.dataset.kiDetected;
         delete senderEl.dataset.kiSource;
         delete senderEl.dataset.userTyped;
       }
+
+      const statusEl = document.getElementById('fdl-ki-status');
+      if (statusEl) statusEl.innerHTML = '';
+
       return origHardReset.apply(this, args);
     };
     wrapped._kiWrapped = true;
