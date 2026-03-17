@@ -347,6 +347,50 @@ function buildPatternFromVendor(vendor) {
 /* ══════════════════════════════════════════════════════════════════════════
    EXTRAKTION
    ══════════════════════════════════════════════════════════════════════════ */
+   function extractInvoiceNumber(txt, lines) {
+
+  const cleanLines = toCleanLines(txt, lines);
+
+  const labelPatterns = [
+    /rechnung\s*(?:nr\.?|nummer)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i,
+    /invoice\s*(?:no\.?|number)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i,
+    /beleg\s*(?:nr\.?|nummer)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i,
+    /doc(?:ument)?\s*(?:nr\.?|number)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i
+  ];
+
+  for (const line of cleanLines) {
+    for (const rx of labelPatterns) {
+      const m = line.match(rx);
+      if (m && m[1]) {
+        const value = m[1].replace(/[^\w\-\/]/g, '');
+        if (value.length >= 4) {
+          return value;
+        }
+      }
+    }
+  }
+
+  const genericPatterns = [
+    /\b[A-Z]{1,3}\d{5,}\b/,
+    /\b\d{6,}\b/,
+    /\b\d{4,}\-\d{2,}\b/,
+    /\b\d{8,}\b/
+  ];
+
+  const text = String(txt || '');
+
+  for (const rx of genericPatterns) {
+    const m = text.match(rx);
+    if (m) {
+      const candidate = m[0];
+      if (candidate.length >= 5 && candidate.length <= 20) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+}
 
 function extractSenderFromRule(matchedRule) {
   if (matchedRule?.sender?.trim()) {
