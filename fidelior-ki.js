@@ -257,17 +257,25 @@ function countCompanySignals(line) {
 function isClearlyBadSenderLine(line) {
   const s = normalizeWs(line);
   if (!s) return true;
+
   if (NEGATIVE_LINE_RX.test(s)) return true;
-  if (INVOICE_WORD_RX.test(s) && !COMPANY_SUFFIXES_RX.test(s)) return true;
   if (PERSON_LINE_RX.test(s)) return true;
+
   if (looksLikeAddress(s)) return true;
   if (looksLikeZipCity(s)) return true;
+
   if (CONTACT_RX.test(s)) return true;
   if (BANK_RX.test(s)) return true;
   if (VAT_RX.test(s)) return true;
+
+  if (/hauptverwaltung/i.test(s)) return true;
+  if (/kundenservice/i.test(s)) return true;
+  if (/vertrieb/i.test(s)) return true;
+
   if (/^\d[\d\s.,/-]*$/.test(s)) return true;
-  if (s.length > 95) return true;
-  if (/^[A-Z0-9 .,_\-\/]+$/.test(s) && !COMPANY_SUFFIXES_RX.test(s) && s.split(' ').length <= 2) return true;
+
+  if (s.length < 4 || s.length > 90) return true;
+
   return false;
 }
 
@@ -828,6 +836,7 @@ async function onOcr(txt, lines, assignmentsCfg) {
 
         showSenderBadge(result.confidence, result.source);
         setStatus(result.confidence, `Absender erkannt: ${incoming}`);
+senderEl.dataset.lastDetectedSender = incoming;
 
         if (typeof refreshPreview === 'function') {
           try { refreshPreview(); } catch {}
