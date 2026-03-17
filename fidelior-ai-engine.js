@@ -49,7 +49,76 @@
       .map(normalizeWs)
       .filter(Boolean);
   }
+function detectZones(lines) {
+  const head = Array.isArray(lines) ? lines.slice(0, 30) : [];
 
+  let recipientStart = -1;
+  let recipientEnd = -1;
+
+  for (let i = 0; i < head.length - 2; i++) {
+    const l1 = normalizeWs(head[i] || '');
+    const l2 = normalizeWs(head[i + 1] || '');
+    const l3 = normalizeWs(head[i + 2] || '');
+
+    const hasZipCity = /\b\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]{2,}/.test(l3);
+    const hasStreet = /\b(straße|str\.|weg|allee|platz|ring|gasse|ufer|chaussee|pfad|steig|road|street|avenue|lane|drive)\b/i.test(l2);
+    const looksLikeName = /^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,}$/.test(l1) && !/\b(rechnung|invoice|kundennummer|vertragsnummer|datum|tarif|seite)\b/i.test(l1);
+
+    if (hasZipCity && hasStreet && looksLikeName) {
+      recipientStart = i;
+      recipientEnd = i + 2;
+      break;
+    }
+  }
+
+  const metaIndices = [];
+  for (let i = 0; i < head.length; i++) {
+    const s = normalizeWs(head[i] || '');
+    if (!s) continue;
+
+    if (/\b(rechnungs?(nummer|nr|no)|invoice\s*(no|number|nr)|kundennummer|kunden\-?nr|vertragsnummer|vertrag|datum|invoice\s*date|auftragsdatum|customer\s*(no|number)|tarif)\b/i.test(s)) {
+      metaIndices.push(i);
+      continue;
+    }
+
+    if (
+      /\b\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}\b/.test(s) &&
+      /\b\d{4,}\b/.test(s)
+    ) {
+      metaIndices.push(i);
+    }
+  }
+
+  const metaStart = metaIndices.length ? Math.max(0, Math.min(...metaIndices) - 1) : -1;
+  const metaEnd = metaIndices.length ? Math.min(head.length - 1, Math.max(...metaIndices) + 1) : -1;
+
+  const headerTop = head.filter((_, i) => i <= 8 && (recipientStart < 0 || (i < recipientStart || i > recipientEnd)));
+  const recipientBlock = recipientStart >= 0 ? head.slice(recipientStart, recipientEnd + 1) : [];
+  const metaBlock = metaStart >= 0 ? head.slice(metaStart, metaEnd + 1) : [];
+
+  const bodyStart = Math.max(
+    0,
+    recipientEnd >= 0 ? recipientEnd + 1 : 0,
+    metaEnd >= 0 ? metaEnd + 1 : 0,
+    8
+  );
+
+  const body = lines.slice(bodyStart);
+
+  return {
+    headerTop,
+    recipientBlock,
+    metaBlock,
+    body,
+    indices: {
+      recipientStart,
+      recipientEnd,
+      metaStart,
+      metaEnd,
+      bodyStart
+    }
+  };
+}
   function mapConfidence(score) {
     if (score >= 14) return 'high';
     if (score >= 9) return 'medium';
@@ -100,31 +169,38 @@
     return `${d}.${m}.${y}`;
   }
 
-  function detectInvoiceDate(text) {
-    const labelPatterns = [
-      /rechnungsdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
-      /invoice\s*date[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
-      /datum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i
-    ];
+function detectInvoiceDate(text, lines) {
+  const zones = detectZones(lines || []);
+  const scopedText = [
+    ...(zones.metaBlock || []),
+    ...(zones.headerTop || []),
+    String(text || '')
+  ].join('\n');
 
-    for (const rx of labelPatterns) {
-      const m = String(text || '').match(rx);
-      if (m) return m[1];
-    }
+  const labelPatterns = [
+    /rechnungsdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+    /invoice\s*date[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+    /datum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i
+  ];
 
-    const hits = [];
-    for (const m of String(text || '').matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
-      const d = +m[1];
-      const mo = +m[2];
-      const y = String(m[3]).length === 2 ? (+m[3] < 50 ? 2000 + +m[3] : 1900 + +m[3]) : +m[3];
-      const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      hits.push(iso);
-    }
-
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const valid = hits.filter(v => v <= todayIso).sort();
-    return valid.length ? formatDisplayDate(valid[valid.length - 1]) : '';
+  for (const rx of labelPatterns) {
+    const m = scopedText.match(rx);
+    if (m) return m[1];
   }
+
+  const hits = [];
+  for (const m of scopedText.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
+    const d = +m[1];
+    const mo = +m[2];
+    const y = String(m[3]).length === 2 ? (+m[3] < 50 ? 2000 + +m[3] : 1900 + +m[3]) : +m[3];
+    const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    hits.push(iso);
+  }
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const valid = hits.filter(v => v <= todayIso).sort();
+  return valid.length ? formatDisplayDate(valid[valid.length - 1]) : '';
+}
 
   function detectAmountCandidates(lines) {
     const candidates = [];
@@ -182,154 +258,151 @@
     return candidates.sort((a, b) => b.score - a.score);
   }
 
-  function detectSenderCandidates(lines) {
-    const candidates = [];
-    const companyRx = /\b(gmbh|ag|kg|ug|ohg|mbh|ltd|inc|company|corp|llc|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke)\b/i;
-    const negativeRx = /\b(rechnung|invoice|kundennummer|kundenummer|vertragsnummer|vertrag|iban|bic|swift|telefon|fax|e-?mail|email|www\.|ust|mwst|steuer|datum|seite|page)\b/i;
-    const zipCityRx = /\b\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]{2,}/;
-    const streetRx = /\b(straße|str\.|weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive)\b/i;
+function detectSenderCandidates(lines) {
+  const candidates = [];
+  const zones = detectZones(lines);
 
-    const head = lines.slice(0, 24);
-let recipientBlock = -1;
+  const companyRx = /\b(gmbh|ag|kg|ug|ohg|mbh|ltd|inc|company|corp|llc|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke)\b/i;
+  const negativeRx = /\b(rechnung|invoice|kundennummer|kundenummer|vertragsnummer|vertrag|iban|bic|swift|telefon|fax|e-?mail|email|www\.|ust|mwst|steuer|datum|seite|page|tarif)\b/i;
+  const zipCityRx = /\b\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]{2,}/;
+  const streetRx = /\b(straße|str\.|weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive)\b/i;
+  const urlRx = /(https?:\/\/|www\.)/i;
 
-for (let i = 0; i < head.length - 2; i++) {
-  const l1 = head[i];
-  const l2 = head[i + 1];
-  const l3 = head[i + 2];
+  function pushCandidate(s, baseScore, source, index) {
+    const line = normalizeWs(s);
+    if (!line) return;
+    if (line.length < 3 || line.length > 120) return;
+    if (urlRx.test(line)) return;
+    if (zipCityRx.test(line)) return;
+    if (streetRx.test(line)) return;
 
-  if (
-    /\b\d{5}\s+[A-ZÄÖÜ]/.test(l3) &&
-    /(straße|str\.|weg|allee|platz|ring|gasse)/i.test(l2)
-  ) {
-    recipientBlock = i;
-    break;
-  }
-}
-    head.forEach((line, index) => {
-        if (recipientBlock >= 0 && index >= recipientBlock && index <= recipientBlock + 2) {
-  return;
-}
-      const s = normalizeWs(line);
-      if (!s) return;
-      if (s.length < 3 || s.length > 95) return;
-      if (zipCityRx.test(s)) return;
-      if (streetRx.test(s)) return;
+    let score = baseScore;
 
-      let score = 0;
-      if (index <= 2) score += 6;
-      else if (index <= 5) score += 4;
-      else if (index <= 10) score += 2;
+    if (companyRx.test(line)) score += 12;
+    if (!negativeRx.test(line)) score += 2;
+    if (!/\d/.test(line)) score += 1;
+    if (/^[A-ZÄÖÜ0-9][A-Za-zÄÖÜäöüß&.\- ]+$/.test(line)) score += 1;
+    if (negativeRx.test(line) && !companyRx.test(line)) score -= 10;
+    if (/^\b(name|anschrift|adresse)\b[:\s]/i.test(line)) score -= 8;
+    if (/^(sehr geehrte|guten tag|hallo)\b/i.test(line)) score -= 10;
 
-      if (companyRx.test(s)) score += 12;
-      if (!negativeRx.test(s)) score += 2;
-      if (!/\d/.test(s)) score += 1;
-     if (/\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\-]+\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\-]+/.test(s)) score -= 1;
-
-      if (negativeRx.test(s) && !companyRx.test(s)) score -= 8;
-
-      if (score > 0) {
-        candidates.push({
-          value: s,
-          score,
-          line: s,
-          index,
-          source: 'Briefkopf'
-        });
-      }
-    });
-
-    const labelMatch = String(lines.join('\n')).match(/\b(?:rechnungssteller|lieferant|anbieter|auftragnehmer|firma|vendor|supplier)\b[:\s]+([^\n]+)/i);
-    if (labelMatch && labelMatch[1]) {
-      const candidate = cleanToken(labelMatch[1]);
-      if (candidate) {
-        candidates.push({
-          value: candidate,
-          score: 16,
-          line: candidate,
-          index: -1,
-          source: 'Label im Dokument'
-        });
-      }
-    }
-
-    const dedup = new Map();
-    candidates.forEach(c => {
-      const key = normalizeCompare(c.value);
-      if (!key) return;
-      const prev = dedup.get(key);
-      if (!prev || c.score > prev.score) dedup.set(key, c);
-    });
-
-    return [...dedup.values()].sort((a, b) => b.score - a.score);
-  }
-
-  function detectReferenceCandidates(text, lines) {
-    const joined = String(text || '');
-    const candidates = [];
-
-    const labelPatterns = [
-      /\b(rechnungs?(?:nummer|nr|no)\.?|rechnung\s*#|rg-?nr\.?|rn\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi,
-      /\b(invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi
-    ];
-
-    const badPrefix = /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT)\b/i;
-    const ibanLike = /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i;
-    const dateLike = /^(\d{1,2}[.\-/]){2}\d{2,4}$/i;
-
-    const addCandidate = (value, line, score, source) => {
-      const token = cleanToken(value).replace(/\s+/g, '');
-      if (!token) return;
-      if (token.length < 4 || token.length > 24) return;
-      if (!/\d/.test(token)) return;
-      if (dateLike.test(token)) return;
-      if (ibanLike.test(token)) return;
-      if (badPrefix.test(token)) return;
-
+    if (score > 0) {
       candidates.push({
-        value: token,
+        value: line.replace(/^(name|firma)\s*:\s*/i, '').trim(),
         score,
-        line: normalizeWs(line),
+        line,
+        index,
         source
       });
-    };
-
-    for (const rx of labelPatterns) {
-      let m;
-      while ((m = rx.exec(joined))) {
-        addCandidate(m[2], m[0], 18, 'Label Rechnungsnummer');
-      }
     }
-
-    lines.forEach(line => {
-      const s = normalizeWs(line);
-      if (!s) return;
-
-      const m = s.match(/\b(rechnungs?(?:nummer|nr|no)\.?|invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\b[:#\s-]*([A-Z0-9._/-]{4,})/i);
-      if (m && m[2]) addCandidate(m[2], s, 20, 'Zeile Rechnungsnummer');
-
-      const km = s.match(/\b(kundennummer|kunden\-?nr|customer\s*(?:no|number))\b[:#\s-]*([A-Z0-9._/-]{4,})/i);
-      if (km && km[2]) {
-        candidates.push({
-          value: cleanToken(km[2]).replace(/\s+/g, ''),
-          score: 3,
-          line: s,
-          source: 'Kundennummer'
-        });
-      }
-    });
-
-    const dedup = new Map();
-    candidates.forEach(c => {
-      const key = normalizeCompare(c.value);
-      if (!key) return;
-      const prev = dedup.get(key);
-      if (!prev || c.score > prev.score) dedup.set(key, c);
-    });
-
-    return [...dedup.values()]
-      .filter(c => c.score >= 8)
-      .sort((a, b) => b.score - a.score);
   }
+
+  zones.headerTop.forEach((line, idx) => {
+    let score = 8;
+    if (idx <= 2) score += 4;
+    pushCandidate(line, score, 'Briefkopf', idx);
+  });
+
+  zones.metaBlock.forEach((line, idx) => {
+    if (companyRx.test(line) && !negativeRx.test(line)) {
+      pushCandidate(line, 6, 'Metablock', idx);
+    }
+  });
+
+  const labelMatch = String(lines.join('\n')).match(/\b(?:rechnungssteller|lieferant|anbieter|auftragnehmer|firma|vendor|supplier)\b[:\s]+([^\n]+)/i);
+  if (labelMatch && labelMatch[1]) {
+    const candidate = cleanToken(labelMatch[1]);
+    if (candidate) {
+      candidates.push({
+        value: candidate,
+        score: 18,
+        line: candidate,
+        index: -1,
+        source: 'Label im Dokument'
+      });
+    }
+  }
+
+  const dedup = new Map();
+  candidates.forEach(c => {
+    const key = normalizeCompare(c.value);
+    if (!key) return;
+    const prev = dedup.get(key);
+    if (!prev || c.score > prev.score) dedup.set(key, c);
+  });
+
+  return [...dedup.values()].sort((a, b) => b.score - a.score);
+}
+function detectReferenceCandidates(text, lines) {
+  const joined = String(text || '');
+  const zones = detectZones(lines);
+  const candidates = [];
+
+  const labelPatterns = [
+    /\b(rechnungs?(?:nummer|nr|no)\.?|rechnung\s*#|rg-?nr\.?|rn\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi,
+    /\b(invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi
+  ];
+
+  const badPrefix = /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT)\b/i;
+  const ibanLike = /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i;
+  const dateLike = /^(\d{1,2}[.\-/]){2}\d{2,4}$/i;
+
+  const addCandidate = (value, line, score, source) => {
+    const token = cleanToken(value).replace(/\s+/g, '');
+    if (!token) return;
+    if (token.length < 4 || token.length > 24) return;
+    if (!/\d/.test(token)) return;
+    if (dateLike.test(token)) return;
+    if (ibanLike.test(token)) return;
+    if (badPrefix.test(token)) return;
+
+    candidates.push({
+      value: token,
+      score,
+      line: normalizeWs(line),
+      source
+    });
+  };
+
+  for (const rx of labelPatterns) {
+    let m;
+    while ((m = rx.exec(joined))) {
+      addCandidate(m[2], m[0], 18, 'Label Rechnungsnummer');
+    }
+  }
+
+  const metaLines = zones.metaBlock.length ? zones.metaBlock : lines.slice(0, 16);
+
+  metaLines.forEach(line => {
+    const s = normalizeWs(line);
+    if (!s) return;
+
+    const m = s.match(/\b(rechnungs?(?:nummer|nr|no)\.?|invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\b[:#\s-]*([A-Z0-9._/-]{4,})/i);
+    if (m && m[2]) addCandidate(m[2], s, 22, 'Metablock Rechnungsnummer');
+
+    const km = s.match(/\b(kundennummer|kunden\-?nr|customer\s*(?:no|number))\b[:#\s-]*([A-Z0-9._/-]{4,})/i);
+    if (km && km[2]) {
+      candidates.push({
+        value: cleanToken(km[2]).replace(/\s+/g, ''),
+        score: 2,
+        line: s,
+        source: 'Kundennummer'
+      });
+    }
+  });
+
+  const dedup = new Map();
+  candidates.forEach(c => {
+    const key = normalizeCompare(c.value);
+    if (!key) return;
+    const prev = dedup.get(key);
+    if (!prev || c.score > prev.score) dedup.set(key, c);
+  });
+
+  return [...dedup.values()]
+    .filter(c => c.score >= 8)
+    .sort((a, b) => b.score - a.score);
+}
 
   function buildField(best, fallbackValue = '') {
     if (!best) {
@@ -363,7 +436,7 @@ for (let i = 0; i < head.length - 2; i++) {
     const senderField = buildField(senderCandidates[0]);
     const referenceField = (type === 'rechnung') ? buildField(referenceCandidates[0]) : buildField(null);
     const amountField = buildField(amountCandidates[0]);
-    const dateValue = detectInvoiceDate(textString);
+  const dateValue = detectInvoiceDate(textString, lines);
 
     const warnings = [];
     if (!senderField.value) warnings.push('Absender nicht sicher erkannt');
