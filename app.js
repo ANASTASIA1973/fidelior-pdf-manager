@@ -1410,6 +1410,7 @@ const BAD = {
   // Steuer / Bank
   ustid: /^DE[\s-]?\d{9}$/i,
   iban: /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i,
+  
   bic: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/i,   // z. B. BICCOLSDE33 / SWBKDDE33
   bankWord: /^(BIC|IBAN|SWIFT)$/i,
 
