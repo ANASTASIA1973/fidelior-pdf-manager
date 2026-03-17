@@ -314,14 +314,41 @@ function extractUstId(text) {
 
 function extractInvoiceNo(text) {
   if (!text) return '';
-  const patterns = [
-    /\b(?:Rechnungsnummer|Rechnung Nr\.?|Rechnung-Nr\.?|Invoice No\.?|Invoice Number|Belegnr\.?)[:\s#-]*([A-Z0-9\-\/]{2,40})\b/i,
-    /\bNr\.?\s*([A-Z0-9\-\/]{2,20})\b/i
+
+  const blacklist = [
+    'seite',
+    'page',
+    'telefon',
+    'tel',
+    'fax',
+    'iban',
+    'bic',
+    'hrb',
+    'ust',
+    'mwst'
   ];
+
+  const patterns = [
+    /\b(?:Rechnungsnummer|Rechnung\s*Nr\.?|Rechnung-Nr\.?|Invoice\s*No\.?|Invoice\s*Number|Belegnr\.?)[:\s#-]*([A-Z0-9\-\/]{4,30})\b/i,
+    /\b(?:Nr\.?)\s*([A-Z0-9\-\/]{5,30})\b/i
+  ];
+
   for (const p of patterns) {
     const m = text.match(p);
-    if (m) return String(m[1] || '').trim();
+    if (!m) continue;
+
+    const val = String(m[1] || '').trim();
+
+    if (val.length < 4) continue;
+
+    const lower = val.toLowerCase();
+    if (blacklist.some(b => lower.includes(b))) continue;
+
+    if (/^\d+$/.test(val) && val.length < 5) continue;
+
+    return val;
   }
+
   return '';
 }
 
