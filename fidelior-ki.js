@@ -261,20 +261,23 @@ function isClearlyBadSenderLine(line) {
   if (NEGATIVE_LINE_RX.test(s)) return true;
   if (PERSON_LINE_RX.test(s)) return true;
 
-  if (looksLikeAddress(s)) return true;
-  if (looksLikeZipCity(s)) return true;
+  const strongCompany =
+    COMPANY_SUFFIXES_RX.test(s) ||
+    /\b(energie|werke|versicherung|sanitätshaus|online|media|bau|service|services|solutions|management|autodoc)\b/i.test(s);
 
-  if (CONTACT_RX.test(s)) return true;
+  if (looksLikeAddress(s) && !strongCompany) return true;
+  if (looksLikeZipCity(s) && !strongCompany) return true;
+
+  if (CONTACT_RX.test(s) && !strongCompany) return true;
   if (BANK_RX.test(s)) return true;
   if (VAT_RX.test(s)) return true;
 
   if (/hauptverwaltung/i.test(s)) return true;
   if (/kundenservice/i.test(s)) return true;
-  if (/vertrieb/i.test(s)) return true;
 
   if (/^\d[\d\s.,/-]*$/.test(s)) return true;
 
-  if (s.length < 4 || s.length > 90) return true;
+  if (s.length < 3 || s.length > 90) return true;
 
   return false;
 }
@@ -396,7 +399,7 @@ function extractSenderByLabel(txt) {
 
 function extractSenderFromHeader(lines) {
   const candidates = [];
-  const head = (lines || []).slice(0, 14);
+  const head = (lines || []).slice(0, 24);
 
   for (let i = 0; i < head.length; i++) {
     const scored = scoreHeaderCandidate(head[i], i, head);
