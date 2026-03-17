@@ -243,6 +243,8 @@ function detectInvoiceDate(text, lines) {
         if (ignorePattern.test(text)) score -= 6;
         if (pos === matches.length - 1) score += 1;
         if (value > 0 && value < 1000000) score += 1;
+        // Mini-Beträge stark abwerten (typische OCR-Datumsfragmente)
+if (value < 5) score -= 8;
 
         candidates.push({
           value,
@@ -435,7 +437,18 @@ function detectReferenceCandidates(text, lines) {
 
     const senderField = buildField(senderCandidates[0]);
     const referenceField = (type === 'rechnung') ? buildField(referenceCandidates[0]) : buildField(null);
-    const amountField = buildField(amountCandidates[0]);
+  let bestAmount = amountCandidates[0] || null;
+
+// sehr kleine Beträge nur akzeptieren wenn Text klar Rechnungsbezug hat
+if (bestAmount && bestAmount.value < 10) {
+  const line = (bestAmount.line || '').toLowerCase();
+
+  if (!/(gesamt|summe|total|betrag|zu zahlen|rechnungsbetrag)/.test(line)) {
+    bestAmount = null;
+  }
+}
+
+const amountField = buildField(bestAmount);
   const dateValue = detectInvoiceDate(textString, lines);
 
     const warnings = [];
