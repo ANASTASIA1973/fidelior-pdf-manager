@@ -204,6 +204,39 @@ function detectInvoiceDate(text, lines) {
 
   function detectAmountCandidates(lines) {
     const candidates = [];
+      // =====================================================
+  // PRIORITÄT 1: echte Total-Zeilen sofort erkennen
+  // =====================================================
+  const totalLineRx = /(gesamt|summe|total|rechnungsbetrag|endbetrag|zu\s+zahlen|zahlbetrag)/i;
+  const totalMoneyRx = /(-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+\.\d{2})/g;
+
+  for (let i = 0; i < lines.length; i++) {
+    const text = normalizeWs(lines[i]);
+    if (!text) continue;
+
+    if (totalLineRx.test(text)) {
+      const m = text.match(totalMoneyRx);
+      if (m && m.length) {
+        const raw = m[m.length - 1];
+
+        // Datumsfragmente wie 04.02 ignorieren
+        if (/^\d{1,2}[.\-\/]\d{1,2}$/.test(raw)) continue;
+
+        const value = parseEuro(raw);
+
+        if (Number.isFinite(value) && value > 0) {
+          return [{
+            value,
+            raw,
+            score: 50,
+            line: text,
+            index: i,
+            source: 'Totalzeile'
+          }];
+        }
+      }
+    }
+  }
     const priorityPatterns = [
       /noch\s+offen/i,
       /offener\s+betrag/i,
@@ -262,6 +295,7 @@ if (value < 5) score -= 8;
 
 function detectSenderCandidates(lines) {
   const candidates = [];
+
   const zones = detectZones(lines);
 
   const companyRx = /\b(gmbh|ag|kg|ug|ohg|mbh|ltd|inc|company|corp|llc|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke)\b/i;
