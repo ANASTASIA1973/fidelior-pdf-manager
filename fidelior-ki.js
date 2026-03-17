@@ -859,6 +859,7 @@ async function onOcr(txt, lines, assignmentsCfg) {
     }
 
     const result = extractSender(txt, lines, matchedRule);
+
     if (result?.value) {
       const current = normalizeWs(senderEl.value || '');
       const incoming = normalizeWs(result.value);
@@ -883,7 +884,17 @@ async function onOcr(txt, lines, assignmentsCfg) {
 
         showSenderBadge(result.confidence, result.source);
         setStatus(result.confidence, `Absender erkannt: ${incoming}`);
-senderEl.dataset.lastDetectedSender = incoming;
+
+        try {
+          const invEl = getInvNoEl();
+          if (invEl && !invEl.value) {
+            const inv = extractInvoiceNumber(txt, lines);
+            if (inv) {
+              invEl.value = inv;
+              invEl.dataset.kiDetected = '1';
+            }
+          }
+        } catch {}
 
         if (typeof refreshPreview === 'function') {
           try { refreshPreview(); } catch {}
