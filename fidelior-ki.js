@@ -858,7 +858,28 @@ async function onOcr(txt, lines, assignmentsCfg) {
       try { matchedRule = evaluateAssignmentRules(txt, assignmentsCfg); } catch {}
     }
 
-    const result = extractSender(txt, lines, matchedRule);
+      let result = null;
+
+    try {
+      const engine = window.FideliorAI?.analyzeDocument?.(txt, lines);
+      const senderField = engine?.fields?.sender;
+
+      if (senderField?.value) {
+        result = {
+          value: senderField.value,
+          confidence: senderField.confidence || 'medium',
+          source: senderField.source || 'Zentrale Engine',
+          score: senderField.score || 0,
+          reference: engine?.fields?.reference?.value || ''
+        };
+      }
+    } catch (e) {
+      console.warn('[FideliorKI] Engine bridge failed:', e);
+    }
+
+    if (!result) {
+      result = extractSender(txt, lines, matchedRule);
+    }
 
     if (result?.value) {
       const current = normalizeWs(senderEl.value || '');
@@ -885,10 +906,14 @@ async function onOcr(txt, lines, assignmentsCfg) {
         showSenderBadge(result.confidence, result.source);
         setStatus(result.confidence, `Absender erkannt: ${incoming}`);
 
-        try {
+         try {
           const invEl = getInvNoEl();
           if (invEl && !invEl.value) {
-            const inv = extractInvoiceNumber(txt, lines);
+            const inv =
+              result.reference ||
+              window.FideliorAI?.analyzeDocument?.(txt, lines)?.fields?.reference?.value ||
+              extractInvoiceNumber(txt, lines);
+
             if (inv) {
               invEl.value = inv;
               invEl.dataset.kiDetected = '1';

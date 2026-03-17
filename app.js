@@ -1851,6 +1851,14 @@ function euroToNum(s){
 ========================================================= */
 
 function analyzeDocument(txt, lines){
+  try {
+    if (window.FideliorAI?.analyzeDocument) {
+      return window.FideliorAI.analyzeDocument(txt, lines);
+    }
+  } catch (e) {
+    console.warn("FideliorAI analyzeDocument failed, fallback active:", e);
+  }
+
   const smartType = detectDocTypeSmart(txt);
   const isInvoiceLike = (smartType === "rechnung" || smartType === "gutschrift");
 
@@ -1868,7 +1876,10 @@ function analyzeDocument(txt, lines){
       if (!autoInv) autoInv = findInvoiceNumberStrict(txt);
 
       return autoInv && !isMaskedIbanLike(autoInv) ? autoInv : "";
-    })()
+    })(),
+    fields: {},
+    candidates: {},
+    warnings: ["Fallback-Analyse aktiv"]
   };
 }
 /* =========================================================
