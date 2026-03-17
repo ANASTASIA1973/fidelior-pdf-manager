@@ -190,8 +190,25 @@
     const streetRx = /\b(straße|str\.|weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive)\b/i;
 
     const head = lines.slice(0, 24);
+let recipientBlock = -1;
 
+for (let i = 0; i < head.length - 2; i++) {
+  const l1 = head[i];
+  const l2 = head[i + 1];
+  const l3 = head[i + 2];
+
+  if (
+    /\b\d{5}\s+[A-ZÄÖÜ]/.test(l3) &&
+    /(straße|str\.|weg|allee|platz|ring|gasse)/i.test(l2)
+  ) {
+    recipientBlock = i;
+    break;
+  }
+}
     head.forEach((line, index) => {
+        if (recipientBlock >= 0 && index >= recipientBlock && index <= recipientBlock + 2) {
+  return;
+}
       const s = normalizeWs(line);
       if (!s) return;
       if (s.length < 3 || s.length > 95) return;
@@ -203,10 +220,10 @@
       else if (index <= 5) score += 4;
       else if (index <= 10) score += 2;
 
-      if (companyRx.test(s)) score += 8;
+      if (companyRx.test(s)) score += 12;
       if (!negativeRx.test(s)) score += 2;
       if (!/\d/.test(s)) score += 1;
-      if (/\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\-]+\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\-]+/.test(s)) score += 1;
+     if (/\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\-]+\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\-]+/.test(s)) score -= 1;
 
       if (negativeRx.test(s) && !companyRx.test(s)) score -= 8;
 
