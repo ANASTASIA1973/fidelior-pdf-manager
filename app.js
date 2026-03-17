@@ -1369,117 +1369,96 @@ document.getElementById("downloadBtn")?.addEventListener("click", () => {
 function findInvoiceNumberStrict(rawText){
   if (!rawText) return "";
 
-  // 1) Normalisieren (PDF-Artefakte entfernen)
   const text = String(rawText)
-    .replace(/\u00A0/g, " ")                    // NBSP -> Space
-    .replace(/[\u2010-\u2015\u2212]/g, "-")     // typogr. Bindestriche -> "-"
+    .replace(/\u00A0/g, " ")
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 
-  // 2) Label-basierte Kandidaten (de/en)
   const labelRxs = [
     /\b(rechnungs?(nummer|nr|no)\.?|rechnung\s*#|rg-?nr\.?|rn\.?|beleg(nr|nummer))\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi,
-    /\b(invoice\s*(no|nr|number)?|inv\.?\s*no\.?|bill\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi,
-    // Muster: "Rechnungs-Nr. 5080235099" / "Rechnungsnummer 5080..."
+    /\b(invoice\s*(no|nr|number)?|inv\.?\s*no\.?|bill\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi
   ];
+
+  const BAD = {
+    maskedIbanLike: /^DE[\dxX*]{6,}$/i,
+    date1: /^(\d{1,2}[.\-/]){2}\d{2,4}$/i,
+    date2: /^(20\d{2}[.\-/]?\d{2}[.\-/]?\d{2})$/,
+    ustid: /^DE[\s-]?\d{9}$/i,
+    iban: /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i,
+    bic: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/i,
+    bankWord: /^(BIC|IBAN|SWIFT)$/i,
+    phone: /^\+?\d{2,3}[\s/-]?(?:\d{2,4}[\s/-]?){2,4}\d{2,}$/i,
+    zip: /^\d{5}$/,
+    uuid: /^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i,
+    money: /(?:€|\bEUR\b)\s*\d/i,
+    badPrefix: /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT)\b/i
+  };
+
+  const clean = s => String(s || "")
+    .trim()
+    .replace(/^[#:.,\-\s]+/, "")
+    .replace(/[,:.;]+$/, "");
+
+  const invalid = s => {
+    if (!s) return true;
+
+    const x = String(s).toUpperCase().trim();
+
+    if (BAD.maskedIbanLike.test(x)) return true;
+    if (BAD.bankWord.test(x)) return true;
+    if (BAD.bic.test(x)) return true;
+    if (BAD.date1.test(x) || BAD.date2.test(x)) return true;
+    if (BAD.ustid.test(x)) return true;
+    if (BAD.iban.test(x)) return true;
+    if (BAD.phone.test(x)) return true;
+    if (BAD.zip.test(x)) return true;
+    if (BAD.uuid.test(x)) return true;
+    if (BAD.money.test(x)) return true;
+    if (BAD.badPrefix.test(x)) return true;
+
+    if (x.length < 5 || x.length > 24) return true;
+    if (!/\d/.test(x)) return true;
+
+    /* zu OCR-müllig / zu textlastig */
+    const letters = (x.match(/[A-Z]/g) || []).length;
+    const digits  = (x.match(/\d/g) || []).length;
+    if (letters >= 5 && digits <= 1) return true;
+    if (/[ÄÖÜ]/.test(x)) return true;
+
+    /* reine große Zahl mit 10–15 Stellen → eher Kunden-/Vertragsnummer */
+    if (/^\d{10,15}$/.test(x)) return true;
+
+    /* Bon-/Fließtext-artige Tokens wie Rnnnaasse2 verwerfen */
+    if (/^[A-Z]{5,}\d{0,2}$/i.test(x)) return true;
+
+    return false;
+  };
 
   const candidates = [];
 
   for (const rx of labelRxs){
     let m;
     while ((m = rx.exec(text))){
-      const token = m[m.length - 1]; // letzter capture
-      candidates.push({ c: token, score: 5, why: "label" });
+      const token = clean(m[m.length - 1]);
+      if (invalid(token)) continue;
+
+      let score = 10;
+      if (/[A-Z]/.test(token) && /\d/.test(token)) score += 2;
+      if (/^(RE|RG|RN|INV|INVOICE)[\s._/-]?/i.test(token)) score += 3;
+      if (token.length >= 6 && token.length <= 18) score += 1;
+
+      candidates.push({ c: token, score });
     }
   }
 
-  // 3) Fallback: freie Tokens, die invoice-ähnlich aussehen
-  //    (mind. 4 Zeichen, max 24, enthält mind. 1 Ziffer; erlaubt . _ / -)
-  for (const m of text.matchAll(/\b(?!DE\d{9}\b)[A-Z0-9][A-Z0-9._/-]{3,23}\b/gi)){
-    candidates.push({ c: m[0], score: 1, why: "generic" });
-  }
+  /* Kein freier OCR-Fallback mehr:
+     Ohne Label lieber leer statt Fantasie-Rechnungsnummer */
+  if (!candidates.length) return "";
 
-  // 4) harte Negativ-Filter (weg damit)
-const BAD = {
-  maskedIbanLike: /^DE[\dxX*]{6,}$/i,
-
-  // Daten
-  date1: /^(\d{1,2}[.\-/]){2}\d{2,4}$/i,
-  date2: /^(20\d{2}[.\-/]?\d{2}[.\-/]?\d{2})$/,
-
-  // Steuer / Bank
-  ustid: /^DE[\s-]?\d{9}$/i,
-  iban: /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i,
-  
-  bic: /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/i,   // z. B. BICCOLSDE33 / SWBKDDE33
-  bankWord: /^(BIC|IBAN|SWIFT)$/i,
-
-  // Telefon / Adresse
-  phone: /^\+?\d{2,3}[\s/-]?(?:\d{2,4}[\s/-]?){2,4}\d{2,}$/i,
-  zip: /^\d{5}$/,
-
-  // Sonstiges
-  uuid: /^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$/i,
-  money: /(?:€|\bEUR\b)\s*\d/i,
-
-  // Offensichtlich falsche Prefixe
-  badPrefix: /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT)\b/i,
-};
-
-  const clean = s => String(s||"")
-    .trim()
-    .replace(/^[#:.,\-\s]+/, "")
-    .replace(/[,:.;]+$/, "");
-
-const invalid = s => {
-  if (!s) return true;
-
-  const x = String(s).toUpperCase().trim();
-
-  if (BAD.maskedIbanLike.test(x)) return true;
-  if (BAD.bankWord.test(x)) return true;
-  if (BAD.bic.test(x)) return true;
-
-  if (x.length < 4 || x.length > 24) return true;
-  if (!/\d/.test(x)) return true;
-
-  // Nur Buchstaben + ein paar Ziffern => oft Bankcode / Kürzel, keine Rechnungsnummer
-  if (/^[A-Z]{6,}\d{2,5}$/.test(x)) return true;
-
-  if (BAD.date1.test(x) || BAD.date2.test(x)) return true;
-  if (BAD.ustid.test(x)) return true;
-  if (BAD.iban.test(x)) return true;
-  if (BAD.phone.test(x)) return true;
-  if (BAD.zip.test(x)) return true;
-  if (BAD.uuid.test(x)) return true;
-  if (BAD.money.test(x)) return true;
-  if (BAD.badPrefix.test(x)) return true;
-
-  // reine große Zahl mit 10–15 Stellen → eher Kunden-/Vertrags-/Telefonnummer
-  if (/^\d{10,15}$/.test(x)) return true;
-
-  return false;
-};
-  // 5) Scoring & Auswahl
-  const pool = [];
-for (const k of candidates){
-  const x = clean(k.c);
-  if (invalid(x)) continue;
-
-  let score = k.score;
-  if (/[A-Z]/.test(x) && /\d/.test(x)) score += 2;
-  if (x.length >= 6 && x.length <= 18) score += 1;
-  if (/^(RE|RG|RN|INV|INVOICE)[\s._/-]?/i.test(x)) score += 2;
-
-  pool.push({ c: x, score });
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].c;
 }
-
-
-  if (!pool.length) return "";
-  pool.sort((a,b) => b.score - a.score);
-  return pool[0].c;
-}
-
 // — Text + Zeilen (mit x/y) extrahieren —
 async function extractTextAndLinesFirstPages(pdf, maxPages = 3){
   const N = Math.min(maxPages, pdf.numPages);
