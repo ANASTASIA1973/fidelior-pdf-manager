@@ -804,19 +804,24 @@ async function onOcr(txt, lines, assignmentsCfg) {
     }
 
     const result = extractSender(txt, lines, matchedRule);
-
     if (result?.value) {
       const current = normalizeWs(senderEl.value || '');
       const incoming = normalizeWs(result.value);
 
+      const sameSender =
+        normalizeForCompare(current) === normalizeForCompare(incoming);
+
       const mayWrite =
         !current ||
         senderEl.dataset.kiDetected === '1' ||
-        normalizeForCompare(current) === normalizeForCompare(incoming);
+        sameSender;
 
       if (mayWrite) {
-        senderEl.value = incoming;
-        senderEl.classList.add('auto');
+        if (!current) {
+          senderEl.value = incoming;
+          senderEl.classList.add('auto');
+        }
+
         senderEl.dataset.kiDetected = '1';
         senderEl.dataset.kiSource = result.source;
         delete senderEl.dataset.userTyped;
@@ -837,7 +842,6 @@ async function onOcr(txt, lines, assignmentsCfg) {
       }
       return;
     }
-
     removeSenderBadge();
     setStatus('low', 'Kein sicherer Absender erkannt');
 
