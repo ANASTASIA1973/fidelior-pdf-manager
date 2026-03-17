@@ -354,11 +354,34 @@ function extractInvoiceNo(text) {
 
 function extractMoneyCandidates(text) {
   if (!text) return [];
-  const matches = text.match(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g) || [];
-  const values = matches
-    .map(v => parseAmountFloat(v))
-    .filter(v => isFinite(v) && v > 0);
-  return [...new Set(values)].sort((a, b) => b - a);
+
+  const candidates = [];
+
+  const patterns = [
+    /\b(?:gesamtbetrag|gesamt|summe|total|zu\s*zahlen|betrag)\s*[:\-]?\s*([\d\.\,]+)\s?€/i,
+    /\b(?:brutto)\s*[:\-]?\s*([\d\.\,]+)\s?€/i
+  ];
+
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) {
+      const n = parseAmountFloat(m[1]);
+      if (n > 0) candidates.push(n);
+    }
+  }
+
+  const generic = text.match(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g) || [];
+
+  for (const g of generic) {
+    const n = parseAmountFloat(g);
+    if (isFinite(n) && n > 0 && n < 1000000) {
+      candidates.push(n);
+    }
+  }
+
+  const unique = [...new Set(candidates)];
+
+  return unique.sort((a, b) => b - a);
 }
 
 function extractVatAmount(text) {
