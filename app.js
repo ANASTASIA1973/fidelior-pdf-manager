@@ -1537,54 +1537,126 @@ function storeDocumentFingerprint(fp){
 function detectTotalAmountFromLines(lines){
   if (!Array.isArray(lines) || !lines.length) return NaN;
 
-const PRI = [
+  const PRI = [
+    /* Mahnung / Zahlungserinnerung zuerst */
+    /Noch\s+offen/i,
+    /Offener\s+Betrag/i,
+    /Offene\s+Forderung/i,
+    /Restbetrag/i,
+    /Zu\s+zahlen/i,
+    /Zu\s+überweisen/i,
+    /Bitte\s+überweisen/i,
+    /Gesamtforderung/i,
+    /Forderung/i,
 
-/Zu\s+zahlender\s+Betrag/i,
-/Zahlbetrag/i,
-/Amount due/i,
-/Total amount due/i,
-/Gesamtbetrag/i,
-/Invoice total/i,
-/Total/i,
-/Summe/i
+    /* klassische Rechnungslabels */
+    /Zu\s+zahlender\s+Betrag/i,
+    /Zahlbetrag/i,
+    /Amount due/i,
+    /Total amount due/i,
+    /Gesamtbetrag/i,
+    /Rechnungsbetrag/i,
+    /Invoice total/i,
+    /\bTotal\b/i,
+    /\bSumme\b/i
+  ];
 
-];
-
-  const IGN = /Zwischensumme|Subtotal|Netto\b|Rabatt|Discount|USt|MwSt|Steuer|Versand/i;
+  const IGN = /Zwischensumme|Subtotal|Netto\b|Rabatt|Discount|USt|MwSt|Steuer|Versand|Skonto|Abschlag/i;
 
   const parseNum = (s) => {
-    let x = (s||"").replace(/[ €\u00A0]/g,"").replace(/−/g,"-");
-    if (/,/.test(x) && /\./.test(x)) x = x.replace(/\./g,"").replace(",",".");
-    else if (/,/.test(x)) x = x.replace(",",".");
-    const v = Number((x.match(/-?\d+(?:\.\d+)?/)||[""])[0]);
+    let x = String(s || "")
+      .replace(/[€\u00A0 ]/g, "")
+      .replace(/−/g, "-");
+
+    if (/,/.test(x) && /\./.test(x)) {
+      x = x.replace(/\./g, "").replace(",", ".");
+    } else if (/,/.test(x)) {
+      x = x.replace(",", ".");
+    }
+
+    const v = Number((x.match(/-?\d+(?:\.\d+)?/) || [""])[0]);
     return isFinite(v) ? v : NaN;
   };
 
+  /* Holt nur echte Geldbeträge — keine Datumsfragmente wie 22.02 aus 22.02.2026 */
+  const extractAmounts = (text) => {
+    const s = String(text || "");
+    const out = [];
+
+    const rx = /(?:^|[^\d])(-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+\.\d{2})(?!\.\d)(?:[^\d]|$)/g;
+    let m;
+    while ((m = rx.exec(s)) !== null) {
+      const raw = (m[1] || "").trim();
+
+      /* Falls Treffer direkt Teil eines Datums ist: verwerfen */
+      const start = s.indexOf(raw, Math.max(0, m.index - 2));
+      const end = start >= 0 ? start + raw.length : -1;
+      const before = start > 0 ? s[start - 1] : "";
+      const after1 = end >= 0 ? (s[end] || "") : "";
+      const after2 = end >= 0 ? (s[end + 1] || "") : "";
+      const after3 = end >= 0 ? (s[end + 2] || "") : "";
+      const after4 = end >= 0 ? (s[end + 3] || "") : "";
+
+      const looksLikeDateFragment =
+        before === "." ||
+        (after1 === "." && /\d/.test(after2)) ||
+        /\d{4}/.test(after1 + after2 + after3 + after4);
+
+      if (looksLikeDateFragment) continue;
+
+      const val = parseNum(raw);
+      if (isFinite(val) && !isNaN(val)) out.push(val);
+    }
+
+    return out;
+  };
+
   const rightMostAmount = (L) => {
-    const nums = L.text.match(/-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+(?:\.\d{2})/g);
-    if (!nums || !nums.length) return NaN;
-    return parseNum(nums[nums.length-1]);
+    const vals = extractAmounts(L?.text || "");
+    if (!vals.length) return NaN;
+    return vals[vals.length - 1];
   };
 
   for (const rx of PRI){
     let best = null;
-    for (let i=0;i<lines.length;i++){
-      const L = lines[i];
-      if (!rx.test(L.text)) continue;
-      if (IGN.test(L.text)) continue;
 
-      let v = rightMostAmount(L);
-      if (!isFinite(v) || isNaN(v)){
-        const N = lines[i+1];
-        if (N && !IGN.test(N.text)) v = rightMostAmount(N);
+    for (let i = 0; i < lines.length; i++){
+      const L = lines[i];
+      if (!L || !rx.test(L.text || "")) continue;
+      if (IGN.test(L.text || "")) continue;
+
+      let vals = extractAmounts(L.text || "");
+
+      /* Falls im Label selbst kein Betrag steht, auf Folgezeile schauen */
+      if (!vals.length) {
+        const N = lines[i + 1];
+        if (N && !IGN.test(N.text || "")) vals = extractAmounts(N.text || "");
       }
-      if (isFinite(v) && !isNaN(v)){
-        if (!best || v >= best.val) best = { val: v };
+
+      if (vals.length) {
+        const v = vals[vals.length - 1];
+        if (isFinite(v) && !isNaN(v)) {
+          if (!best || v > best.val) best = { val: v };
+        }
       }
     }
+
     if (best) return best.val;
   }
-  return NaN;
+
+  /* Fallback: große echte Beträge bevorzugen, aber keine Datumsfragmente */
+  let fallback = NaN;
+  for (const L of lines) {
+    if (!L || IGN.test(L.text || "")) continue;
+    const vals = extractAmounts(L.text || "");
+    for (const v of vals) {
+      if (isFinite(v) && !isNaN(v)) {
+        if (!isFinite(fallback) || v > fallback) fallback = v;
+      }
+    }
+  }
+
+  return fallback;
 }
 /* ======================================================
    DOCUMENT SUMMARY GENERATOR
@@ -1801,17 +1873,21 @@ function euroToNum(s){
 
 function analyzeDocument(txt, lines){
   const smartType = detectDocTypeSmart(txt);
+  const isInvoiceLike = (smartType === "rechnung" || smartType === "gutschrift");
 
   return {
-    type: (smartType === "rechnung" || smartType === "gutschrift") ? "rechnung" : "dokument",
+    type: isInvoiceLike ? "rechnung" : "dokument",
     semanticType: smartType,
     amount: detectTotalAmountFromLines(lines),
     date: detectInvoiceDateSmart(txt, lines),
     sender: detectSenderSmart(txt, lines),
     reference: (() => {
+      if (!isInvoiceLike) return "";
+
       let autoInv = "";
       if (lines && lines.length) autoInv = findInvoiceNumberFromLines(lines);
       if (!autoInv) autoInv = findInvoiceNumberStrict(txt);
+
       return autoInv && !isMaskedIbanLike(autoInv) ? autoInv : "";
     })()
   };
@@ -1823,6 +1899,12 @@ function analyzeDocument(txt, lines){
 function detectDocTypeSmart(txt){
   const t = String(txt || "").toLowerCase();
 
+  /* Erst Negativ-/Sonderfälle, damit "Zahlungserinnerung" nicht wegen
+     irgendeines späteren "Rechnung"-Worts als Rechnung eingeordnet wird. */
+  if (/\b(zahlungserinnerung|mahnung|erste mahnung|zweite mahnung|dritte mahnung|reminder|payment reminder|overdue notice|inkasso|forderungsmanagement)\b/i.test(t)) {
+    return "mahnung";
+  }
+
   if (/\bgutschrift\b|\bcredit note\b|\brefund\b/i.test(t)) {
     return "gutschrift";
   }
@@ -1831,7 +1913,7 @@ function detectDocTypeSmart(txt){
     return "angebot";
   }
 
-  if (/\brechnung\b|\binvoice\b|\bbill\b/i.test(t)) {
+  if (/\b(rechnung|invoice|bill|verbrauchsabrechnung)\b/i.test(t)) {
     return "rechnung";
   }
 
