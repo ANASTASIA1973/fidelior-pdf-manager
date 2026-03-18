@@ -514,7 +514,20 @@ function analyzeDocument(text, linesInput) {
   }
 
    let senderField = buildField(senderCandidates[0]);
-  let referenceField = (type === 'rechnung') ? buildField(referenceCandidates[0]) : buildField(null);
+let referenceField = buildField(null);
+
+if (type === 'rechnung') {
+  const bestRef = referenceCandidates[0];
+
+  if (
+    bestRef &&
+    bestRef.score >= 12 &&
+    /\d/.test(bestRef.value) &&
+    !/^(kopie|copy|original|erstellt)$/i.test(bestRef.value)
+  ) {
+    referenceField = buildField(bestRef);
+  }
+}
 
   const anchoredSender = supplierApi?.detectByAnchor
     ? supplierApi.detectByAnchor(payload, "sender", payload.profile, payload)
@@ -541,7 +554,7 @@ function analyzeDocument(text, linesInput) {
       source: "Gelernter Feldanker"
     };
   }
-  let bestAmount = amountCandidates[0] || null;
+ let bestAmount = amountCandidates.find(c => c.score >= 10) || null;
 
   if (bestAmount && bestAmount.value < 10) {
     const line = (bestAmount.line || '').toLowerCase();
@@ -568,7 +581,19 @@ function analyzeDocument(text, linesInput) {
       ? [bestAmount, ...amountCandidates.filter(c => c !== bestAmount)]
       : amountCandidates;
 
-    const voted = window.FideliorCandidateVoter.pickBestCandidate(votedPool);
+   const voted = window.FideliorCandidateVoter.pickBestCandidate(votedPool);
+
+if (!voted || voted.score < 10) {
+  amountField = buildField(bestAmount);
+} else {
+  amountField = {
+    value: voted.value,
+    confidence: voted.confidence,
+    score: voted.score,
+    source: voted.source,
+    line: voted.line || ''
+  };
+}
 
     amountField = {
       value: Number.isFinite(voted.value) ? voted.value : parseEuro(voted.value),
