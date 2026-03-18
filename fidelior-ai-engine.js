@@ -586,30 +586,24 @@ if (type === 'rechnung') {
       ? [bestAmount, ...amountCandidates.filter(c => c !== bestAmount)]
       : amountCandidates;
 
-   const voted = window.FideliorCandidateVoter.pickBestCandidate(votedPool);
+    const voted = window.FideliorCandidateVoter.pickBestCandidate(votedPool);
 
-if (!voted || voted.score < 10) {
-  amountField = buildField(bestAmount);
-} else {
-  amountField = {
-    value: voted.value,
-    confidence: voted.confidence,
-    score: voted.score,
-    source: voted.source,
-    line: voted.line || ''
-  };
-}
-
-    amountField = {
-      value: Number.isFinite(voted.value) ? voted.value : parseEuro(voted.value),
-      confidence: voted.confidence,
-      score: voted.score,
-      source: voted.source,
-      line: voted.line || ''
-    };
-
-    if (!Number.isFinite(amountField.value)) {
+    if (!voted || voted.score < 10) {
       amountField = buildField(bestAmount);
+    } else {
+      const votedValue = Number.isFinite(voted.value) ? voted.value : parseEuro(voted.value);
+
+      amountField = {
+        value: votedValue,
+        confidence: voted.confidence,
+        score: voted.score,
+        source: voted.source,
+        line: voted.line || ''
+      };
+
+      if (!Number.isFinite(amountField.value)) {
+        amountField = buildField(bestAmount);
+      }
     }
   } else {
     amountField = buildField(bestAmount);
