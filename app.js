@@ -6004,7 +6004,15 @@ async function handleSaveFlow(mode = "save_only") {
       ).trim();
       const confirmedDocType = (typeSel?.value || "").trim();
 
-      if (learnText && confirmedSender && window.FideliorSupplierProfiles?.learnFromDocument) {
+           const hasUsefulCoreData =
+        !!confirmedSender &&
+        (
+          !!confirmedInvoiceNo ||
+          !!confirmedInvoiceDate ||
+          !!confirmedAmount
+        );
+
+      if (learnText && hasUsefulCoreData && window.FideliorSupplierProfiles?.learnFromDocument) {
         window.FideliorSupplierProfiles.learnFromDocument({
           text: learnText,
           confirmedFields: {

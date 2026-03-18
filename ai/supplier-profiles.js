@@ -290,6 +290,10 @@
         amountLabels: uniq([...(prev.amountLabels || []), ...(profilePatch.amountLabels || [])]),
         dateLabels: uniq([...(prev.dateLabels || []), ...(profilePatch.dateLabels || [])]),
         docTypeHints: uniq([...(prev.docTypeHints || []), ...(profilePatch.docTypeHints || [])]),
+              anchors: {
+          ...(prev.anchors || {}),
+          ...(profilePatch.anchors || {})
+        },
         learned: true,
         updatedAt: new Date().toISOString()
       };
@@ -303,6 +307,7 @@
         amountLabels: uniq(profilePatch.amountLabels || []),
         dateLabels: uniq(profilePatch.dateLabels || []),
         docTypeHints: uniq(profilePatch.docTypeHints || []),
+               anchors: profilePatch.anchors || {},
         learned: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -330,6 +335,51 @@
     const amountLabel = extractAmountLabel(lines, amount);
     const dateLabel = extractDateLabel(lines, invoiceDate);
 
+    function findAnchor(value, kind) {
+      const needle = normalizeWs(value);
+      if (!needle) return null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const raw = normalizeWs(lines[i]);
+        if (!raw) continue;
+
+        let hit = false;
+
+        if (kind === "amount") {
+          const variants = [
+            needle,
+            needle.replace(".", ","),
+            needle.replace(",", ".")
+          ];
+          hit = variants.some(v => v && raw.includes(v));
+        } else {
+          hit = raw.includes(needle);
+        }
+
+        if (!hit) continue;
+
+        let zone = "bodyZone";
+        if (i <= 9) zone = "senderZone";
+        else if (i <= 18) zone = "metaZone";
+        else if (i >= lines.length - 10) zone = "footerZone";
+
+        return {
+          lineIndex: i,
+          zone,
+          lineText: raw.slice(0, 180)
+        };
+      }
+
+      return null;
+    }
+
+    const anchors = {
+      sender: findAnchor(sender, "sender"),
+      invoiceNumber: invoiceNo ? findAnchor(invoiceNo, "reference") : null,
+      invoiceDate: invoiceDate ? findAnchor(invoiceDate, "date") : null,
+      amount: amount ? findAnchor(amount, "amount") : null
+    };
+
     const profile = {
       id: "learned_" + slugify(sender),
       name: sender,
@@ -339,7 +389,8 @@
       invoiceExamples: invoiceNo ? [invoiceNo] : [],
       amountLabels: amountLabel ? [amountLabel] : [],
       dateLabels: dateLabel ? [dateLabel] : [],
-      docTypeHints: docType ? [docType] : []
+      docTypeHints: docType ? [docType] : [],
+      anchors
     };
 
     upsertLearnedProfile(profile);
@@ -416,12 +467,109 @@
 
     return "";
   }
+  function boostByAnchors(kind, candidates, profile) {
+    if (!profile || !Array.isArray(candidates) || !candidates.length) return candidates;
 
-  window.FideliorSupplierProfiles = {
+    const anchorMap = profile.anchors || {};
+    const anchor =
+      kind === "sender" ? anchorMap.sender :
+      kind === "reference" ? anchorMap.invoiceNumber :
+      kind === "date" ? anchorMap.invoiceDate :
+      kind === "amount" ? anchorMap.amount :
+      null;
+
+    if (!anchor) return candidates;
+
+    return candidates.map(c => {
+      const next = { ...c };
+
+      const candidateIndex = Number.isInteger(c.index) ? c.index : null;
+      const candidateSource = String(c.source || "");
+
+      if (anchor.zone && candidateSource.toLowerCase().includes(String(anchor.zone).replace("Zone", "").toLowerCase())) {
+        next.score += 6;
+        next.source = "Gelernter Feldanker";
+      }
+
+      if (candidateIndex !== null && Number.isInteger(anchor.lineIndex)) {
+        const distance = Math.abs(candidateIndex - anchor.lineIndex);
+
+        if (distance <= 1) {
+          next.score += 10;
+          next.source = "Gelernter Feldanker";
+        } else if (distance <= 3) {
+          next.score += 6;
+          next.source = "Gelernter Feldanker";
+        } else if (distance <= 6) {
+          next.score += 2;
+        }
+      }
+
+      return next;
+    }).sort((a, b) => b.score - a.score);
+  }
+
+  function detectByAnchor(payload, kind, profile) {
+    if (!profile || !payload) return "";
+
+    const anchorMap = profile.anchors || {};
+    const anchor =
+      kind === "sender" ? anchorMap.sender :
+      kind === "reference" ? anchorMap.invoiceNumber :
+      kind === "date" ? anchorMap.invoiceDate :
+      kind === "amount" ? anchorMap.amount :
+      null;
+
+    if (!anchor || !Number.isInteger(anchor.lineIndex)) return "";
+
+    const lines = Array.isArray(payload.lines) ? payload.lines : [];
+    const idx = anchor.lineIndex;
+
+    const scan = [idx - 1, idx, idx + 1].filter(i => i >= 0 && i < lines.length);
+
+    for (const i of scan) {
+      const line = normalizeWs(lines[i]);
+
+      if (!line) continue;
+
+      if (kind === "date") {
+        const m = line.match(/\b(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})\b/);
+        if (m && m[1]) return m[1];
+      }
+
+      if (kind === "reference") {
+        const m = line.match(/\b([A-Z0-9][A-Z0-9._/-]{3,24})\b/g);
+        if (m && m.length) {
+          const best = m
+            .map(v => normalizeWs(v).replace(/\s+/g, ""))
+            .filter(v => /\d/.test(v))
+            .sort((a, b) => b.length - a.length)[0];
+          if (best) return best;
+        }
+      }
+
+      if (kind === "amount") {
+        const m = line.match(/-?\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|-?\d+\.\d{2}/g);
+        if (m && m.length) {
+          const best = m[m.length - 1];
+          if (best) return best;
+        }
+      }
+
+      if (kind === "sender") {
+        if (line.length >= 3 && line.length <= 120) return line;
+      }
+    }
+
+    return "";
+  }
+   window.FideliorSupplierProfiles = {
     getAllProfiles,
     findMatchingProfile,
     learnFromDocument,
     boostCandidates,
-    detectDateByProfile
+    boostByAnchors,
+    detectDateByProfile,
+    detectByAnchor
   };
 })();

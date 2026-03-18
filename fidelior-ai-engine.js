@@ -135,6 +135,11 @@
 
 function detectInvoiceDate(payload) {
   const zones = payload?.zones || {};
+    const anchoredDate = window.FideliorSupplierProfiles?.detectByAnchor
+    ? window.FideliorSupplierProfiles.detectByAnchor(payload, "date", payload?.profile || null)
+    : "";
+
+  if (anchoredDate) return anchoredDate;
     const profileDate = window.FideliorSupplierProfiles?.detectDateByProfile
     ? window.FideliorSupplierProfiles.detectDateByProfile(payload, payload?.profile || null)
     : "";
@@ -463,21 +468,52 @@ function analyzeDocument(text, linesInput) {
   ];
   const amountCandidatesRaw = detectAmountCandidates(amountSourceLines);
 
-  const senderCandidates = supplierApi?.boostCandidates
+  let senderCandidates = supplierApi?.boostCandidates
     ? supplierApi.boostCandidates("sender", senderCandidatesRaw, payload.profile, payload)
     : senderCandidatesRaw;
 
-  const referenceCandidates = supplierApi?.boostCandidates
+  let referenceCandidates = supplierApi?.boostCandidates
     ? supplierApi.boostCandidates("reference", referenceCandidatesRaw, payload.profile, payload)
     : referenceCandidatesRaw;
 
-  const amountCandidates = supplierApi?.boostCandidates
+  let amountCandidates = supplierApi?.boostCandidates
     ? supplierApi.boostCandidates("amount", amountCandidatesRaw, payload.profile, payload)
     : amountCandidatesRaw;
 
-  const senderField = buildField(senderCandidates[0]);
-  const referenceField = (type === 'rechnung') ? buildField(referenceCandidates[0]) : buildField(null);
+  if (supplierApi?.boostByAnchors) {
+    senderCandidates = supplierApi.boostByAnchors("sender", senderCandidates, payload.profile, payload);
+    referenceCandidates = supplierApi.boostByAnchors("reference", referenceCandidates, payload.profile, payload);
+    amountCandidates = supplierApi.boostByAnchors("amount", amountCandidates, payload.profile, payload);
+  }
 
+   let senderField = buildField(senderCandidates[0]);
+  let referenceField = (type === 'rechnung') ? buildField(referenceCandidates[0]) : buildField(null);
+
+  const anchoredSender = supplierApi?.detectByAnchor
+    ? supplierApi.detectByAnchor(payload, "sender", payload.profile, payload)
+    : "";
+
+  const anchoredReference = supplierApi?.detectByAnchor
+    ? supplierApi.detectByAnchor(payload, "reference", payload.profile, payload)
+    : "";
+
+  if ((!senderField.value || senderField.confidence === "low") && anchoredSender) {
+    senderField = {
+      value: anchoredSender,
+      confidence: "medium",
+      score: 11,
+      source: "Gelernter Feldanker"
+    };
+  }
+
+  if (type === "rechnung" && (!referenceField.value || referenceField.confidence === "low") && anchoredReference) {
+    referenceField = {
+      value: anchoredReference,
+      confidence: "medium",
+      score: 11,
+      source: "Gelernter Feldanker"
+    };
+  }
   let bestAmount = amountCandidates[0] || null;
 
   if (bestAmount && bestAmount.value < 10) {
@@ -486,7 +522,18 @@ function analyzeDocument(text, linesInput) {
       bestAmount = null;
     }
   }
+  const anchoredAmount = supplierApi?.detectByAnchor
+    ? supplierApi.detectByAnchor(payload, "amount", payload.profile, payload)
+    : "";
 
+  if (!bestAmount && anchoredAmount) {
+    bestAmount = {
+      value: anchoredAmount,
+      score: 11,
+      source: "Gelernter Feldanker",
+      line: anchoredAmount
+    };
+  }
  let amountField;
 
 if (window.FideliorCandidateVoter) {
