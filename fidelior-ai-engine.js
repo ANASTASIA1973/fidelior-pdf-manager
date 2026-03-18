@@ -584,20 +584,24 @@ let bestAmount = amountCandidates.length ? amountCandidates[0] : null;
 if (bestAmount) {
   const line = (bestAmount.line || '').toLowerCase();
 
-  // ❌ kleine Beträge ohne klaren Kontext raus
+  // kleine Beträge nur dann verwerfen, wenn der Score schwach ist
   if (
     bestAmount.value < 10 &&
-    !/(gesamt|summe|total|betrag|zu zahlen|rechnungsbetrag|amount due|invoice total)/.test(line)
+    bestAmount.score < 20 &&
+    !/(gesamt|summe|total|betrag|zu zahlen|rechnungsbetrag|amount due|invoice total|endbetrag|zahlbetrag)/.test(line)
   ) {
     bestAmount = null;
   }
 
-  // ❌ MwSt / Netto NICHT als Hauptbetrag akzeptieren
-  if (/(mwst|ust|vat|tax|netto)/.test(line)) {
+  // MwSt/Netto nur dann verwerfen, wenn die Zeile NICHT gleichzeitig klar nach Gesamtbetrag aussieht
+  if (
+    /(mwst|ust|vat|tax|netto)/.test(line) &&
+    !/(gesamt|summe|total|betrag|zu zahlen|rechnungsbetrag|amount due|invoice total|endbetrag|zahlbetrag)/.test(line)
+  ) {
     bestAmount = null;
   }
 
-  // ❌ IBAN Nähe = fast sicher falsch
+  // IBAN-Nähe bleibt harter Ausschluss
   if (/de\d{2}/i.test(line)) {
     bestAmount = null;
   }
