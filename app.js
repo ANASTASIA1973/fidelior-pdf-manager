@@ -2001,41 +2001,38 @@ async function autoRecognize() {
     console.log("Document facts:", facts);
 
 let analysis = null;
+let uiModel = null;
 
 try {
-  if (
-    window.FideliorDocAnalyzer &&
-    window.FideliorDocumentValidator &&
-    window.FideliorDocumentPresenter
-  ) {
-    const analyzed = window.FideliorDocAnalyzer.analyze(txt, lines);
-    const validated = window.FideliorDocumentValidator.validate(analyzed);
-    const uiModel = window.FideliorDocumentPresenter.buildUiModel(validated);
+  const analyzed = window.FideliorDocAnalyzer?.analyze
+    ? window.FideliorDocAnalyzer.analyze(txt, lines)
+    : null;
 
-    analysis = {
-      type: /^(rechnung|gutschrift)$/.test(uiModel.docType) ? "rechnung" : "dokument",
-      semanticType: uiModel.docType || "dokument",
-      sender: uiModel.fields.sender || "",
-      reference: uiModel.fields.invoiceNumber || "",
-      date: uiModel.fields.invoiceDate || "",
-      amount: uiModel.fields.amount
-        ? Number(String(uiModel.fields.amount).replace(",", "."))
-        : NaN,
-      summary: uiModel.summary || "",
-      warnings: uiModel.warnings || [],
-      confidence: uiModel.confidence || 0
-    };
-  } else {
-    analysis = analyzeDocument(txt, lines);
-  }
-} catch (e) {
-  console.warn("New document analyzer failed, fallback active:", e);
+  const validated = window.FideliorDocumentValidator?.validate
+    ? window.FideliorDocumentValidator.validate(analyzed)
+    : null;
+
+  uiModel = window.FideliorDocumentPresenter?.buildUiModel
+    ? window.FideliorDocumentPresenter.buildUiModel(validated)
+    : null;
+
   analysis = analyzeDocument(txt, lines);
+} catch (e) {
+  console.warn("Central document pipeline failed, fallback active:", e);
+  analysis = analyzeDocument(txt, lines);
+  uiModel = null;
 }
 
-    /* Betrag */
+    /* Betrag – nur bei hoher Sicherheit automatisch */
     if (amountEl && !amountEl.dataset.userTyped) {
-      if (isFinite(analysis.amount) && !isNaN(analysis.amount)) {
+      const amountConfidence =
+        uiModel?.fieldMeta?.amount?.confidence ||
+        analysis?.fields?.amount?.confidence ||
+        "low";
+
+      const mayAutofillAmount = amountConfidence === "high";
+
+      if (mayAutofillAmount && isFinite(analysis.amount) && !isNaN(analysis.amount)) {
         const euro = numToEuro(analysis.amount);
         amountEl.dataset.raw = euro;
         amountEl.value = euro;
@@ -2050,16 +2047,27 @@ try {
         updateAmountRequiredUI();
       }
     }
-
-    /* Datum */
+    /* Datum – high oder medium erlaubt */
     if (invDateEl && !invDateEl.value.trim() && analysis.date) {
-      invDateEl.value = analysis.date;
-      invDateEl.classList.add("auto");
+      const dateConfidence =
+        uiModel?.fieldMeta?.invoiceDate?.confidence ||
+        analysis?.fields?.date?.confidence ||
+        "low";
+
+      if (dateConfidence === "high" || dateConfidence === "medium") {
+        invDateEl.value = analysis.date;
+        invDateEl.classList.add("auto");
+      }
     }
 
-    /* Rechnungsnummer */
+      /* Rechnungsnummer – nur bei hoher Sicherheit automatisch */
     if (invNoEl && !invNoEl.dataset.userTyped) {
-      if (analysis.reference) {
+      const refConfidence =
+        uiModel?.fieldMeta?.invoiceNumber?.confidence ||
+        analysis?.fields?.reference?.confidence ||
+        "low";
+
+      if (refConfidence === "high" && analysis.reference) {
         invNoEl.value = analysis.reference;
         invNoEl.classList.add("auto");
       } else {
@@ -2067,9 +2075,14 @@ try {
         invNoEl.classList.remove("auto");
       }
     }
-/* Absender – nur bei starkem Treffer setzen */
+/* Absender – nur bei hoher Sicherheit setzen */
 if (senderEl && !senderEl.dataset.userTyped) {
-  if (analysis.sender) {
+  const senderConfidence =
+    uiModel?.fieldMeta?.sender?.confidence ||
+    analysis?.fields?.sender?.confidence ||
+    "low";
+
+  if (senderConfidence === "high" && analysis.sender) {
     senderEl.value = analysis.sender;
     senderEl.classList.add("auto");
   } else {

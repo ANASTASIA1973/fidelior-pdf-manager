@@ -25,11 +25,17 @@
       .filter(Boolean);
   }
 
-  function detectZones(lines) {
-    const head = Array.isArray(lines) ? lines.slice(0, 30) : [];
+  function uniqueIndices(arr) {
+    return [...new Set((arr || []).filter(v => Number.isInteger(v) && v >= 0))].sort((a, b) => a - b);
+  }
 
-    let recipientStart = -1;
-    let recipientEnd = -1;
+  function sliceByIndices(lines, indices) {
+    return uniqueIndices(indices).map(i => normalizeWs(lines[i] || "")).filter(Boolean);
+  }
+
+  function detectRecipientRange(head) {
+    let start = -1;
+    let end = -1;
 
     for (let i = 0; i < head.length - 2; i++) {
       const l1 = normalizeWs(head[i] || "");
@@ -38,35 +44,149 @@
 
       const hasZipCity = /\b\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]{2,}/.test(l3);
       const hasStreet = /\b(straße|str\.|weg|allee|platz|ring|gasse|ufer|chaussee|pfad|steig|road|street|avenue|lane|drive)\b/i.test(l2);
-      const looksLikeName = /^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,}$/.test(l1);
+      const looksLikeName =
+        /^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,}$/.test(l1) &&
+        !/\b(rechnung|invoice|kundennummer|vertragsnummer|datum|tarif|seite)\b/i.test(l1);
 
       if (hasZipCity && hasStreet && looksLikeName) {
-        recipientStart = i;
-        recipientEnd = i + 2;
+        start = i;
+        end = i + 2;
         break;
       }
     }
 
-    const headerTop = head.filter((_, i) => i <= 10 && (recipientStart < 0 || (i < recipientStart || i > recipientEnd)));
-    const recipientBlock = recipientStart >= 0 ? head.slice(recipientStart, recipientEnd + 1) : [];
-    const body = lines.slice(Math.max(8, recipientEnd + 1));
+    return { start, end };
+  }
 
-    return {
-      headerTop,
-      recipientBlock,
-      body,
-      indices: {
-        recipientStart,
-        recipientEnd
+  function detectMetaIndices(head) {
+    const out = [];
+
+    for (let i = 0; i < head.length; i++) {
+      const s = normalizeWs(head[i] || "");
+      if (!s) continue;
+
+      if (/\b(rechnungs?(nummer|nr|no)|invoice\s*(no|number|nr)|kundennummer|kunden\-?nr|vertragsnummer|vertrag|datum|invoice\s*date|auftragsdatum|customer\s*(no|number)|tarif)\b/i.test(s)) {
+        out.push(i);
+        continue;
       }
-    };
+
+      if (
+        /\b\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}\b/.test(s) &&
+        /\b[A-Z0-9._\/-]{4,}\b/.test(s)
+      ) {
+        out.push(i);
+      }
+    }
+
+    return uniqueIndices(out);
+  }
+
+  function detectTotalsIndices(lines) {
+    const out = [];
+    const totalLineRx = /\b(gesamt|summe|total|rechnungsbetrag|endbetrag|zu\s+zahlen|zahlbetrag|amount\s+due|invoice\s+total)\b/i;
+    const moneyRx = /(-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+\.\d{2})/;
+
+    for (let i = 0; i < lines.length; i++) {
+      const s = normalizeWs(lines[i] || "");
+      if (!s) continue;
+
+      if (totalLineRx.test(s) && moneyRx.test(s)) {
+        out.push(i - 1, i, i + 1);
+      }
+    }
+
+    return uniqueIndices(out.filter(i => i >= 0 && i < lines.length));
+  }
+
+  function detectFooterStart(lines) {
+    for (let i = Math.max(0, lines.length - 20); i < lines.length; i++) {
+      const s = normalizeWs(lines[i] || "");
+      if (!s) continue;
+
+      if (
+        /\b(iban|bic|swift|ust-?id|umsatzsteuer|steuernummer|www\.|http|e-?mail|email|telefon|fax|geschäftsführer|bankverbindung)\b/i.test(s)
+      ) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   function extractPayload(text, linesInput) {
     const rawText = String(text || "");
     const lines = buildLines(rawText, linesInput);
-    const zones = detectZones(lines);
-    const profile = window.FideliorSupplierProfiles?.findMatchingProfile?.(rawText) || null;
+    const head = lines.slice(0, 32);
+
+    const recipient = detectRecipientRange(head);
+    const metaIndices = detectMetaIndices(head);
+    const totalsIndices = detectTotalsIndices(lines);
+    const footerStart = detectFooterStart(lines);
+
+    const recipientIndices =
+      recipient.start >= 0 && recipient.end >= recipient.start
+        ? Array.from({ length: recipient.end - recipient.start + 1 }, (_, k) => recipient.start + k)
+        : [];
+
+    const metaStart = metaIndices.length ? Math.max(0, metaIndices[0] - 1) : -1;
+    const metaEnd = metaIndices.length ? Math.min(head.length - 1, metaIndices[metaIndices.length - 1] + 1) : -1;
+
+    const metaRange =
+      metaStart >= 0 && metaEnd >= metaStart
+        ? Array.from({ length: metaEnd - metaStart + 1 }, (_, k) => metaStart + k)
+        : [];
+
+    const excludedHeader = new Set([...recipientIndices, ...metaRange]);
+    const senderHeaderIndices = [];
+    for (let i = 0; i < Math.min(10, head.length); i++) {
+      if (!excludedHeader.has(i)) senderHeaderIndices.push(i);
+    }
+
+    const bodyStart = Math.max(
+      8,
+      recipient.end >= 0 ? recipient.end + 1 : 0,
+      metaEnd >= 0 ? metaEnd + 1 : 0
+    );
+
+    const footerIdx = footerStart >= 0 ? footerStart : lines.length;
+    const tableEnd = totalsIndices.length ? Math.max(0, totalsIndices[0] - 1) : footerIdx - 1;
+
+    const bodyIndices = [];
+    for (let i = bodyStart; i < footerIdx; i++) bodyIndices.push(i);
+
+    const tableIndices = [];
+    for (let i = bodyStart; i <= tableEnd && i < footerIdx; i++) tableIndices.push(i);
+
+    const footerIndices = [];
+    if (footerStart >= 0) {
+      for (let i = footerStart; i < lines.length; i++) footerIndices.push(i);
+    }
+
+    const zones = {
+      senderZone: sliceByIndices(lines, senderHeaderIndices),
+      recipientZone: sliceByIndices(lines, recipientIndices),
+      metaZone: sliceByIndices(lines, metaRange),
+      bodyZone: sliceByIndices(lines, bodyIndices),
+      tableZone: sliceByIndices(lines, tableIndices),
+      totalsZone: sliceByIndices(lines, totalsIndices),
+      footerZone: sliceByIndices(lines, footerIndices),
+
+      headerTop: sliceByIndices(lines, senderHeaderIndices),
+      recipientBlock: sliceByIndices(lines, recipientIndices),
+      metaBlock: sliceByIndices(lines, metaRange),
+      body: sliceByIndices(lines, bodyIndices),
+
+      indices: {
+        recipientStart: recipient.start,
+        recipientEnd: recipient.end,
+        metaStart,
+        metaEnd,
+        bodyStart,
+        footerStart
+      }
+    };
+
+    const profile =
+      window.FideliorSupplierProfiles?.findMatchingProfile?.(rawText) || null;
 
     return {
       rawText,
