@@ -963,23 +963,41 @@ async function renderPanel(file) {
   const tasks = await loadTasks(file.name);
   const open = tasks.filter(t => t.status !== 'done');
 
-  const docTitle = [
-    core?.type || fmtFolderType(file.folderType),
-    core?.sender || m.absender || "",
-    core?.objectName || file.objectName || "",
-    core?.amount || m.betrag || ""
-  ].filter(Boolean).join(" – ");
+  const docType = core?.type || fmtFolderType(file.folderType);
+  const amount = core?.amount || m.betrag || '';
+  const docDate = core?.date || m.datum || '';
+  const sender = core?.sender || m.absender || '';
+  const objectCode = core?.objectCode || file.objectCode || '';
+  const objectName = core?.objectName || file.objectName || '';
+  const modifiedLabel = fmtDate(file.modified);
+  const fileSizeLabel = fmtSize(file.size);
+  const filePath = (file.pathSegs || []).join(' › ');
 
-  const docSummary = [
-    core?.sender || m.absender ? `Absender: ${core?.sender || m.absender}` : "",
-    core?.amount || m.betrag ? `Betrag: ${core?.amount || m.betrag}` : "",
-    core?.date || m.datum ? `Datum: ${core?.date || m.datum}` : "",
-    core?.objectCode || file.objectCode ? `Objekt: ${core?.objectCode || file.objectCode}` : ""
-  ].filter(Boolean).join(" · ");
+  const smallFileName = file.name || '';
+  const largeTitle = buildArchivTitle({
+    file,
+    core,
+    docType,
+    amount,
+    sender,
+    objectCode,
+    objectName
+  });
+
+  const summary = buildArchivSummary({
+    file,
+    core,
+    docType,
+    amount,
+    docDate,
+    sender,
+    objectCode,
+    objectName
+  });
 
   const catPills = [
-    S.obj ? `<span class="av3-cat-pill">${S.obj.code}</span>` : '',
-    file.folderType ? `<span class="av3-cat-pill green">${fmtFolderType(file.folderType)}</span>` : '',
+    objectCode ? `<span class="av3-cat-pill">${objectCode}</span>` : '',
+    docType ? `<span class="av3-cat-pill green">${docType}</span>` : '',
     file.year ? `<span class="av3-cat-pill blue">${file.year}</span>` : '',
     file.subfolder ? `<span class="av3-cat-pill amber">${file.subfolder}</span>` : '',
   ].filter(Boolean).join('');
@@ -993,37 +1011,61 @@ async function renderPanel(file) {
           <span style="${done ? 'text-decoration:line-through;opacity:.5' : ''}">${t.title}</span>
         </div>`;
       }).join('')
-    : '<div class="av3-no-tasks">Noch keine Aufgaben</div>';
+    : '<div class="av3-no-tasks">Noch keine Aufgaben vorhanden.</div>';
 
   el.innerHTML = `
     <div class="av3-panel-rail">
       ${railButtons(open.length)}
     </div>
+
     <div class="av3-panel-content">
-      <div class="av3-panel-meta">
-             <div class="av3-ph-date">${fmtDate(file.modified)}</div>
-        <div class="av3-ph-name">${docTitle || file.name}</div>
-        ${docSummary ? `<div style="font-size:11px;color:#6B7280;line-height:1.45;margin:-2px 0 10px 0">${docSummary}</div>` : ''}
-        <div class="av3-cat-pills">${catPills || '<span style="color:#9CA3AF;font-size:11px">—</span>'}</div>
-        <div class="av3-meta">
-          ${(core?.type || file.folderType) ? `<div class="av3-meta-row"><span class="av3-meta-label">Typ</span><span class="av3-meta-val">${core?.type || fmtFolderType(file.folderType)}</span></div>` : ''}
-          ${(core?.amount || m.betrag) ? `<div class="av3-meta-row"><span class="av3-meta-label">Betrag</span><span class="av3-meta-val">${core?.amount || m.betrag}</span></div>` : ''}
-          ${(core?.date || m.datum) ? `<div class="av3-meta-row"><span class="av3-meta-label">Belegdatum</span><span class="av3-meta-val">${core?.date || m.datum}</span></div>` : ''}
-          ${(core?.sender || m.absender) ? `<div class="av3-meta-row"><span class="av3-meta-label">Absender</span><span class="av3-meta-val">${core?.sender || m.absender}</span></div>` : ''}
-          ${(core?.objectCode || file.objectCode) ? `<div class="av3-meta-row"><span class="av3-meta-label">Objekt</span><span class="av3-meta-val">${core?.objectCode || file.objectCode}</span></div>` : ''}
-          <div class="av3-meta-row"><span class="av3-meta-label">Dateigröße</span><span class="av3-meta-val">${fmtSize(file.size)}</span></div>
-          <div class="av3-meta-row"><span class="av3-meta-label">Geändert</span><span class="av3-meta-val">${fmtDate(file.modified)}</span></div>
-          ${file.subfolder ? `<div class="av3-meta-row"><span class="av3-meta-label">Unterordner</span><span class="av3-meta-val">${file.subfolder}</span></div>` : ''}
-          <div class="av3-meta-row"><span class="av3-meta-label">Pfad</span><span class="av3-meta-val mono">${(file.pathSegs || []).join(' › ')}</span></div>
-        </div>
-        <div class="av3-tasks-mini">
-          <div class="av3-tasks-mini-hdr">
-            <span class="av3-tasks-mini-title">Aufgaben${open.length ? ' (' + open.length + ')' : ''}</span>
-            <button class="av3-task-add" onclick="window.__av3.task()">+ Erstellen</button>
+      <div class="av3-panel-meta av3-doc-shell">
+
+        <div class="av3-doc-hero">
+          <div class="av3-doc-file">${smallFileName || '—'}</div>
+          <div class="av3-doc-title">${largeTitle || smallFileName || 'Dokument'}</div>
+          ${summary ? `<div class="av3-doc-summary">${summary}</div>` : ''}
+          <div class="av3-doc-date-row">
+            ${docDate ? `<span class="av3-doc-date-main">${docDate}</span>` : `<span class="av3-doc-date-main">${modifiedLabel}</span>`}
           </div>
-          ${taskHTML}
+          <div class="av3-cat-pills">${catPills || '<span style="color:#9CA3AF;font-size:11px">—</span>'}</div>
         </div>
+
+        <div class="av3-doc-section">
+          <div class="av3-doc-section-title">Dokumentdaten</div>
+          <div class="av3-meta">
+            ${docType ? `<div class="av3-meta-row"><span class="av3-meta-label">Typ</span><span class="av3-meta-val">${docType}</span></div>` : ''}
+            ${amount ? `<div class="av3-meta-row"><span class="av3-meta-label">Betrag</span><span class="av3-meta-val">${amount}</span></div>` : ''}
+            ${docDate ? `<div class="av3-meta-row"><span class="av3-meta-label">Belegdatum</span><span class="av3-meta-val">${docDate}</span></div>` : ''}
+            ${sender ? `<div class="av3-meta-row"><span class="av3-meta-label">Absender</span><span class="av3-meta-val">${sender}</span></div>` : ''}
+            ${objectCode ? `<div class="av3-meta-row"><span class="av3-meta-label">Objekt</span><span class="av3-meta-val">${objectCode}${objectName ? ` · ${objectName}` : ''}</span></div>` : ''}
+            ${file.subfolder ? `<div class="av3-meta-row"><span class="av3-meta-label">Unterordner</span><span class="av3-meta-val">${file.subfolder}</span></div>` : ''}
+            ${filePath ? `<div class="av3-meta-row"><span class="av3-meta-label">Pfad</span><span class="av3-meta-val mono">${filePath}</span></div>` : ''}
+          </div>
+        </div>
+
+        <div class="av3-doc-section">
+          <div class="av3-doc-section-title">Dateiinformationen</div>
+          <div class="av3-meta">
+            <div class="av3-meta-row"><span class="av3-meta-label">Dateiname</span><span class="av3-meta-val mono">${smallFileName || '—'}</span></div>
+            <div class="av3-meta-row"><span class="av3-meta-label">Größe</span><span class="av3-meta-val">${fileSizeLabel || '—'}</span></div>
+            <div class="av3-meta-row"><span class="av3-meta-label">Geändert</span><span class="av3-meta-val">${modifiedLabel || '—'}</span></div>
+            <div class="av3-meta-row"><span class="av3-meta-label">Quelle</span><span class="av3-meta-val">Archiv</span></div>
+          </div>
+        </div>
+
+        <div class="av3-doc-section av3-doc-section-tasks">
+          <div class="av3-tasks-mini">
+            <div class="av3-tasks-mini-hdr">
+              <span class="av3-tasks-mini-title">Aufgaben${open.length ? ' (' + open.length + ')' : ''}</span>
+              <button class="av3-task-add" onclick="window.__av3.task()">+ Erstellen</button>
+            </div>
+            ${taskHTML}
+          </div>
+        </div>
+
       </div>
+
       <div class="av3-panel-preview" id="fdl-av3-prev">
         <div class="av3-prev-label">Vorschau</div>
         <div class="av3-loading"><div class="av3-spinner"></div> PDF wird gerendert…</div>
@@ -1033,6 +1075,42 @@ async function renderPanel(file) {
   renderPDF(file);
 }
 
+function buildArchivTitle(ctx) {
+  const {
+    file, docType, sender, amount, objectCode
+  } = ctx || {};
+
+  const nameStem = String(file?.name || '').replace(/\.pdf$/i, '');
+
+  if (docType === 'Rechnung') {
+    const parts = [];
+    if (docType) parts.push(docType);
+    if (sender) parts.push(sender);
+    if (objectCode) parts.push(objectCode);
+    if (amount) parts.push(amount);
+    return parts.filter(Boolean).join(' – ');
+  }
+
+  if (sender) return sender;
+  return nameStem || 'Dokument';
+}
+
+function buildArchivSummary(ctx) {
+  const {
+    docType, sender, amount, docDate, objectCode, objectName, file
+  } = ctx || {};
+
+  const bits = [];
+
+  if (docType) bits.push(docType);
+  if (sender) bits.push(`Absender ${sender}`);
+  if (objectCode) bits.push(`Objekt ${objectCode}${objectName ? ` (${objectName})` : ''}`);
+  if (amount) bits.push(`Betrag ${amount}`);
+  if (docDate) bits.push(`vom ${docDate}`);
+  if (!bits.length && file?.name) bits.push(file.name.replace(/\.pdf$/i, ''));
+
+  return bits.join(' · ');
+}
 function railButtons(taskCount) {
   return `
     <button class="av3-rail-btn" title="Herunterladen" onclick="window.__av3.dl()">${SVG.download}</button>

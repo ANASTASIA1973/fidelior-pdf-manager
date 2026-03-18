@@ -453,3 +453,112 @@ body.fdl-pro .btn-outline {
 .fdl-sb-label { display:block; line-height:1.2; }
 .av3-topbar-close { display:inline-flex !important; align-items:center; justify-content:center; width:36px; height:36px; border:1px solid var(--pro-border,#E3E3E8); background:#fff; border-radius:8px; cursor:pointer; color:#6B7280; }
 .av3-topbar-close:hover { color:#111827; background:#F4F4F6; }
+/* =========================================================
+   Archiv rechts – Dokumentkarte
+========================================================= */
+
+.av3-doc-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 18px;
+  max-height: 380px;
+}
+
+.av3-doc-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #E5E7EB;
+}
+
+.av3-doc-file {
+  font-size: 11px;
+  color: #9CA3AF;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.av3-doc-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.35;
+}
+
+.av3-doc-summary {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #4B5563;
+}
+
+.av3-doc-date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.av3-doc-date-main {
+  font-size: 12px;
+  color: #6B7280;
+  font-weight: 500;
+}
+
+.av3-doc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #E5E7EB;
+}
+
+.av3-doc-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.av3-doc-section-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #9CA3AF;
+}
+
+.av3-doc-section .av3-meta {
+  gap: 0;
+}
+
+.av3-doc-section .av3-meta-row {
+  padding: 5px 0;
+}
+
+.av3-doc-section .av3-meta-label {
+  width: 96px;
+}
+
+.av3-doc-section .av3-meta-val {
+  max-width: 220px;
+  text-align: right;
+  word-break: break-word;
+}
+
+.av3-doc-section .av3-meta-val.mono {
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.av3-doc-section-tasks .av3-tasks-mini {
+  padding: 0;
+  border-top: none;
+}
+
+.av3-doc-section-tasks .av3-no-tasks {
+  padding: 2px 0 0;
+}
+
+.av3-doc-section-tasks .av3-task-row {
+  padding: 5px 0;
+}
