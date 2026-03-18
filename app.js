@@ -2074,18 +2074,35 @@ try {
     }
 
       /* Rechnungsnummer – nur bei hoher Sicherheit automatisch */
-    if (invNoEl && !invNoEl.dataset.userTyped) {
+    {
       const refConfidence =
         uiModel?.fieldMeta?.invoiceNumber?.confidence ||
         analysis?.fields?.reference?.confidence ||
         "low";
 
-      if (refConfidence === "high" && analysis.reference) {
-        invNoEl.value = analysis.reference;
-        invNoEl.classList.add("auto");
-      } else {
-        invNoEl.value = "";
-        invNoEl.classList.remove("auto");
+      const currentValue = String(invNoEl?.value || "").trim();
+      const currentLooksAuto =
+        invNoEl?.classList.contains("auto") ||
+        invNoEl?.dataset?.kiDetected === "1";
+
+      const mayWrite =
+        !!invNoEl &&
+        (
+          !invNoEl.dataset.userTyped ||
+          currentLooksAuto ||
+          !currentValue
+        );
+
+      if (mayWrite) {
+        if (refConfidence === "high" && analysis.reference) {
+          invNoEl.value = analysis.reference;
+          invNoEl.classList.add("auto");
+          invNoEl.dataset.kiDetected = "1";
+        } else {
+          invNoEl.value = "";
+          invNoEl.classList.remove("auto");
+          delete invNoEl.dataset.kiDetected;
+        }
       }
     }
 /* Absender – nur bei hoher Sicherheit setzen */
