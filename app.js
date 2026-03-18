@@ -2094,15 +2094,22 @@ try {
         );
 
       if (mayWrite) {
-        if (refConfidence === "high" && analysis.reference) {
-          invNoEl.value = analysis.reference;
-          invNoEl.classList.add("auto");
-          invNoEl.dataset.kiDetected = "1";
-        } else {
-          invNoEl.value = "";
-          invNoEl.classList.remove("auto");
-          delete invNoEl.dataset.kiDetected;
-        }
+     const isRealInvoice = analysis?.type === "rechnung";
+
+if (
+  isRealInvoice &&
+  refConfidence === "high" &&
+  analysis.reference &&
+  /\d/.test(analysis.reference) // MUSS Zahl enthalten
+) {
+  invNoEl.value = analysis.reference;
+  invNoEl.classList.add("auto");
+  invNoEl.dataset.kiDetected = "1";
+} else {
+  invNoEl.value = "";
+  invNoEl.classList.remove("auto");
+  delete invNoEl.dataset.kiDetected;
+}
       }
     }
 /* Absender – nur bei hoher Sicherheit setzen */
