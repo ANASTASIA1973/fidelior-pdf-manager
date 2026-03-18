@@ -490,28 +490,32 @@ egyoSuffixEl?.addEventListener("change", ()=> refreshPreview());
   const fileNamePrev=$("#fileNamePreview"), targetPrev=$("#targetPreview");
   const amountLabel = document.querySelector("label[for='amountInput']");
   const amountStar  = document.getElementById("amountRequiredStar");
-
   function updateAmountRequiredUI() {
     const isInv = (typeof isInvoice === "function") ? isInvoice() : false;
 
     if (amountEl) {
-      // Pflichtflag
       amountEl.required = isInv;
 
-      // aktueller Inhalt (raw bevorzugen, falls vorhanden)
-      const current = (amountEl.dataset.raw !== undefined
-        ? amountEl.dataset.raw
-        : amountEl.value || ""
+      const current = String(
+        amountEl.dataset.raw !== undefined
+          ? amountEl.dataset.raw
+          : (amountEl.value || "")
       ).trim();
 
       const isEmpty = current === "";
 
-      // Rot nur: Rechnung + leer
-      amountEl.classList.toggle("input--error", isInv && isEmpty);
+      // nur Rechnungen rot markieren
+      amountEl.classList.toggle("input--error", !!isInv && isEmpty);
+
+      // bei Nicht-Rechnung niemals künstlich Fehlerzustand halten
+      if (!isInv) {
+        amountEl.classList.remove("required");
+      } else {
+        amountEl.classList.add("required");
+      }
     }
 
     if (amountStar) {
-      // Sternchen nur bei Rechnung
       amountStar.style.display = isInv ? "inline" : "none";
     }
   }
@@ -2073,7 +2077,8 @@ try {
       }
     }
 
-      /* Rechnungsnummer – Engine zuerst, dann sauberer Label-Fallback */
+    
+         /* Rechnungsnummer – nur für echte Rechnungen relevant */
     {
       const refConfidence =
         uiModel?.fieldMeta?.invoiceNumber?.confidence ||
@@ -2094,26 +2099,29 @@ try {
         );
 
       if (mayWrite) {
-        const isRealInvoice = analysis?.type === "rechnung";
+        const detectedType = String(
+          analysis?.type ||
+          analysis?.semanticType ||
+          ""
+        ).trim().toLowerCase();
 
-        let refValue =
-          (refConfidence === "high" && analysis.reference && /\d/.test(analysis.reference))
-            ? String(analysis.reference).trim()
-            : "";
+        const isRealInvoice =
+          detectedType === "rechnung" || detectedType === "gutschrift";
 
-        // Fallback: explizite Rechnungsnummer-Zeilen aus dem OCR-Layout lesen
-        if (!refValue && isRealInvoice && Array.isArray(lines) && typeof findInvoiceNumberFromLines === "function") {
-          const fallbackRef = String(findInvoiceNumberFromLines(lines) || "").trim();
-          if (fallbackRef && /\d/.test(fallbackRef)) {
-            refValue = fallbackRef;
-          }
-        }
+        const refValue = String(analysis?.reference || "").trim();
 
-        if (isRealInvoice && refValue) {
+        const validRef =
+          isRealInvoice &&
+          refConfidence === "high" &&
+          refValue &&
+          /\d/.test(refValue);
+
+        if (validRef) {
           invNoEl.value = refValue;
           invNoEl.classList.add("auto");
           invNoEl.dataset.kiDetected = "1";
-        } else {
+        } else if (!currentValue || currentLooksAuto) {
+          // bei Vertrag / Dokument / Bestätigung Feld bewusst leer lassen
           invNoEl.value = "";
           invNoEl.classList.remove("auto");
           delete invNoEl.dataset.kiDetected;
@@ -2135,21 +2143,48 @@ if (senderEl && !senderEl.dataset.userTyped) {
     senderEl.classList.remove("auto");
   }
 }
-    /* Dokumenttyp
-       WICHTIG: nur setzen, wenn leer ODER auf neutralem Platzhalter */
+    /* Dokumenttyp – zentrale Engine ist führend */
     if (typeSel) {
       const current = String(typeSel.value || "").trim();
-      const neutral = current === "" || current === "dokument";
+      const currentIsNeutral = current === "" || current === "dokument";
 
-      if (neutral) {
-        const detected = analysis.type;
-        const exists = Array.from(typeSel.options).some(o => o.value === detected);
+      const detectedRaw = String(
+        analysis?.type ||
+        analysis?.semanticType ||
+        ""
+      ).trim().toLowerCase();
 
-        if (exists) {
-          typeSel.value = detected;
-          toast(`Dokumentenart erkannt: <strong>${detected}</strong>`, 2000);
-          updateAmountRequiredUI();
-        }
+      // auf echte Select-Werte mappen
+      let detected = "dokument";
+
+      if (detectedRaw === "rechnung" || detectedRaw === "gutschrift") {
+        detected = "rechnung";
+      } else if (detectedRaw === "vertrag") {
+        detected = Array.from(typeSel.options).some(o => o.value === "vertrag")
+          ? "vertrag"
+          : "dokument";
+      } else if (detectedRaw === "angebot") {
+        detected = Array.from(typeSel.options).some(o => o.value === "angebot")
+          ? "angebot"
+          : "dokument";
+      } else if (detectedRaw === "mahnung") {
+        detected = Array.from(typeSel.options).some(o => o.value === "mahnung")
+          ? "mahnung"
+          : "dokument";
+      }
+
+      const exists = Array.from(typeSel.options).some(o => o.value === detected);
+
+      if (exists && (currentIsNeutral || current !== detected)) {
+        typeSel.value = detected;
+        toast(`Dokumentenart erkannt: <strong>${detected}</strong>`, 2000);
+      }
+
+      if (typeof updateAmountRequiredUI === "function") {
+        updateAmountRequiredUI();
+      }
+      if (typeof updateStatusPillsVisibility === "function") {
+        updateStatusPillsVisibility();
       }
     }
 
