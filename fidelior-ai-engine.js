@@ -95,6 +95,11 @@
 
   function detectSemanticType(text) {
     const t = String(text || '').toLowerCase();
+    const neg = window.FideliorNegativeRules || null;
+
+    if (neg?.isDefinitelyNotInvoice && neg.isDefinitelyNotInvoice(t)) {
+      return 'dokument';
+    }
 
     if (/\b(zahlungserinnerung|mahnung|erste mahnung|zweite mahnung|dritte mahnung|reminder|payment reminder|overdue notice|inkasso|forderungsmanagement)\b/i.test(t)) {
       return 'mahnung';
@@ -105,12 +110,20 @@
     if (/\b(angebot|offer|quotation)\b/i.test(t)) {
       return 'angebot';
     }
-    if (/\b(rechnung|invoice|bill|verbrauchsabrechnung)\b/i.test(t)) {
+    if (/\b(vertragsbestätigung|auftragsbestätigung|bestätigung)\b/i.test(t)) {
+      return 'vertrag';
+    }
+
+    const hasInvoiceLabel = /\b(rechnung|invoice|bill|verbrauchsabrechnung)\b/i.test(t);
+    const hasTotal = /\b(gesamt|summe|total|zu zahlen|rechnungsbetrag|invoice total|amount due)\b/i.test(t);
+    const hasCurrency = /€|\beur\b/i.test(t);
+
+    if (hasInvoiceLabel && (hasTotal || hasCurrency)) {
       return 'rechnung';
     }
+
     return 'dokument';
   }
-
   function detectTypeFromSemantic(semanticType) {
     return (semanticType === 'rechnung' || semanticType === 'gutschrift') ? 'rechnung' : 'dokument';
   }
@@ -480,6 +493,20 @@ function analyzeDocument(text, linesInput) {
     ? supplierApi.boostCandidates("amount", amountCandidatesRaw, payload.profile, payload)
     : amountCandidatesRaw;
 
+  const neg = window.FideliorNegativeRules || null;
+
+  if (neg?.isBadReferenceCandidate) {
+    referenceCandidates = referenceCandidates.filter(c =>
+      !neg.isBadReferenceCandidate(c, payload.rawText)
+    );
+  }
+
+  if (neg?.isBadAmountCandidate) {
+    amountCandidates = amountCandidates.filter(c =>
+      !neg.isBadAmountCandidate(c)
+    );
+  }
+
   if (supplierApi?.boostByAnchors) {
     senderCandidates = supplierApi.boostByAnchors("sender", senderCandidates, payload.profile, payload);
     referenceCandidates = supplierApi.boostByAnchors("reference", referenceCandidates, payload.profile, payload);
@@ -534,25 +561,29 @@ function analyzeDocument(text, linesInput) {
       line: anchoredAmount
     };
   }
- let amountField;
+  let amountField;
 
-if (window.FideliorCandidateVoter) {
+  if (window.FideliorCandidateVoter) {
+    const votedPool = bestAmount
+      ? [bestAmount, ...amountCandidates.filter(c => c !== bestAmount)]
+      : amountCandidates;
 
-  const voted = window.FideliorCandidateVoter.pickBestCandidate(amountCandidates);
+    const voted = window.FideliorCandidateVoter.pickBestCandidate(votedPool);
 
-  amountField = {
-    value: voted.value,
-    confidence: voted.confidence,
-    score: voted.score,
-    source: voted.source,
-    line: voted.line
-  };
+    amountField = {
+      value: Number.isFinite(voted.value) ? voted.value : parseEuro(voted.value),
+      confidence: voted.confidence,
+      score: voted.score,
+      source: voted.source,
+      line: voted.line || ''
+    };
 
-} else {
-
-  amountField = buildField(bestAmount);
-
-}
+    if (!Number.isFinite(amountField.value)) {
+      amountField = buildField(bestAmount);
+    }
+  } else {
+    amountField = buildField(bestAmount);
+  }
   const dateValue = detectInvoiceDate(payload);
 
   const warnings = [];
@@ -588,15 +619,21 @@ if (window.FideliorCandidateVoter) {
       }
     },
 
-    candidates: {
+     candidates: {
       sender: senderCandidates,
       reference: referenceCandidates,
       amount: amountCandidates
     },
 
     warnings,
-    debug: {
+     debug: {
       lineCount: lines.length,
+      semanticType,
+      candidateCounts: {
+        sender: senderCandidates.length,
+        reference: referenceCandidates.length,
+        amount: amountCandidates.length
+      },
       zones: {
         senderZone: (zones.senderZone || []).length,
         recipientZone: (zones.recipientZone || []).length,
