@@ -212,14 +212,14 @@ function detectInvoiceDate(payload) {
         const value = parseEuro(raw);
 
         if (Number.isFinite(value) && value > 0) {
-          return [{
-            value,
-            raw,
-            score: 50,
-            line: text,
-            index: i,
-            source: 'Totalzeile'
-          }];
+         candidates.push({
+  value,
+  raw,
+  score: 50,
+  line: text,
+  index: i,
+  source: 'Totalzeile'
+});
         }
       }
     }
@@ -263,13 +263,33 @@ function detectInvoiceDate(payload) {
         const value = parseEuro(raw);
         if (!Number.isFinite(value) || value <= 0) return;
 
-        let score = 1;
-       if (priorityPatterns.some(rx => rx.test(text))) score += 20;
-        if (ignorePattern.test(text)) score -= 6;
-        if (pos === matches.length - 1) score += 1;
-        if (value > 0 && value < 1000000) score += 1;
-        // Mini-Beträge stark abwerten (typische OCR-Datumsfragmente)
-if (value < 5) score -= 8;
+     let score = 1;
+
+// 🔥 STARKES SIGNAL: echte Zahlungs-/Total-Zeile
+if (priorityPatterns.some(rx => rx.test(text))) score += 20;
+
+// 🔥 NEGATIVE: typische Nicht-Gesamtbeträge
+if (ignorePattern.test(text)) score -= 8;
+
+// 🔥 LETZTER WERT in Zeile = oft Gesamtbetrag
+if (pos === matches.length - 1) score += 2;
+
+// 🔥 Plausibler Bereich
+if (value > 0 && value < 1000000) score += 2;
+
+// 🔥 Mini-Beträge fast immer falsch (OCR Müll / Positionen)
+if (value < 10) score -= 10;
+
+// 🔥 Nähe zu IBAN = sehr schlecht
+if (/de\d{2}/i.test(text)) score -= 12;
+
+// 🔥 Nähe zu MwSt explizit abwerten
+if (/(mwst|ust|vat|tax)/i.test(text)) score -= 6;
+
+// 🔥 Wenn Zeile TOTAL enthält → massiv pushen
+if (/(gesamt|summe|total|rechnungsbetrag|endbetrag|zu\s+zahlen|zahlbetrag)/i.test(text)) {
+  score += 15;
+}
 
         candidates.push({
           value,
@@ -559,14 +579,29 @@ if (type === 'rechnung') {
       source: "Gelernter Feldanker"
     };
   }
- let bestAmount = amountCandidates.find(c => c.score >= 10) || null;
+let bestAmount = amountCandidates.length ? amountCandidates[0] : null;
 
-  if (bestAmount && bestAmount.value < 10) {
-    const line = (bestAmount.line || '').toLowerCase();
-    if (!/(gesamt|summe|total|betrag|zu zahlen|rechnungsbetrag|amount due|invoice total)/.test(line)) {
-      bestAmount = null;
-    }
+if (bestAmount) {
+  const line = (bestAmount.line || '').toLowerCase();
+
+  // ❌ kleine Beträge ohne klaren Kontext raus
+  if (
+    bestAmount.value < 10 &&
+    !/(gesamt|summe|total|betrag|zu zahlen|rechnungsbetrag|amount due|invoice total)/.test(line)
+  ) {
+    bestAmount = null;
   }
+
+  // ❌ MwSt / Netto NICHT als Hauptbetrag akzeptieren
+  if (/(mwst|ust|vat|tax|netto)/.test(line)) {
+    bestAmount = null;
+  }
+
+  // ❌ IBAN Nähe = fast sicher falsch
+  if (/de\d{2}/i.test(line)) {
+    bestAmount = null;
+  }
+}
   const anchoredAmount = supplierApi?.detectByAnchor
     ? supplierApi.detectByAnchor(payload, "amount", payload.profile, payload)
     : "";
