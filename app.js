@@ -2073,7 +2073,7 @@ try {
       }
     }
 
-      /* Rechnungsnummer – nur bei hoher Sicherheit automatisch */
+      /* Rechnungsnummer – Engine zuerst, dann sauberer Label-Fallback */
     {
       const refConfidence =
         uiModel?.fieldMeta?.invoiceNumber?.confidence ||
@@ -2094,22 +2094,30 @@ try {
         );
 
       if (mayWrite) {
-     const isRealInvoice = analysis?.type === "rechnung";
+        const isRealInvoice = analysis?.type === "rechnung";
 
-if (
-  isRealInvoice &&
-  refConfidence === "high" &&
-  analysis.reference &&
-  /\d/.test(analysis.reference) // MUSS Zahl enthalten
-) {
-  invNoEl.value = analysis.reference;
-  invNoEl.classList.add("auto");
-  invNoEl.dataset.kiDetected = "1";
-} else {
-  invNoEl.value = "";
-  invNoEl.classList.remove("auto");
-  delete invNoEl.dataset.kiDetected;
-}
+        let refValue =
+          (refConfidence === "high" && analysis.reference && /\d/.test(analysis.reference))
+            ? String(analysis.reference).trim()
+            : "";
+
+        // Fallback: explizite Rechnungsnummer-Zeilen aus dem OCR-Layout lesen
+        if (!refValue && isRealInvoice && Array.isArray(lines) && typeof findInvoiceNumberFromLines === "function") {
+          const fallbackRef = String(findInvoiceNumberFromLines(lines) || "").trim();
+          if (fallbackRef && /\d/.test(fallbackRef)) {
+            refValue = fallbackRef;
+          }
+        }
+
+        if (isRealInvoice && refValue) {
+          invNoEl.value = refValue;
+          invNoEl.classList.add("auto");
+          invNoEl.dataset.kiDetected = "1";
+        } else {
+          invNoEl.value = "";
+          invNoEl.classList.remove("auto");
+          delete invNoEl.dataset.kiDetected;
+        }
       }
     }
 /* Absender – nur bei hoher Sicherheit setzen */
