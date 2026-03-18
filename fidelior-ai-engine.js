@@ -403,26 +403,32 @@ function detectReferenceCandidates(payload) {
     /\b(invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi
   ];
 
-  const badPrefix = /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT)\b/i;
-  const ibanLike = /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i;
-  const dateLike = /^(\d{1,2}[.\-/]){2}\d{2,4}$/i;
+const badPrefix = /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT|DATUM|DATE|SEITE|PAGE|ERSTELLT|KOPIE|COPY|ORIGINAL)\b/i;
+const badExact = /^(erstellt|datum|date|seite|page|kopie|copy|original|kunde|customer|vertrag|contract)$/i;
+const badLineRx = /\b(kundennummer|kunden\-?nr|customer\s*(?:no|number)|iban|bic|swift|vertragskonto|mandatsreferenz|mandats\-?ref|erstellt\s+am|erstellt\s+für)\b/i;
+const ibanLike = /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i;
+const dateLike = /^(\d{1,2}[.\-/]){2}\d{2,4}$/i;
 
-  const addCandidate = (value, line, score, source) => {
-    const token = cleanToken(value).replace(/\s+/g, '');
-    if (!token) return;
-    if (token.length < 4 || token.length > 24) return;
-    if (!/\d/.test(token)) return;
-    if (dateLike.test(token)) return;
-    if (ibanLike.test(token)) return;
-    if (badPrefix.test(token)) return;
+const addCandidate = (value, line, score, source) => {
+  const token = cleanToken(value).replace(/\s+/g, '');
+  const lineNorm = normalizeWs(line);
 
-    candidates.push({
-      value: token,
-      score,
-      line: normalizeWs(line),
-      source
-    });
-  };
+  if (!token) return;
+  if (token.length < 4 || token.length > 24) return;
+  if (!/\d/.test(token)) return;
+  if (dateLike.test(token)) return;
+  if (ibanLike.test(token)) return;
+  if (badPrefix.test(token)) return;
+  if (badExact.test(token)) return;
+  if (badLineRx.test(lineNorm) && !/\b(rechnungs?(?:nummer|nr|no)\.?|invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\b/i.test(lineNorm)) return;
+
+  candidates.push({
+    value: token,
+    score,
+    line: lineNorm,
+    source
+  });
+};
 
   for (const rx of labelPatterns) {
     let m;
@@ -543,12 +549,19 @@ let referenceField = buildField(null);
 
 if (type === 'rechnung') {
   const bestRef = referenceCandidates[0];
+  const bestRefLine = normalizeWs(bestRef?.line || '');
 
   if (
     bestRef &&
     bestRef.score >= 12 &&
     /\d/.test(bestRef.value) &&
-    !/^(kopie|copy|original|erstellt)$/i.test(bestRef.value)
+    !/^(kopie|copy|original|erstellt|datum|date|seite|page)$/i.test(bestRef.value) &&
+    (
+      /\b(rechnungs?(?:nummer|nr|no)\.?|invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\b/i.test(bestRefLine) ||
+      /^[A-Z]?\d{5,}$/i.test(bestRef.value) ||
+      /^[A-Z0-9._/-]*\d[A-Z0-9._/-]*$/i.test(bestRef.value)
+    ) &&
+    !/\b(kundennummer|kunden\-?nr|customer\s*(?:no|number)|iban|bic|swift|mandatsreferenz|mandats\-?ref|vertragskonto)\b/i.test(bestRefLine)
   ) {
     referenceField = buildField(bestRef);
   }

@@ -906,19 +906,24 @@ async function onOcr(txt, lines, assignmentsCfg) {
         showSenderBadge(result.confidence, result.source);
         setStatus(result.confidence, `Absender erkannt: ${incoming}`);
 
-    try {
+try {
   const invEl = getInvNoEl();
 
   if (invEl && !invEl.value) {
-    const refValue = window.FideliorAI?.analyzeDocument
-      ? (window.FideliorAI.analyzeDocument(txt, lines)?.fields?.reference?.value || "")
-      : "";
+    const engine = window.FideliorAI?.analyzeDocument
+      ? window.FideliorAI.analyzeDocument(txt, lines)
+      : null;
 
-    const refConfidence = window.FideliorAI?.analyzeDocument
-      ? (window.FideliorAI.analyzeDocument(txt, lines)?.fields?.reference?.confidence || "low")
-      : "low";
+    const refValue = engine?.fields?.reference?.value || "";
+    const refConfidence = engine?.fields?.reference?.confidence || "low";
+    const isRealInvoice = engine?.type === "rechnung";
 
-    if (refConfidence === "high" && refValue) {
+    if (
+      isRealInvoice &&
+      refConfidence === "high" &&
+      refValue &&
+      /\d/.test(refValue)
+    ) {
       invEl.value = refValue;
       invEl.dataset.kiDetected = "1";
     } else {
@@ -927,7 +932,6 @@ async function onOcr(txt, lines, assignmentsCfg) {
     }
   }
 } catch {}
-
         if (typeof refreshPreview === 'function') {
           try { refreshPreview(); } catch {}
         }
