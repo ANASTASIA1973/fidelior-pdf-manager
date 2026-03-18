@@ -1851,40 +1851,14 @@ function euroToNum(s){
 }
 /* =========================================================
    FIDELIOR DOCUMENT ANALYSIS PIPELINE
-   zentrale Analysefunktion
+   UI ruft nur die zentrale Engine auf
 ========================================================= */
 
 function analyzeDocument(txt, lines){
-  try {
-    if (window.FideliorAI?.analyzeDocument) {
-      return window.FideliorAI.analyzeDocument(txt, lines);
-    }
-  } catch (e) {
-    console.warn("FideliorAI analyzeDocument failed, fallback active:", e);
+  if (!window.FideliorAI?.analyzeDocument) {
+    throw new Error("FideliorAI.analyzeDocument ist nicht verfügbar");
   }
-
-  const smartType = detectDocTypeSmart(txt);
-  const isInvoiceLike = (smartType === "rechnung" || smartType === "gutschrift");
-
-  return {
-    type: isInvoiceLike ? "rechnung" : "dokument",
-    semanticType: smartType,
-    amount: detectTotalAmountFromLines(lines),
-    date: detectInvoiceDateSmart(txt, lines),
-    sender: detectSenderSmart(txt, lines),
-    reference: (() => {
-      if (!isInvoiceLike) return "";
-
-      let autoInv = "";
-      if (lines && lines.length) autoInv = findInvoiceNumberFromLines(lines);
-      if (!autoInv) autoInv = findInvoiceNumberStrict(txt);
-
-      return autoInv && !isMaskedIbanLike(autoInv) ? autoInv : "";
-    })(),
-    fields: {},
-    candidates: {},
-    warnings: ["Fallback-Analyse aktiv"]
-  };
+  return window.FideliorAI.analyzeDocument(txt, lines);
 }
 /* =========================================================
    SMART DOCUMENT TYPE DETECTION
@@ -2004,48 +1978,18 @@ async function autoRecognize() {
     const facts = extractStructuredFacts(txt);
     console.log("Document facts:", facts);
 
-let analysis = null;
-let uiModel = null;
+const analysis = analyzeDocument(txt, lines);
 
-try {
-  const analyzed = window.FideliorDocAnalyzer?.analyze
-    ? window.FideliorDocAnalyzer.analyze(txt, lines)
-    : null;
-
-  const validated = window.FideliorDocumentValidator?.validate
-    ? window.FideliorDocumentValidator.validate(analyzed)
-    : null;
-
-  uiModel = window.FideliorDocumentPresenter?.buildUiModel
-    ? window.FideliorDocumentPresenter.buildUiModel(validated)
-    : null;
-
-   analysis = analyzeDocument(txt, lines);
-
-  window.__fdlLastAutoLearningContext = {
-    text: txt,
-    lines,
-    analysis
-  };
-} catch (e) {
-
-  console.warn("Central document pipeline failed, fallback active:", e);
-  analysis = analyzeDocument(txt, lines);
-  uiModel = null;
-
-  window.__fdlLastAutoLearningContext = {
-    text: txt,
-    lines,
-    analysis
-  };
-}
-
+window.__fdlLastAutoLearningContext = {
+  text: txt,
+  lines,
+  analysis
+};
     /* Betrag – nur bei hoher Sicherheit automatisch */
     if (amountEl && !amountEl.dataset.userTyped) {
-      const amountConfidence =
-        uiModel?.fieldMeta?.amount?.confidence ||
-        analysis?.fields?.amount?.confidence ||
-        "low";
+    const amountConfidence =
+  analysis?.fields?.amount?.confidence ||
+  "low";
 
       const mayAutofillAmount = amountConfidence === "high";
 
@@ -2066,12 +2010,11 @@ try {
     }
     /* Datum – high oder medium erlaubt */
     if (invDateEl && !invDateEl.value.trim() && analysis.date) {
-      const dateConfidence =
-        uiModel?.fieldMeta?.invoiceDate?.confidence ||
-        analysis?.fields?.date?.confidence ||
-        "low";
+   const dateConfidence =
+  analysis?.fields?.date?.confidence ||
+  "low";
 
-      if (dateConfidence === "high" || dateConfidence === "medium") {
+if (dateConfidence === "high") {
         invDateEl.value = analysis.date;
         invDateEl.classList.add("auto");
       }
@@ -2080,10 +2023,9 @@ try {
     
          /* Rechnungsnummer – nur für echte Rechnungen relevant */
     {
-      const refConfidence =
-        uiModel?.fieldMeta?.invoiceNumber?.confidence ||
-        analysis?.fields?.reference?.confidence ||
-        "low";
+     const refConfidence =
+  analysis?.fields?.reference?.confidence ||
+  "low";
 
       const currentValue = String(invNoEl?.value || "").trim();
       const currentLooksAuto =
@@ -2130,10 +2072,9 @@ try {
     }
 /* Absender – nur bei hoher Sicherheit setzen */
 if (senderEl && !senderEl.dataset.userTyped) {
-  const senderConfidence =
-    uiModel?.fieldMeta?.sender?.confidence ||
-    analysis?.fields?.sender?.confidence ||
-    "low";
+const senderConfidence =
+  analysis?.fields?.sender?.confidence ||
+  "low";
 
   if (senderConfidence === "high" && analysis.sender) {
     senderEl.value = analysis.sender;

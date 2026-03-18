@@ -508,7 +508,10 @@
       return next;
     }).sort((a, b) => b.score - a.score);
   }
-
+// LEGACY-HINWEIS:
+// Diese Funktion darf nur für Debug/Inspektion verwendet werden.
+// Fachliche Entscheidungen müssen über Kandidaten + boostByAnchors laufen,
+// niemals durch direktes Übernehmen dieses Rückgabewerts.
   function detectByAnchor(payload, kind, profile) {
     if (!profile || !payload) return "";
 

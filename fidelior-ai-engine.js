@@ -1,40 +1,41 @@
 /* =========================================================
-   Fidelior AI Engine v3
-   Zentrale Dokumentanalyse – eine Quelle der Wahrheit
-   Liefert:
-   - semanticType / type
-   - sender / reference / amount / date
-   - fields mit confidence/source
-   - candidates / warnings / debug
+   Fidelior AI Engine v4
+   Zentrale Dokumentanalyse – Single Source of Truth
+
+   Ziele:
+   - nur eine fachliche Analysequelle
+   - Kandidaten -> Scoring -> Confidence -> Feldwert
+   - Supplier Profiles dürfen nur boosten, nicht blind überschreiben
+   - UI darf nur noch rendern
 ========================================================= */
 
 (() => {
-  'use strict';
+  "use strict";
 
-  /* ═══════════════════════════════════════════════════════
-     BASIS
-  ═══════════════════════════════════════════════════════ */
+  /* =========================================================
+     BASICS
+  ========================================================= */
 
   function normalizeWs(s) {
-    return String(s || '')
-      .replace(/\u00A0/g, ' ')
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\s{2,}/g, ' ')
+    return String(s || "")
+      .replace(/\u00A0/g, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\s{2,}/g, " ")
       .trim();
   }
 
   function normalizeCompare(s) {
     return normalizeWs(s)
       .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s&.\-\/]/gu, '')
-      .replace(/\s+/g, ' ')
+      .replace(/[^\p{L}\p{N}\s&.\-\/]/gu, "")
+      .replace(/\s+/g, " ")
       .trim();
   }
 
   function cleanToken(s) {
     return normalizeWs(s)
-      .replace(/^[#:;.,\-\s]+/, '')
-      .replace(/[,:;.]+$/, '')
+      .replace(/^[#:;.,\-\s]+/, "")
+      .replace(/[,:;.]+$/, "")
       .trim();
   }
 
@@ -42,13 +43,13 @@
     if (Array.isArray(lines) && lines.length) {
       return lines
         .map(v => {
-          if (typeof v === 'string') return normalizeWs(v);
-          return normalizeWs(v?.text || '');
+          if (typeof v === "string") return normalizeWs(v);
+          return normalizeWs(v?.text || "");
         })
         .filter(Boolean);
     }
 
-    return String(text || '')
+    return String(text || "")
       .split(/\r?\n+/)
       .map(normalizeWs)
       .filter(Boolean);
@@ -63,97 +64,42 @@
     const lines = linesFromInput(text, linesInput);
 
     return {
-      rawText: String(text || ''),
+      rawText: String(text || ""),
       lines,
       zones: {
         senderZone: lines.slice(0, 8),
         recipientZone: [],
-        metaZone: [],
-        bodyZone: lines.slice(8),
-        tableZone: lines.slice(8),
-        totalsZone: [],
-        footerZone: [],
+        metaZone: lines.slice(8, 18),
+        bodyZone: lines.slice(18),
+        tableZone: lines.slice(18),
+        totalsZone: lines.slice(-12),
+        footerZone: lines.slice(-10),
         headerTop: lines.slice(0, 8),
         recipientBlock: [],
-        metaBlock: [],
-        body: lines.slice(8),
+        metaBlock: lines.slice(8, 18),
+        body: lines.slice(18),
         indices: {
           recipientStart: -1,
           recipientEnd: -1,
-          metaStart: -1,
-          metaEnd: -1,
-          bodyStart: 8,
-          footerStart: -1
+          metaStart: 8,
+          metaEnd: 18,
+          bodyStart: 18,
+          footerStart: Math.max(0, lines.length - 10)
         }
       },
       profile: null
     };
   }
 
-  function mapConfidence(score) {
-    if (score >= 14) return 'high';
-    if (score >= 9) return 'medium';
-    return 'low';
-  }
-
-  /* ═══════════════════════════════════════════════════════
-     SEMANTIK / TYP
-  ═══════════════════════════════════════════════════════ */
-
-  function detectSemanticType(text) {
-    const t = String(text || '').toLowerCase();
-    const neg = window.FideliorNegativeRules || null;
-
-    if (neg?.isDefinitelyNotInvoice && neg.isDefinitelyNotInvoice(t)) {
-      return 'dokument';
-    }
-
-    if (/\b(zahlungserinnerung|mahnung|erste mahnung|zweite mahnung|dritte mahnung|reminder|payment reminder|overdue notice|inkasso|forderungsmanagement)\b/i.test(t)) {
-      return 'mahnung';
-    }
-
-    if (/\b(gutschrift|credit note|refund)\b/i.test(t)) {
-      return 'gutschrift';
-    }
-
-    if (/\b(angebot|offer|quotation)\b/i.test(t)) {
-      return 'angebot';
-    }
-
-    if (/\b(vertragsbestätigung|auftragsbestätigung|bestätigung)\b/i.test(t)) {
-      return 'vertrag';
-    }
-
-    const hasInvoiceLabel = /\b(rechnung|invoice|bill|verbrauchsabrechnung|liquidation)\b/i.test(t);
-    const hasTotal = /\b(gesamt|summe|total|zu zahlen|rechnungsbetrag|invoice total|amount due|zahlbetrag|endbetrag)\b/i.test(t);
-    const hasCurrency = /€|\beur\b/i.test(t);
-
-    if (hasInvoiceLabel && (hasTotal || hasCurrency)) {
-      return 'rechnung';
-    }
-
-    return 'dokument';
-  }
-
-  function detectTypeFromSemantic(semanticType) {
-    return (semanticType === 'rechnung' || semanticType === 'gutschrift')
-      ? 'rechnung'
-      : 'dokument';
-  }
-
-  /* ═══════════════════════════════════════════════════════
-     FORMAT / PARSER
-  ═══════════════════════════════════════════════════════ */
-
   function parseEuro(raw) {
-    let x = String(raw || '')
-      .replace(/[€\u00A0 ]/g, '')
-      .replace(/−/g, '-');
+    let x = String(raw || "")
+      .replace(/[€\u00A0 ]/g, "")
+      .replace(/−/g, "-");
 
-    if (x.includes(',') && x.includes('.')) {
-      x = x.replace(/\./g, '').replace(',', '.');
-    } else if (x.includes(',')) {
-      x = x.replace(',', '.');
+    if (x.includes(",") && x.includes(".")) {
+      x = x.replace(/\./g, "").replace(",", ".");
+    } else if (x.includes(",")) {
+      x = x.replace(",", ".");
     }
 
     const n = Number(x);
@@ -161,111 +107,357 @@
   }
 
   function formatDisplayDate(iso) {
-    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
-    const [y, m, d] = iso.split('-');
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "";
+    const [y, m, d] = iso.split("-");
     return `${d}.${m}.${y}`;
   }
 
-  /* ═══════════════════════════════════════════════════════
-     DATUM
-  ═══════════════════════════════════════════════════════ */
+  function toIsoDate(raw) {
+    const m = String(raw || "").match(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/);
+    if (!m) return "";
 
-  function detectInvoiceDate(payload) {
-    const zones = payload?.zones || {};
-    const supplierApi = window.FideliorSupplierProfiles || null;
+    const d = +m[1];
+    const mo = +m[2];
+    const y = String(m[3]).length === 2
+      ? (+m[3] < 50 ? 2000 + +m[3] : 1900 + +m[3])
+      : +m[3];
 
-    const anchoredDate = supplierApi?.detectByAnchor
-      ? supplierApi.detectByAnchor(payload, 'date', payload?.profile || null)
-      : '';
-
-    if (anchoredDate) return anchoredDate;
-
-    const profileDate = supplierApi?.detectDateByProfile
-      ? supplierApi.detectDateByProfile(payload, payload?.profile || null)
-      : '';
-
-    if (profileDate) return profileDate;
-
-    const scopedText = [
-      ...(zones.metaZone || zones.metaBlock || []),
-      ...(zones.senderZone || zones.headerTop || []),
-      String(payload?.rawText || '')
-    ].join('\n');
-
-    const labelPatterns = [
-      /rechnungsdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
-      /invoice\s*date[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
-      /datum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i
-    ];
-
-    for (const rx of labelPatterns) {
-      const m = scopedText.match(rx);
-      if (m) return m[1];
-    }
-
-    const hits = [];
-    for (const m of scopedText.matchAll(/\b(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})\b/g)) {
-      const d = +m[1];
-      const mo = +m[2];
-      const y = String(m[3]).length === 2
-        ? (+m[3] < 50 ? 2000 + +m[3] : 1900 + +m[3])
-        : +m[3];
-
-      const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      hits.push(iso);
-    }
-
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const valid = hits.filter(v => v <= todayIso).sort();
-    return valid.length ? formatDisplayDate(valid[valid.length - 1]) : '';
+    if (d < 1 || d > 31 || mo < 1 || mo > 12 || y < 2000 || y > 2100) return "";
+    return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
 
-  /* ═══════════════════════════════════════════════════════
-     BETRAG
-  ═══════════════════════════════════════════════════════ */
+  function dedupeCandidates(candidates, keyFn) {
+    const map = new Map();
 
-  function detectAmountCandidates(lines) {
+    candidates.forEach(c => {
+      const key = keyFn(c);
+      if (!key) return;
+
+      const prev = map.get(key);
+      if (!prev || (c.score || 0) > (prev.score || 0)) {
+        map.set(key, c);
+      }
+    });
+
+    return [...map.values()].sort((a, b) => (b.score || 0) - (a.score || 0));
+  }
+
+  function mapConfidence(score, margin) {
+    if (score >= 24 && margin >= 6) return "high";
+    if (score >= 16 && margin >= 4) return "high";
+    if (score >= 11 && margin >= 2) return "medium";
+    return "low";
+  }
+
+  function finalizeField(candidates, opts = {}) {
+    const list = Array.isArray(candidates) ? candidates : [];
+    const best = list[0] || null;
+    const second = list[1] || null;
+    const margin = best ? (best.score || 0) - (second?.score || 0) : 0;
+    const confidence = best ? mapConfidence(best.score || 0, margin) : "low";
+    const minScore = Number.isFinite(opts.minScore) ? opts.minScore : 0;
+    const requireHigh = !!opts.requireHigh;
+
+    if (!best || (best.score || 0) < minScore) {
+      return {
+        value: opts.emptyValue ?? "",
+        confidence: "low",
+        score: 0,
+        margin: 0,
+        source: "keine sichere Erkennung",
+        line: "",
+        candidates: list
+      };
+    }
+
+    if (requireHigh && confidence !== "high") {
+      return {
+        value: opts.emptyValue ?? "",
+        confidence,
+        score: best.score || 0,
+        margin,
+        source: best.source || "Dokumentanalyse",
+        line: best.line || "",
+        candidates: list
+      };
+    }
+
+    return {
+      value: best.value,
+      confidence,
+      score: best.score || 0,
+      margin,
+      source: best.source || "Dokumentanalyse",
+      line: best.line || "",
+      candidates: list
+    };
+  }
+
+  function applyProfileBoost(kind, candidates, profile, payload) {
+    const api = window.FideliorSupplierProfiles || null;
+    let out = Array.isArray(candidates) ? [...candidates] : [];
+
+    if (api?.boostCandidates) {
+      try { out = api.boostCandidates(kind, out, profile, payload) || out; } catch {}
+    }
+
+    if (api?.boostByAnchors) {
+      try { out = api.boostByAnchors(kind, out, profile, payload) || out; } catch {}
+    }
+
+    return out.sort((a, b) => (b.score || 0) - (a.score || 0));
+  }
+
+  function applyNegativeRules(kind, candidates, payload) {
+    const neg = window.FideliorNegativeRules || null;
+    let out = Array.isArray(candidates) ? [...candidates] : [];
+
+    if (kind === "reference" && neg?.isBadReferenceCandidate) {
+      out = out.filter(c => !neg.isBadReferenceCandidate(c, payload?.rawText || ""));
+    }
+
+    if (kind === "amount" && neg?.isBadAmountCandidate) {
+      out = out.filter(c => !neg.isBadAmountCandidate(c));
+    }
+
+    return out;
+  }
+
+  /* =========================================================
+     SEMANTIC TYPE
+  ========================================================= */
+
+  function detectSemanticType(text) {
+    const t = String(text || "").toLowerCase();
+    const neg = window.FideliorNegativeRules || null;
+
+    if (neg?.isDefinitelyNotInvoice && neg.isDefinitelyNotInvoice(t)) {
+      return "dokument";
+    }
+
+    if (/\b(zahlungserinnerung|mahnung|erste mahnung|zweite mahnung|dritte mahnung|reminder|payment reminder|overdue notice|inkasso|forderungsmanagement)\b/i.test(t)) {
+      return "mahnung";
+    }
+
+    if (/\b(gutschrift|credit note|refund)\b/i.test(t)) {
+      return "gutschrift";
+    }
+
+    if (/\b(angebot|offer|quotation)\b/i.test(t)) {
+      return "angebot";
+    }
+
+    if (/\b(vertragsbestätigung|auftragsbestätigung|bestätigung)\b/i.test(t)) {
+      return "vertrag";
+    }
+
+    const hasInvoiceLabel = /\b(rechnung|invoice|bill|verbrauchsabrechnung|liquidation)\b/i.test(t);
+    const hasTotal = /\b(gesamt|summe|total|zu zahlen|rechnungsbetrag|invoice total|amount due|zahlbetrag|endbetrag)\b/i.test(t);
+    const hasCurrency = /€|\beur\b/i.test(t);
+
+    if (hasInvoiceLabel && (hasTotal || hasCurrency)) {
+      return "rechnung";
+    }
+
+    return "dokument";
+  }
+
+  function detectTypeFromSemantic(semanticType) {
+    return (semanticType === "rechnung" || semanticType === "gutschrift") ? "rechnung" : "dokument";
+  }
+
+  /* =========================================================
+     SENDER
+  ========================================================= */
+
+  function detectSenderCandidates(payload) {
     const candidates = [];
+    const zones = payload?.zones || {};
+    const profile = payload?.profile || null;
 
-    const totalLineRx = /(gesamt|summe|total|rechnungsbetrag|endbetrag|zu\s+zahlen|zahlbetrag)/i;
-    const totalMoneyRx = /(-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+\.\d{2})/g;
+    const companyRx = /\b(gmbh|ag|kg|ug|ohg|mbh|ltd|inc|company|corp|llc|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke|wasser)\b/i;
+    const negativeRx = /\b(rechnung|invoice|kundennummer|kundenummer|vertragsnummer|vertrag|iban|bic|swift|telefon|fax|e-?mail|email|www\.|ust|mwst|steuer|datum|seite|page|tarif|lieferadresse|rechnungsadresse|leistungsempfänger)\b/i;
+    const zipCityRx = /\b\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]{2,}/;
+    const streetRx = /\b(straße|str\.|weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive)\b/i;
+    const personRx = /^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]+){1,3}$/;
+    const greetingRx = /^(sehr geehrte|guten tag|hallo)\b/i;
 
-    for (let i = 0; i < lines.length; i++) {
-      const text = normalizeWs(lines[i]);
-      if (!text) continue;
+    function pushCandidate(line, baseScore, source, index, zoneTag) {
+      const s = normalizeWs(line);
+      if (!s || s.length < 3 || s.length > 120) return;
+      if (zipCityRx.test(s)) return;
+      if (streetRx.test(s)) return;
+      if (greetingRx.test(s)) return;
 
-if (totalLineRx.test(text)) {
-  const m = text.match(totalMoneyRx);
-  if (m && m.length) {
-    const raw = m[m.length - 1];
+      let score = baseScore;
 
-    if (/^\d{1,2}[.\-\/]\d{1,2}$/.test(raw)) continue;
+      if (companyRx.test(s)) score += 12;
+      if (personRx.test(s)) score += 3;
+      if (!negativeRx.test(s)) score += 2;
+      if (!/\d/.test(s)) score += 1;
+      if (/^(name|firma)\s*:/i.test(s)) score += 4;
+      if (/^(adresse|anschrift)\s*:/i.test(s)) score -= 10;
+      if (negativeRx.test(s) && !companyRx.test(s)) score -= 10;
+      if (/rechnungsadresse|leistungsempfänger|kunde|customer/i.test(s)) score -= 16;
+      if (zoneTag === "senderZone") score += 4;
+      if (zoneTag === "recipientZone") score -= 18;
 
-    const value = parseEuro(raw);
+      if (score > 0) {
+        candidates.push({
+          value: s.replace(/^(name|firma)\s*:\s*/i, "").trim(),
+          score,
+          line: s,
+          index: Number.isInteger(index) ? index : -1,
+          source
+        });
+      }
+    }
 
-    if (Number.isFinite(value) && value > 0) {
+    (zones.senderZone || zones.headerTop || []).forEach((line, idx) => {
+      pushCandidate(line, idx <= 2 ? 12 : 9, "Absenderzone", idx, "senderZone");
+    });
 
-      // 🔥 HARTE PRIORITÄT für echte Total-Zeilen
-      let score = 70;
+    (zones.metaZone || zones.metaBlock || []).forEach((line, idx) => {
+      pushCandidate(line, 6, "Metazone", idx, "metaZone");
+    });
 
-      // Extra Schutz gegen Bar / Rückgeld
-      if (/\b(bar|cash)\b/i.test(text)) score -= 30;
-      if (/\b(rückgeld|change)\b/i.test(text)) score -= 40;
+    (zones.recipientZone || zones.recipientBlock || []).forEach((line, idx) => {
+      pushCandidate(line, 2, "Empfängerzone", idx, "recipientZone");
+    });
 
+    const labelMatch = String(payload?.rawText || "").match(/\b(?:rechnungssteller|lieferant|anbieter|auftragnehmer|firma|vendor|supplier)\b[:\s]+([^\n]+)/i);
+    if (labelMatch && labelMatch[1]) {
+      pushCandidate(cleanToken(labelMatch[1]), 20, "Label im Dokument", -1, "metaZone");
+    }
+
+    if (profile?.name) {
       candidates.push({
-        value,
-        raw,
-        score,
-        line: text,
-        index: i,
-        source: 'Totalzeile (priorisiert)'
+        value: normalizeWs(profile.name),
+        score: 24,
+        line: profile.name,
+        index: -1,
+        source: "Lieferantenprofil"
       });
     }
-  }
-}
 
+    return dedupeCandidates(candidates, c => normalizeCompare(c.value));
+  }
+
+  /* =========================================================
+     REFERENCE / INVOICE NUMBER
+  ========================================================= */
+
+  function detectReferenceCandidates(payload, semanticType) {
+    const joined = String(payload?.rawText || "");
+    const lines = payload?.lines || [];
+    const profile = payload?.profile || null;
+    const candidates = [];
+
+    const labelPatterns = [
+      /\b(rechnungs?(?:nummer|nr|no)?|rechnung)\b\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{3,})/gi,
+      /\b(invoice\s*(?:no|nr|number)?|invoice)\b\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{3,})/gi,
+      /\b(rg-?nr\.?|rn\.?)\b\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{3,})/gi
+    ];
+
+    const genericTokenRx = /\b([A-Z]?\d[A-Z0-9._/-]{5,23})\b/g;
+    const badPrefix = /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT|DATUM|DATE|SEITE|PAGE|ERSTELLT|KOPIE|COPY|ORIGINAL)\b/i;
+    const badExact = /^(erstellt|datum|date|seite|page|kopie|copy|original|kunde|customer|vertrag|contract)$/i;
+    const badLineRx = /\b(kundennummer|kunden\-?nr|customer\s*(?:no|number)|iban|bic|swift|vertragskonto|mandatsreferenz|mandats\-?ref|rufnummer|telefonnummer|auftragsnummer|bestellnummer)\b/i;
+    const ibanLike = /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i;
+    const dateLike = /^(\d{1,2}[.\-/]){2}\d{2,4}$/i;
+
+    function addCandidate(value, line, score, source, index) {
+      const token = cleanToken(value).replace(/\s+/g, "");
+      const lineNorm = normalizeWs(line);
+
+      if (!token) return;
+      if (token.length < 4 || token.length > 28) return;
+      if (!/\d/.test(token)) return;
+      if (badPrefix.test(token)) return;
+      if (badExact.test(token)) return;
+      if (ibanLike.test(token)) return;
+      if (dateLike.test(token)) return;
+      if (badLineRx.test(lineNorm) && !/\b(rechnung|invoice|rg-?nr|rn\.?)\b/i.test(lineNorm)) return;
+
+      let nextScore = score;
+
+      if (/^(?:[A-Z]{0,3}\d{6,}|[A-Z0-9._/-]*\d[A-Z0-9._/-]*)$/i.test(token)) nextScore += 5;
+      if (/\b(rechnung|invoice|rg-?nr|rn\.?)\b/i.test(lineNorm)) nextScore += 10;
+      if (semanticType === "rechnung" || semanticType === "gutschrift") nextScore += 2;
+
+      candidates.push({
+        value: token,
+        score: nextScore,
+        line: lineNorm,
+        index: Number.isInteger(index) ? index : -1,
+        source
+      });
     }
 
+    for (const rx of labelPatterns) {
+      let m;
+      const safe = new RegExp(rx.source, rx.flags.includes("g") ? rx.flags : rx.flags + "g");
+      while ((m = safe.exec(joined))) {
+        addCandidate(m[2], m[0], 20, "Label im Dokument", -1);
+      }
+    }
+
+    lines.forEach((s, idx) => {
+      const line = normalizeWs(s);
+      if (!line) return;
+
+      const lineHasInvoiceLabel = /\b(rechnung|invoice|rg-?nr|rn\.?)\b/i.test(line);
+      if (lineHasInvoiceLabel) {
+        const m = line.match(/\b([A-Z0-9][A-Z0-9._/-]{3,24})\b/g) || [];
+        m.forEach(token => addCandidate(token, line, 14, "Rechnungszeile", idx));
+      }
+
+      const km = line.match(/\b(kundennummer|kunden\-?nr|customer\s*(?:no|number))\b[:#\s-]*([A-Z0-9._/-]{4,})/i);
+      if (km && km[2]) {
+        candidates.push({
+          value: cleanToken(km[2]).replace(/\s+/g, ""),
+          score: 1,
+          line,
+          index: idx,
+          source: "Kundennummer"
+        });
+      }
+
+      let m2;
+      const safeGeneric = new RegExp(genericTokenRx.source, "g");
+      while ((m2 = safeGeneric.exec(line))) {
+        addCandidate(m2[1], line, lineHasInvoiceLabel ? 10 : 4, lineHasInvoiceLabel ? "Rechnungszeile" : "Generischer Token", idx);
+      }
+    });
+
+    if (Array.isArray(profile?.invoiceNumberPatterns)) {
+      for (const rx of profile.invoiceNumberPatterns) {
+        if (!(rx instanceof RegExp)) continue;
+
+        const safeRx = new RegExp(rx.source, rx.flags.includes("g") ? rx.flags : rx.flags + "g");
+        let m;
+        while ((m = safeRx.exec(joined))) {
+          addCandidate(m[1] || m[0], m[0], 26, "Lieferantenprofil Rechnungsnummer", -1);
+        }
+      }
+    }
+
+    return dedupeCandidates(candidates, c => normalizeCompare(c.value))
+      .filter(c => (c.score || 0) >= 8);
+  }
+
+  /* =========================================================
+     AMOUNT
+  ========================================================= */
+
+  function detectAmountCandidates(payload, semanticType) {
+    const lines = [
+      ...(payload?.zones?.totalsZone || []),
+      ...(payload?.zones?.tableZone || []),
+      ...(payload?.lines || [])
+    ];
+
+    const candidates = [];
     const priorityPatterns = [
       /noch\s+offen/i,
       /offener\s+betrag/i,
@@ -284,16 +476,13 @@ if (totalLineRx.test(text)) {
       /invoice\s+total/i,
       /\bsumme\b/i,
       /\btotal\b/i,
-      /jahresbeitrag/i,
-      /beitrag/i,
-      /fällig/i
+      /endbetrag/i
     ];
-
     const ignorePattern = /zwischensumme|subtotal|netto\b|rabatt|discount|ust|mwst|steuer|versand|skonto|abschlag/i;
     const moneyRx = /(-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+\.\d{2})/g;
 
-    lines.forEach((line, index) => {
-      const text = normalizeWs(line);
+    lines.forEach((rawLine, index) => {
+      const text = normalizeWs(rawLine);
       if (!text) return;
 
       const matches = [...text.matchAll(moneyRx)].map(m => m[1]).filter(Boolean);
@@ -303,16 +492,17 @@ if (totalLineRx.test(text)) {
         const value = parseEuro(raw);
         if (!Number.isFinite(value) || value <= 0) return;
 
-        let score = 1;
+        let score = 2;
 
-        if (priorityPatterns.some(rx => rx.test(text))) score += 20;
+        if (priorityPatterns.some(rx => rx.test(text))) score += 22;
+        if (/(gesamt|summe|total|rechnungsbetrag|endbetrag|zu\s+zahlen|zahlbetrag|amount due|invoice total)/i.test(text)) score += 12;
         if (ignorePattern.test(text)) score -= 8;
+        if (/(mwst|ust|vat|tax|netto)/i.test(text) && !/(gesamt|summe|total|endbetrag|zu\s+zahlen|zahlbetrag|amount due|invoice total)/i.test(text)) score -= 7;
         if (pos === matches.length - 1) score += 2;
-        if (value > 0 && value < 1000000) score += 2;
         if (value < 10) score -= 10;
-        if (/de\d{2}/i.test(text)) score -= 12;
-        if (/(mwst|ust|vat|tax)/i.test(text)) score -= 6;
-        if (/(gesamt|summe|total|rechnungsbetrag|endbetrag|zu\s+zahlen|zahlbetrag)/i.test(text)) score += 15;
+        if (/de\d{2}/i.test(text)) score -= 14;
+        if (semanticType === "rechnung" || semanticType === "gutschrift" || semanticType === "mahnung") score += 2;
+        if (index >= lines.length - 12) score += 2;
 
         candidates.push({
           value,
@@ -320,257 +510,113 @@ if (totalLineRx.test(text)) {
           score,
           line: text,
           index,
-          source: 'Betrag aus Dokument'
+          source: priorityPatterns.some(rx => rx.test(text)) ? "Totalzeile" : "Betrag aus Dokument"
         });
       });
     });
 
-    return candidates.sort((a, b) => b.score - a.score);
+    return dedupeCandidates(candidates, c => String(Number(c.value).toFixed(2)));
   }
 
-  /* ═══════════════════════════════════════════════════════
-     ABSENDER
-  ═══════════════════════════════════════════════════════ */
+  /* =========================================================
+     DATE
+  ========================================================= */
 
-  function detectSenderCandidates(payload) {
-    const candidates = [];
-    const lines = payload?.lines || [];
-    const zones = payload?.zones || {};
-
-    const companyRx = /\b(gmbh|ag|kg|ug|ohg|mbh|ltd|inc|company|corp|llc|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke|wasser)\b/i;
-    const negativeRx = /\b(rechnung|invoice|kundennummer|kundenummer|vertragsnummer|vertrag|iban|bic|swift|telefon|fax|e-?mail|email|www\.|ust|mwst|steuer|datum|seite|page|tarif)\b/i;
-    const zipCityRx = /\b\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]{2,}/;
-    const streetRx = /\b(straße|str\.|weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive)\b/i;
-    const urlRx = /(https?:\/\/|www\.)/i;
-
-    function pushCandidate(s, baseScore, source, index) {
-      const line = normalizeWs(s);
-      if (!line) return;
-      if (line.length < 3 || line.length > 120) return;
-      if (urlRx.test(line)) return;
-      if (zipCityRx.test(line)) return;
-      if (streetRx.test(line)) return;
-
-      let score = baseScore;
-
-      if (companyRx.test(line)) score += 12;
-      if (!negativeRx.test(line)) score += 2;
-      if (!/\d/.test(line)) score += 1;
-      if (/^[A-ZÄÖÜ0-9][A-Za-zÄÖÜäöüß&.\- ]+$/.test(line)) score += 1;
-      if (negativeRx.test(line) && !companyRx.test(line)) score -= 10;
-      if (/^\b(name|anschrift|adresse)\b[:\s]/i.test(line)) score -= 8;
-      if (/^(sehr geehrte|guten tag|hallo)\b/i.test(line)) score -= 10;
-
-      if (score > 0) {
-        candidates.push({
-          value: line.replace(/^(name|firma)\s*:\s*/i, '').trim(),
-          score,
-          line,
-          index,
-          source
-        });
-      }
-    }
-
-    (zones.senderZone || zones.headerTop || []).forEach((line, idx) => {
-      let score = 10;
-      if (idx <= 2) score += 4;
-      pushCandidate(line, score, 'Absenderzone', idx);
-    });
-
-    (zones.metaZone || zones.metaBlock || []).forEach((line, idx) => {
-      if (companyRx.test(line) && !negativeRx.test(line)) {
-        pushCandidate(line, 7, 'Metazone', idx);
-      }
-    });
-
-    const labelMatch = String(payload?.rawText || '').match(/\b(?:rechnungssteller|lieferant|anbieter|auftragnehmer|firma|vendor|supplier)\b[:\s]+([^\n]+)/i);
-    if (labelMatch && labelMatch[1]) {
-      const candidate = cleanToken(labelMatch[1]);
-      if (candidate) {
-        candidates.push({
-          value: candidate,
-          score: 18,
-          line: candidate,
-          index: -1,
-          source: 'Label im Dokument'
-        });
-      }
-    }
-
-    const profile = payload?.profile || null;
-    if (profile?.name) {
-      candidates.push({
-        value: normalizeWs(profile.name),
-        score: 26,
-        line: profile.name,
-        index: -1,
-        source: 'Lieferantenprofil'
-      });
-    }
-
-    const dedup = new Map();
-    candidates.forEach(c => {
-      const key = normalizeCompare(c.value);
-      if (!key) return;
-      const prev = dedup.get(key);
-      if (!prev || c.score > prev.score) dedup.set(key, c);
-    });
-
-    return [...dedup.values()].sort((a, b) => b.score - a.score);
-  }
-
-  /* ═══════════════════════════════════════════════════════
-     RECHNUNGSNUMMER
-  ═══════════════════════════════════════════════════════ */
-
-  function detectReferenceCandidates(payload) {
-    const joined = String(payload?.rawText || '');
-    const lines = payload?.lines || [];
+  function detectDateCandidates(payload, semanticType) {
     const zones = payload?.zones || {};
     const profile = payload?.profile || null;
     const candidates = [];
 
     const labelPatterns = [
-      /\b(rechnungs?(?:nummer|nr|no)\.?|rechnung\s*#|rg-?nr\.?|rn\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi,
-      /\b(invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9._/-]{2,})/gi
+      { rx: /rechnungsdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i, score: 24, source: "Rechnungsdatum-Label" },
+      { rx: /invoice\s*date[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i, score: 24, source: "Invoice-Date-Label" },
+      { rx: /belegdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i, score: 22, source: "Belegdatum-Label" },
+      { rx: /leistungsdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i, score: 18, source: "Leistungsdatum-Label" },
+      { rx: /\bdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i, score: 14, source: "Datum-Label" }
     ];
 
-    const badPrefix = /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT|DATUM|DATE|SEITE|PAGE|ERSTELLT|KOPIE|COPY|ORIGINAL)\b/i;
-    const badExact = /^(erstellt|datum|date|seite|page|kopie|copy|original|kunde|customer|vertrag|contract)$/i;
-    const badLineRx = /\b(kundennummer|kunden\-?nr|customer\s*(?:no|number)|iban|bic|swift|vertragskonto|mandatsreferenz|mandats\-?ref|erstellt\s+am|erstellt\s+für)\b/i;
-    const ibanLike = /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i;
-    const dateLike = /^(\d{1,2}[.\-/]){2}\d{2,4}$/i;
+    const scopedLines = [
+      ...(zones.metaZone || zones.metaBlock || []),
+      ...(zones.senderZone || zones.headerTop || []),
+      ...(zones.bodyZone || []).slice(0, 30)
+    ];
 
-    const addCandidate = (value, line, score, source) => {
-      const token = cleanToken(value).replace(/\s+/g, '');
-      const lineNorm = normalizeWs(line);
+    scopedLines.forEach((line, index) => {
+      const text = normalizeWs(line);
+      if (!text) return;
 
-      if (!token) return;
-      if (token.length < 4 || token.length > 24) return;
-      if (!/\d/.test(token)) return;
-      if (dateLike.test(token)) return;
-      if (ibanLike.test(token)) return;
-      if (badPrefix.test(token)) return;
-      if (badExact.test(token)) return;
-      if (
-        badLineRx.test(lineNorm) &&
-        !/\b(rechnungs?(?:nummer|nr|no)\.?|invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\b/i.test(lineNorm)
-      ) return;
+      labelPatterns.forEach(def => {
+        const m = text.match(def.rx);
+        if (!m || !m[1]) return;
 
-      candidates.push({
-        value: token,
-        score,
-        line: lineNorm,
-        source
-      });
-    };
+        const iso = toIsoDate(m[1]);
+        if (!iso) return;
 
-    for (const rx of labelPatterns) {
-      let m;
-      while ((m = rx.exec(joined))) {
-        addCandidate(m[2], m[0], 18, 'Label Rechnungsnummer');
-      }
-    }
-
-    // Titel-/Headline-Fallback: "Rechnung B898301796"
-    for (const line of lines.slice(0, 24)) {
-      const s = normalizeWs(line);
-      if (!s) continue;
-
-      const m = s.match(/\b(?:rechnung|invoice)\b[\s#:.-]*([A-Z]?\d{6,})\b/i);
-      if (m && m[1]) {
-        addCandidate(m[1], s, 26, 'Titelzeile Rechnungsnummer');
-      }
-    }
-
-    // Metazone
-    const metaLines = (zones.metaZone || zones.metaBlock || []).length
-      ? (zones.metaZone || zones.metaBlock || [])
-      : lines.slice(0, 16);
-
-    metaLines.forEach(line => {
-      const s = normalizeWs(line);
-      if (!s) return;
-
-      const m = s.match(/\b(rechnungs?(?:nummer|nr|no)\.?|invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\b[:#\s-]*([A-Z0-9._/-]{4,})/i);
-      if (m && m[2]) {
-        addCandidate(m[2], s, 22, 'Metazone Rechnungsnummer');
-      }
-
-      const km = s.match(/\b(kundennummer|kunden\-?nr|customer\s*(?:no|number))\b[:#\s-]*([A-Z0-9._/-]{4,})/i);
-      if (km && km[2]) {
         candidates.push({
-          value: cleanToken(km[2]).replace(/\s+/g, ''),
-          score: 2,
-          line: s,
-          source: 'Kundennummer'
+          value: formatDisplayDate(iso),
+          iso,
+          score: def.score + ((semanticType === "rechnung" || semanticType === "gutschrift") ? 2 : 0),
+          line: text,
+          index,
+          source: def.source
+        });
+      });
+
+      const looseHits = [...text.matchAll(/\b(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})\b/g)];
+      looseHits.forEach(m => {
+        const iso = toIsoDate(m[1]);
+        if (!iso) return;
+
+        let score = 4;
+        if (/\b(rechnungsdatum|invoice\s*date|belegdatum)\b/i.test(text)) score += 10;
+        if (/\b(datum|date)\b/i.test(text)) score += 4;
+        if (index <= 20) score += 2;
+
+        candidates.push({
+          value: formatDisplayDate(iso),
+          iso,
+          score,
+          line: text,
+          index,
+          source: "Datum im Dokument"
+        });
+      });
+    });
+
+    const supplierApi = window.FideliorSupplierProfiles || null;
+    const profileDate = supplierApi?.detectDateByProfile
+      ? supplierApi.detectDateByProfile(payload, profile)
+      : "";
+
+    if (profileDate) {
+      const iso = toIsoDate(profileDate);
+      if (iso) {
+        candidates.push({
+          value: formatDisplayDate(iso),
+          iso,
+          score: 18,
+          line: profileDate,
+          index: -1,
+          source: "Lieferantenprofil Datumslabel"
         });
       }
-    });
-
-    // Lieferantenprofil-Fallback, z.B. Drillisch
-    if (Array.isArray(profile?.invoiceNumberPatterns)) {
-      for (const rx of profile.invoiceNumberPatterns) {
-        if (!(rx instanceof RegExp)) continue;
-
-        const flags = rx.flags.includes('g') ? rx.flags : rx.flags + 'g';
-        const safeRx = new RegExp(rx.source, flags);
-
-        let m;
-        while ((m = safeRx.exec(joined))) {
-          const candidate = m[1] || m[0];
-          addCandidate(candidate, m[0], 30, 'Lieferantenprofil Rechnungsnummer');
-        }
-      }
     }
 
-    const dedup = new Map();
-    candidates.forEach(c => {
-      const key = normalizeCompare(c.value);
-      if (!key) return;
-      const prev = dedup.get(key);
-      if (!prev || c.score > prev.score) dedup.set(key, c);
-    });
+    const todayIso = new Date().toISOString().slice(0, 10);
 
-    return [...dedup.values()]
-      .filter(c => c.score >= 8)
-      .sort((a, b) => b.score - a.score);
+    return dedupeCandidates(
+      candidates.filter(c => c.iso && c.iso <= todayIso),
+      c => c.iso
+    );
   }
 
-  /* ═══════════════════════════════════════════════════════
-     FIELD BUILDER
-  ═══════════════════════════════════════════════════════ */
-
-  function buildField(best, fallbackValue = '') {
-    if (!best) {
-      return {
-        value: fallbackValue || '',
-        confidence: 'low',
-        source: 'keine sichere Erkennung',
-        score: 0,
-        line: ''
-      };
-    }
-
-    return {
-      value: best.value,
-      confidence: mapConfidence(best.score),
-      source: best.source || 'Dokumentanalyse',
-      score: best.score,
-      line: best.line || ''
-    };
-  }
-
-  /* ═══════════════════════════════════════════════════════
-     ANALYSE
-  ═══════════════════════════════════════════════════════ */
+  /* =========================================================
+     ANALYZE
+  ========================================================= */
 
   function analyzeDocument(text, linesInput) {
     const payload = getPayload(text, linesInput);
-    const textString = payload.rawText || '';
-    const lines = payload.lines || [];
-    const zones = payload.zones || {};
+    const textString = payload.rawText || "";
 
     const supplierApi = window.FideliorSupplierProfiles || null;
     if (!payload.profile && supplierApi?.findMatchingProfile) {
@@ -582,239 +628,137 @@ if (totalLineRx.test(text)) {
     const semanticType = detectSemanticType(textString);
     const type = detectTypeFromSemantic(semanticType);
 
-    const senderCandidatesRaw = detectSenderCandidates(payload);
-    const referenceCandidatesRaw = detectReferenceCandidates(payload);
+    let senderCandidates = detectSenderCandidates(payload);
+    let referenceCandidates = detectReferenceCandidates(payload, semanticType);
+    let amountCandidates = detectAmountCandidates(payload, semanticType);
+    let dateCandidates = detectDateCandidates(payload, semanticType);
 
-    const amountSourceLines = [
-      ...(zones.totalsZone || []),
-      ...(zones.tableZone || []),
-      ...(lines || [])
-    ];
-    const amountCandidatesRaw = detectAmountCandidates(amountSourceLines);
+    senderCandidates = applyProfileBoost("sender", senderCandidates, payload.profile, payload);
+    referenceCandidates = applyProfileBoost("reference", referenceCandidates, payload.profile, payload);
+    amountCandidates = applyProfileBoost("amount", amountCandidates, payload.profile, payload);
+    dateCandidates = applyProfileBoost("date", dateCandidates, payload.profile, payload);
 
-    let senderCandidates = supplierApi?.boostCandidates
-      ? supplierApi.boostCandidates('sender', senderCandidatesRaw, payload.profile, payload)
-      : senderCandidatesRaw;
+    referenceCandidates = applyNegativeRules("reference", referenceCandidates, payload);
+    amountCandidates = applyNegativeRules("amount", amountCandidates, payload);
 
-    let referenceCandidates = supplierApi?.boostCandidates
-      ? supplierApi.boostCandidates('reference', referenceCandidatesRaw, payload.profile, payload)
-      : referenceCandidatesRaw;
+    senderCandidates = dedupeCandidates(senderCandidates, c => normalizeCompare(c.value));
+    referenceCandidates = dedupeCandidates(referenceCandidates, c => normalizeCompare(c.value));
+    amountCandidates = dedupeCandidates(amountCandidates, c => String(Number(c.value).toFixed(2)));
+    dateCandidates = dedupeCandidates(dateCandidates, c => c.iso || normalizeCompare(c.value));
 
-    let amountCandidates = supplierApi?.boostCandidates
-      ? supplierApi.boostCandidates('amount', amountCandidatesRaw, payload.profile, payload)
-      : amountCandidatesRaw;
+    const senderField = finalizeField(senderCandidates, {
+      minScore: 14,
+      requireHigh: true,
+      emptyValue: ""
+    });
 
-    const neg = window.FideliorNegativeRules || null;
+    const referenceField = (type === "rechnung")
+      ? finalizeField(referenceCandidates, {
+          minScore: 14,
+          requireHigh: true,
+          emptyValue: ""
+        })
+      : {
+          value: "",
+          confidence: "low",
+          score: 0,
+          margin: 0,
+          source: "für Dokumenttyp nicht relevant",
+          line: "",
+          candidates: referenceCandidates
+        };
 
-    if (neg?.isBadReferenceCandidate) {
-      referenceCandidates = referenceCandidates.filter(c =>
-        !neg.isBadReferenceCandidate(c, payload.rawText)
-      );
-    }
+    const amountField = finalizeField(amountCandidates, {
+      minScore: 16,
+      requireHigh: true,
+      emptyValue: NaN
+    });
 
-    if (neg?.isBadAmountCandidate) {
-      amountCandidates = amountCandidates.filter(c =>
-        !neg.isBadAmountCandidate(c)
-      );
-    }
-
-    if (supplierApi?.boostByAnchors) {
-      senderCandidates = supplierApi.boostByAnchors('sender', senderCandidates, payload.profile, payload);
-      referenceCandidates = supplierApi.boostByAnchors('reference', referenceCandidates, payload.profile, payload);
-      amountCandidates = supplierApi.boostByAnchors('amount', amountCandidates, payload.profile, payload);
-    }
-
-    let senderField = buildField(senderCandidates[0]);
-    let referenceField = buildField(null);
-
-    if (type === 'rechnung') {
-      const bestRef = referenceCandidates[0];
-      const bestRefLine = normalizeWs(bestRef?.line || '');
-
-      if (
-        bestRef &&
-        bestRef.score >= 12 &&
-        /\d/.test(bestRef.value) &&
-        !/^(kopie|copy|original|erstellt|datum|date|seite|page)$/i.test(bestRef.value) &&
-        (
-          /\b(rechnungs?(?:nummer|nr|no)\.?|invoice\s*(?:no|nr|number)?|inv\.?\s*no\.?)\b/i.test(bestRefLine) ||
-          /\b(?:rechnung|invoice)\b/i.test(bestRefLine) ||
-          /^[A-Z]?\d{6,}$/i.test(bestRef.value) ||
-          /^[A-Z0-9._/-]*\d[A-Z0-9._/-]*$/i.test(bestRef.value)
-        ) &&
-        !/\b(kundennummer|kunden\-?nr|customer\s*(?:no|number)|iban|bic|swift|mandatsreferenz|mandats\-?ref|vertragskonto|rufnummer)\b/i.test(bestRefLine)
-      ) {
-        referenceField = buildField(bestRef);
-      }
-    }
-
-    const anchoredSender = supplierApi?.detectByAnchor
-      ? supplierApi.detectByAnchor(payload, 'sender', payload.profile, payload)
-      : '';
-
-    const anchoredReference = supplierApi?.detectByAnchor
-      ? supplierApi.detectByAnchor(payload, 'reference', payload.profile, payload)
-      : '';
-
-    if ((!senderField.value || senderField.confidence === 'low') && anchoredSender) {
-      senderField = {
-        value: anchoredSender,
-        confidence: 'medium',
-        score: 11,
-        source: 'Gelernter Feldanker',
-        line: anchoredSender
-      };
-    }
-
-    if (type === 'rechnung' && (!referenceField.value || referenceField.confidence === 'low') && anchoredReference) {
-      referenceField = {
-        value: anchoredReference,
-        confidence: 'medium',
-        score: 11,
-        source: 'Gelernter Feldanker',
-        line: anchoredReference
-      };
-    }
-
-    let bestAmount = amountCandidates.length ? amountCandidates[0] : null;
-
-    if (bestAmount) {
-      const line = (bestAmount.line || '').toLowerCase();
-
-      if (
-        bestAmount.value < 10 &&
-        bestAmount.score < 20 &&
-        !/(gesamt|summe|total|betrag|zu zahlen|rechnungsbetrag|amount due|invoice total|endbetrag|zahlbetrag)/.test(line)
-      ) {
-        bestAmount = null;
-      }
-
-      if (
-        /(mwst|ust|vat|tax|netto)/.test(line) &&
-        !/(gesamt|summe|total|betrag|zu zahlen|rechnungsbetrag|amount due|invoice total|endbetrag|zahlbetrag)/.test(line)
-      ) {
-        bestAmount = null;
-      }
-
-      if (/de\d{2}/i.test(line)) {
-        bestAmount = null;
-      }
-    }
-
-    const anchoredAmount = supplierApi?.detectByAnchor
-      ? supplierApi.detectByAnchor(payload, 'amount', payload.profile, payload)
-      : '';
-
-    if (!bestAmount && anchoredAmount) {
-      bestAmount = {
-        value: anchoredAmount,
-        score: 11,
-        source: 'Gelernter Feldanker',
-        line: anchoredAmount
-      };
-    }
-
-    let amountField;
-
-    if (bestAmount && bestAmount.score >= 20) {
-      amountField = buildField(bestAmount);
-    } else if (window.FideliorCandidateVoter) {
-      const votedPool = bestAmount
-        ? [bestAmount, ...amountCandidates.filter(c => c !== bestAmount)]
-        : amountCandidates;
-
-      const voted = window.FideliorCandidateVoter.pickBestCandidate(votedPool);
-
-      if (!voted || voted.score < 10) {
-        amountField = buildField(bestAmount);
-      } else {
-        const votedValue = Number.isFinite(voted.value) ? voted.value : parseEuro(voted.value);
-
-        if (Number.isFinite(votedValue)) {
-          amountField = {
-            value: votedValue,
-            confidence: voted.confidence || mapConfidence(voted.score || 0),
-            score: voted.score || 0,
-            source: voted.source || 'Candidate Voter',
-            line: voted.line || ''
-          };
-        } else {
-          amountField = buildField(bestAmount);
-        }
-      }
-    } else {
-      amountField = buildField(bestAmount);
-    }
-
-    const dateValue = detectInvoiceDate(payload);
+    const dateField = finalizeField(dateCandidates, {
+      minScore: 14,
+      requireHigh: true,
+      emptyValue: ""
+    });
 
     const warnings = [];
-    if (!senderField.value) warnings.push('Absender nicht sicher erkannt');
-    if (type === 'rechnung' && !referenceField.value) warnings.push('Rechnungsnummer nicht sicher erkannt');
-    if (!Number.isFinite(amountField.value)) warnings.push('Betrag nicht sicher erkannt');
-    if (!dateValue) warnings.push('Rechnungsdatum nicht sicher erkannt');
-
-    if (!referenceField.value) {
-      referenceField = {
-        value: '',
-        confidence: 'low',
-        source: 'keine gültige Rechnungsnummer',
-        score: 0,
-        line: ''
-      };
-    }
+    if (!senderField.value) warnings.push("Absender nicht sicher erkannt");
+    if (type === "rechnung" && !referenceField.value) warnings.push("Rechnungsnummer nicht sicher erkannt");
+    if (!Number.isFinite(amountField.value)) warnings.push("Betrag nicht sicher erkannt");
+    if (!dateField.value) warnings.push("Rechnungsdatum nicht sicher erkannt");
 
     return {
       type,
       semanticType,
+      profile: payload.profile ? {
+        id: payload.profile.id || "",
+        name: payload.profile.name || ""
+      } : null,
 
-      sender: senderField.value || '',
-      reference: referenceField.value ?? '',
+      sender: senderField.value || "",
+      reference: referenceField.value || "",
       amount: Number.isFinite(amountField.value) ? amountField.value : NaN,
-      date: dateValue || '',
+      date: dateField.value || "",
 
       fields: {
-        sender: senderField,
-        reference: referenceField,
+        sender: {
+          value: senderField.value || "",
+          confidence: senderField.confidence,
+          score: senderField.score,
+          margin: senderField.margin,
+          source: senderField.source,
+          line: senderField.line
+        },
+        reference: {
+          value: referenceField.value || "",
+          confidence: referenceField.confidence,
+          score: referenceField.score,
+          margin: referenceField.margin,
+          source: referenceField.source,
+          line: referenceField.line
+        },
         amount: {
           value: Number.isFinite(amountField.value) ? amountField.value : NaN,
           confidence: amountField.confidence,
-          source: amountField.source,
           score: amountField.score,
+          margin: amountField.margin,
+          source: amountField.source,
           line: amountField.line
         },
         date: {
-          value: dateValue || '',
-          confidence: dateValue ? 'medium' : 'low',
-          source: dateValue ? 'Datumsanalyse' : 'keine sichere Erkennung',
-          score: dateValue ? 9 : 0,
-          line: ''
+          value: dateField.value || "",
+          confidence: dateField.confidence,
+          score: dateField.score,
+          margin: dateField.margin,
+          source: dateField.source,
+          line: dateField.line
         }
       },
 
       candidates: {
         sender: senderCandidates,
         reference: referenceCandidates,
-        amount: amountCandidates
+        amount: amountCandidates,
+        date: dateCandidates
       },
 
       warnings,
 
       debug: {
-        lineCount: lines.length,
+        lineCount: (payload.lines || []).length,
         semanticType,
         candidateCounts: {
           sender: senderCandidates.length,
           reference: referenceCandidates.length,
-          amount: amountCandidates.length
+          amount: amountCandidates.length,
+          date: dateCandidates.length
         },
         zones: {
-          senderZone: (zones.senderZone || []).length,
-          recipientZone: (zones.recipientZone || []).length,
-          metaZone: (zones.metaZone || []).length,
-          tableZone: (zones.tableZone || []).length,
-          totalsZone: (zones.totalsZone || []).length,
-          footerZone: (zones.footerZone || []).length
+          senderZone: (payload.zones?.senderZone || []).length,
+          recipientZone: (payload.zones?.recipientZone || []).length,
+          metaZone: (payload.zones?.metaZone || []).length,
+          tableZone: (payload.zones?.tableZone || []).length,
+          totalsZone: (payload.zones?.totalsZone || []).length,
+          footerZone: (payload.zones?.footerZone || []).length
         }
       }
     };
@@ -824,5 +768,5 @@ if (totalLineRx.test(text)) {
     analyzeDocument
   };
 
-  console.info('[FideliorAI] zentrale Analyse-Engine aktiv');
+  console.info("[FideliorAI] zentrale Analyse-Engine aktiv");
 })();
