@@ -1,19 +1,20 @@
 /* ==========================================================================
    Fidelior KI – Absender-Erkennung & Lern-Engine
-   Version 2.0 — standalone, non-invasive
+   Version 3.0 — konsolidiert, sender-only
    Hook: window.fdlKiOnOcr(txt, lines, assignmentsCfg)
 
-   Ziel:
-   - robustere Absender-Erkennung
-   - weniger Fehlgriffe im Briefkopf
-   - keine Änderung an Ablage-/Save-/Pfadlogik
+   ZIELE
+   - robuste Absender-Erkennung
+   - keine Parallel-Extraktion für Rechnungsnummer / Betrag / Datum
+   - keine Konflikte mit der zentralen FideliorAI-Engine
+   - Lernpanel für assignments.json bleibt erhalten
    ========================================================================== */
 
 (() => {
 'use strict';
 
 /* ══════════════════════════════════════════════════════════════════════════
-   BASIS / KONSTANTEN
+   KONSTANTEN
    ══════════════════════════════════════════════════════════════════════════ */
 
 const COMPANY_SUFFIXES_RX =
@@ -34,7 +35,6 @@ const STREET_RX = /\b(?:straße|str\.|weg|allee|platz|gasse|ufer|chaussee|ring|d
 const VAT_RX = /\b(?:ust-id|ustid|umsatzsteuer|tax\s*id|vat)\b/i;
 const CONTACT_RX = /\b(?:tel|telefon|fax|mobil|email|e-mail|www|http)\b/i;
 const BANK_RX = /\b(?:iban|bic|swift|bank|konto|blz)\b/i;
-const INVOICE_WORD_RX = /\b(?:rechnung|invoice|gutschrift|angebot|mahnung)\b/i;
 
 const LEARN_PANEL_ID = 'fdl-ki-learn-panel';
 const BADGE_ID = 'fdl-ki-sender-badge';
@@ -46,19 +46,29 @@ let learnPanelEl = null;
    DOM HELPERS
    ══════════════════════════════════════════════════════════════════════════ */
 
-function getSenderEl()  { return document.getElementById('senderInput'); }
-function getObjSel()    { return document.getElementById('objectSelect'); }
-function getSubSel()    { return document.getElementById('genericSubfolder'); }
-function getTypeSel()   { return document.getElementById('docTypeSelect'); }
-function getAmountEl()  { return document.getElementById('amountInput'); }
-function getInvNoEl()   { return document.getElementById('invoiceNo'); }
-function getInvDateEl() { return document.getElementById('invoiceDate'); }
-
 function q(id) { return document.getElementById(id); }
+
+function getSenderEl()  { return q('senderInput'); }
+function getObjSel()    { return q('objectSelect'); }
+function getSubSel()    { return q('genericSubfolder'); }
+
+function isVisible(el) {
+  if (!el) return false;
+  const st = getComputedStyle(el);
+  return st.display !== 'none' && st.visibility !== 'hidden';
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   STRING HELPERS
+   ══════════════════════════════════════════════════════════════════════════ */
 
 function escHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, ch => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
   }[ch]));
 }
 
@@ -82,18 +92,13 @@ function normalizeForCompare(s) {
     .trim();
 }
 
-function isVisible(el) {
-  if (!el) return false;
-  const st = getComputedStyle(el);
-  return st.display !== 'none' && st.visibility !== 'hidden';
-}
-
 /* ══════════════════════════════════════════════════════════════════════════
    CSS
    ══════════════════════════════════════════════════════════════════════════ */
 
 function injectKiCSS() {
   if (q('fdl-ki-css')) return;
+
   const s = document.createElement('style');
   s.id = 'fdl-ki-css';
   s.textContent = `
@@ -186,20 +191,26 @@ function injectKiCSS() {
    TOAST
    ══════════════════════════════════════════════════════════════════════════ */
 
-function fdlToast(html, ms) {
+function fdlToast(html, ms = 3500) {
   try {
-    if (typeof toast === 'function') toast(html, ms || 3500);
+    if (typeof toast === 'function') toast(html, ms);
     else console.log('[FideliorKI]', html);
   } catch {}
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   TEXT / OCR HELPERS
+   OCR / TEXT HELPERS
    ══════════════════════════════════════════════════════════════════════════ */
 
 function toCleanLines(txt, lines) {
-  const fromLines = Array.isArray(lines) ? lines.map(v => normalizeWs(v)) : [];
-  const fromText = String(txt || '').split(/\r?\n/).map(v => normalizeWs(v));
+  const fromLines = Array.isArray(lines)
+    ? lines.map(v => normalizeWs(typeof v === 'string' ? v : (v?.text || '')))
+    : [];
+
+  const fromText = String(txt || '')
+    .split(/\r?\n/)
+    .map(normalizeWs);
+
   const merged = [...fromLines, ...fromText].filter(Boolean);
   const out = [];
   const seen = new Set();
@@ -210,6 +221,7 @@ function toCleanLines(txt, lines) {
     seen.add(key);
     out.push(line);
   }
+
   return out;
 }
 
@@ -247,10 +259,12 @@ function looksLikeZipCity(line) {
 function countCompanySignals(line) {
   const s = normalizeWs(line);
   let score = 0;
+
   if (COMPANY_SUFFIXES_RX.test(s)) score += 7;
   if (/\b&\b/.test(s)) score += 1;
   if (/[A-ZÄÖÜ][A-Za-zÄÖÜäöüß]+\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß]+/.test(s)) score += 1;
-  if (/\b(hausverwaltung|immobilien|energie|versorgung|kanzlei|steuerberater|rechtsanwälte|bau|service|services|solutions|management)\b/i.test(s)) score += 2;
+  if (/\b(hausverwaltung|immobilien|energie|versorgung|kanzlei|steuerberater|rechtsanwälte|bau|service|services|solutions|management|autodoc|online|wasser|werke)\b/i.test(s)) score += 2;
+
   return score;
 }
 
@@ -258,12 +272,12 @@ function isClearlyBadSenderLine(line) {
   const s = normalizeWs(line);
   if (!s) return true;
 
-  if (NEGATIVE_LINE_RX.test(s)) return true;
-  if (PERSON_LINE_RX.test(s)) return true;
-
   const strongCompany =
     COMPANY_SUFFIXES_RX.test(s) ||
-    /\b(energie|werke|versicherung|sanitätshaus|online|media|bau|service|services|solutions|management|autodoc)\b/i.test(s);
+    /\b(energie|werke|versicherung|sanitätshaus|online|media|bau|service|services|solutions|management|wasser)\b/i.test(s);
+
+  if (NEGATIVE_LINE_RX.test(s) && !strongCompany) return true;
+  if (PERSON_LINE_RX.test(s) && !strongCompany) return true;
 
   if (looksLikeAddress(s) && !strongCompany) return true;
   if (looksLikeZipCity(s) && !strongCompany) return true;
@@ -276,7 +290,6 @@ function isClearlyBadSenderLine(line) {
   if (/kundenservice/i.test(s)) return true;
 
   if (/^\d[\d\s.,/-]*$/.test(s)) return true;
-
   if (s.length < 3 || s.length > 90) return true;
 
   return false;
@@ -297,10 +310,12 @@ function scoreHeaderCandidate(line, index, nearbyLines) {
 
   if (!/\d/.test(s)) score += 1;
   if (/[A-ZÄÖÜ][a-zäöüß]/.test(s)) score += 1;
-  if (s.split(/\s+/).length >= 2 && s.split(/\s+/).length <= 6) score += 1;
 
-  const next = nearbyLines[index + 1] || '';
-  const prev = nearbyLines[index - 1] || '';
+  const words = s.split(/\s+/).length;
+  if (words >= 2 && words <= 6) score += 1;
+
+  const next = normalizeWs(nearbyLines[index + 1] || '');
+  const prev = normalizeWs(nearbyLines[index - 1] || '');
 
   if (looksLikeAddress(next)) score += 2;
   if (looksLikeZipCity(next)) score += 1;
@@ -317,13 +332,17 @@ function scoreHeaderCandidate(line, index, nearbyLines) {
 
 function pickBestScoredCandidate(list) {
   if (!Array.isArray(list) || !list.length) return null;
+
   const dedup = new Map();
 
   for (const item of list) {
     const key = normalizeForCompare(item.value);
     if (!key) continue;
+
     const prev = dedup.get(key);
-    if (!prev || item.score > prev.score) dedup.set(key, item);
+    if (!prev || item.score > prev.score) {
+      dedup.set(key, item);
+    }
   }
 
   const finalList = [...dedup.values()].sort((a, b) => b.score - a.score);
@@ -341,56 +360,13 @@ function buildPatternFromVendor(vendor) {
   const core = String(vendor)
     .replace(/\b(GmbH|AG|SE|KGaA|KG|GbR|OHG|UG|e\.?\s?V\.?|eG|Inc\.?|Ltd\.?|LLC)\b.*$/i, '')
     .trim();
+
   return escRx(core || vendor);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   EXTRAKTION
+   ABSENDER-EXTRAKTION
    ══════════════════════════════════════════════════════════════════════════ */
-   function extractInvoiceNumber(txt, lines) {
-
-  const cleanLines = toCleanLines(txt, lines);
-
-  const labelPatterns = [
-    /rechnung\s*(?:nr\.?|nummer)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i,
-    /invoice\s*(?:no\.?|number)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i,
-    /beleg\s*(?:nr\.?|nummer)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i,
-    /doc(?:ument)?\s*(?:nr\.?|number)?\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i
-  ];
-
-  for (const line of cleanLines) {
-    for (const rx of labelPatterns) {
-      const m = line.match(rx);
-      if (m && m[1]) {
-        const value = m[1].replace(/[^\w\-\/]/g, '');
-        if (value.length >= 4) {
-          return value;
-        }
-      }
-    }
-  }
-
-  const genericPatterns = [
-    /\b[A-Z]{1,3}\d{5,}\b/,
-    /\b\d{6,}\b/,
-    /\b\d{4,}\-\d{2,}\b/,
-    /\b\d{8,}\b/
-  ];
-
-  const text = String(txt || '');
-
-  for (const rx of genericPatterns) {
-    const m = text.match(rx);
-    if (m) {
-      const candidate = m[0];
-      if (candidate.length >= 5 && candidate.length <= 20) {
-        return candidate;
-      }
-    }
-  }
-
-  return null;
-}
 
 function extractSenderFromRule(matchedRule) {
   if (matchedRule?.sender?.trim()) {
@@ -466,12 +442,13 @@ function extractSenderFromFullText(txt) {
 
   const patterns = [
     /([A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,60}\b(?:GmbH|AG|SE|KG|UG|e\.?\s?V\.?|eG|Holding|Immobilien|Hausverwaltung|Verwaltung|Management|Consulting|Solutions|Services|Service|Stadtwerke|Energie|Versorgung|Versicherung|Versicherungen|Kanzlei|Bank|Sparkasse))/,
-    /([A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,60}\b(?:Hausverwaltung|Immobilien|Verwaltung|Kanzlei|Steuerberater|Rechtsanwälte|Stadtwerke|Energie|Versorgung))/i
+    /([A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,60}\b(?:Hausverwaltung|Immobilien|Verwaltung|Kanzlei|Steuerberater|Rechtsanwälte|Stadtwerke|Energie|Versorgung|Wasser|Werke))/i
   ];
 
   for (const rx of patterns) {
     const m = t.match(rx);
     if (!m) continue;
+
     const candidate = cleanCandidate(m[1]);
     if (!candidate || isClearlyBadSenderLine(candidate)) continue;
 
@@ -493,22 +470,27 @@ function extractSender(txt, lines, matchedRule) {
   const byRule = extractSenderFromRule(matchedRule);
   if (byRule) return byRule;
 
+  const cleanLines = toCleanLines(txt, lines);
+
   const byLabel = extractSenderByLabel(txt);
-  const byHeader = extractSenderFromHeader(toCleanLines(txt, lines));
+  const byHeader = extractSenderFromHeader(cleanLines);
   const byText = extractSenderFromFullText(txt);
 
-  const best = pickBestScoredCandidate(
-    [byLabel, byHeader, byText].filter(Boolean).map(v => ({
+  const pool = [byLabel, byHeader, byText]
+    .filter(Boolean)
+    .map(v => ({
       value: v.value,
       score: v.score,
       source: v.source,
       confidence: v.confidence
-    }))
-  );
+    }));
 
+  const best = pickBestScoredCandidate(pool);
   if (!best) return null;
 
-  const sourceMap = [byLabel, byHeader, byText].find(v => normalizeForCompare(v.value) === normalizeForCompare(best.value));
+  const sourceMap = [byLabel, byHeader, byText]
+    .find(v => v && normalizeForCompare(v.value) === normalizeForCompare(best.value));
+
   return sourceMap || {
     value: best.value,
     confidence: mapConfidence(best.score),
@@ -518,7 +500,7 @@ function extractSender(txt, lines, matchedRule) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   UI: BADGE / STATUS
+   UI
    ══════════════════════════════════════════════════════════════════════════ */
 
 function removeSenderBadge() {
@@ -538,21 +520,25 @@ function ensureStatusHost() {
 
   const parent = senderEl.parentElement;
   if (parent) parent.appendChild(host);
+
   return host;
 }
 
 function setStatus(confidence, text) {
   const host = ensureStatusHost();
   if (!host) return;
+
   if (!text) {
     host.innerHTML = '';
     return;
   }
+
   host.innerHTML = `<span class="fdl-ki-dot ${escHtml(confidence || 'low')}"></span><span>${escHtml(text)}</span>`;
 }
 
 function showSenderBadge(confidence, source) {
   removeSenderBadge();
+
   const senderEl = getSenderEl();
   if (!senderEl) return;
 
@@ -563,7 +549,9 @@ function showSenderBadge(confidence, source) {
   badge.innerHTML = `KI <span class="fdl-ki-src">(${escHtml(source)})</span>`;
 
   const label = senderEl.previousElementSibling;
-  if (label && label.tagName === 'LABEL') label.appendChild(badge);
+  if (label && label.tagName === 'LABEL') {
+    label.appendChild(badge);
+  }
 }
 
 function clearKiUi() {
@@ -573,7 +561,7 @@ function clearKiUi() {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   LERN-PANEL
+   LERNPANEL
    ══════════════════════════════════════════════════════════════════════════ */
 
 function removeLearnPanel() {
@@ -584,16 +572,20 @@ function removeLearnPanel() {
 function getSubfolderValueIfVisible() {
   const sub = getSubSel();
   const row = sub?.closest('#subfolderRow');
+
   if (!sub || (row && !isVisible(row))) return '';
   return sub.value || '';
 }
 
 function bestLearnInsertPoint() {
   const metaDiv = document.querySelector('.meta[aria-live]');
-  if (metaDiv?.parentElement) return { parent: metaDiv.parentElement, before: metaDiv };
+  if (metaDiv?.parentElement) {
+    return { parent: metaDiv.parentElement, before: metaDiv };
+  }
 
   const senderEl = getSenderEl();
   if (!senderEl?.parentElement) return null;
+
   return { parent: senderEl.parentElement, before: null };
 }
 
@@ -682,6 +674,7 @@ async function saveLearnedRule() {
     fdlToast('Bitte ein Stichwort oder einen Absender eingeben.', 2200);
     return;
   }
+
   if (!obj) {
     q('fdl-ki-l-obj')?.focus();
     fdlToast('Bitte eine Liegenschaft wählen.', 2200);
@@ -694,8 +687,9 @@ async function saveLearnedRule() {
     return;
   }
 
-  try { new RegExp(pattern, 'i'); }
-  catch {
+  try {
+    new RegExp(pattern, 'i');
+  } catch {
     fdlToast('Ungültiges Erkennungs-Muster.', 2500);
     return;
   }
@@ -706,15 +700,21 @@ async function saveLearnedRule() {
     sender: sender || vendor,
     note: `auto: ${vendor}`
   };
+
   if (sub) newRule.subfolder = sub;
 
   try {
     let cfg = null;
+
     try {
-      if (typeof loadJson === 'function') cfg = await loadJson('assignments.json');
+      if (typeof loadJson === 'function') {
+        cfg = await loadJson('assignments.json');
+      }
     } catch {}
 
-    if (!cfg || !Array.isArray(cfg.patterns)) cfg = { patterns: [] };
+    if (!cfg || !Array.isArray(cfg.patterns)) {
+      cfg = { patterns: [] };
+    }
 
     const exists = cfg.patterns.some(r =>
       normalizeForCompare(r.pattern || '') === normalizeForCompare(pattern) &&
@@ -729,7 +729,10 @@ async function saveLearnedRule() {
 
     cfg.patterns.push(newRule);
 
-    if (typeof saveJson === 'function') await saveJson('assignments.json', cfg);
+    if (typeof saveJson === 'function') {
+      await saveJson('assignments.json', cfg);
+    }
+
     window.assignmentsCfg = cfg;
 
     fdlToast(`<strong>Regel gelernt ✓</strong><br>${escHtml(vendor)} → ${escHtml(obj)}`, 3000);
@@ -764,6 +767,7 @@ function patchAssignmentsDialog() {
     const extendRow = (tr) => {
       if (!tr || tr.dataset.kiExtended) return;
       tr.dataset.kiExtended = '1';
+
       const delTd = tr.lastElementChild;
       const td = document.createElement('td');
       td.innerHTML = `<input class="input slim as-sender" placeholder="z.B. Stadtwerke Bonn" style="min-width:130px">`;
@@ -784,6 +788,7 @@ function patchAssignmentsDialog() {
     const saveBtn = dlg.querySelector('#assignSave');
     if (saveBtn && !saveBtn._kiSavePatched) {
       saveBtn._kiSavePatched = true;
+
       saveBtn.addEventListener('click', () => {
         setTimeout(async () => {
           try {
@@ -794,11 +799,14 @@ function patchAssignmentsDialog() {
             rows.forEach((tr, i) => {
               const senderVal = normalizeWs(tr.querySelector('.as-sender')?.value || '');
               if (!cfg.patterns[i]) return;
+
               if (senderVal) cfg.patterns[i].sender = senderVal;
               else delete cfg.patterns[i].sender;
             });
 
-            if (typeof saveJson === 'function') await saveJson('assignments.json', cfg);
+            if (typeof saveJson === 'function') {
+              await saveJson('assignments.json', cfg);
+            }
           } catch (e) {
             console.warn('[FideliorKI] sender-Feld Speichern fehlgeschlagen:', e);
           }
@@ -809,7 +817,9 @@ function patchAssignmentsDialog() {
     const patterns = window.assignmentsCfg?.patterns || [];
     dlg.querySelectorAll('#assignTbody tr').forEach((tr, i) => {
       const senderInput = tr.querySelector('.as-sender');
-      if (senderInput && patterns[i]?.sender) senderInput.value = patterns[i].sender;
+      if (senderInput && patterns[i]?.sender) {
+        senderInput.value = patterns[i].sender;
+      }
     });
   });
 
@@ -821,12 +831,13 @@ function patchAssignmentsDialog() {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   INPUT-WATCHER
+   INPUT WATCHER
    ══════════════════════════════════════════════════════════════════════════ */
 
 function attachSenderWatcher() {
   const senderEl = getSenderEl();
   if (!senderEl || senderEl._kiWatching) return;
+
   senderEl._kiWatching = true;
 
   senderEl.addEventListener('input', () => {
@@ -838,7 +849,9 @@ function attachSenderWatcher() {
   });
 
   senderEl.addEventListener('change', () => {
-    if (senderEl.value.trim()) senderEl.dataset.userTyped = '1';
+    if (senderEl.value.trim()) {
+      senderEl.dataset.userTyped = '1';
+    }
   });
 }
 
@@ -846,36 +859,42 @@ function attachSenderWatcher() {
    HAUPT-HOOK
    ══════════════════════════════════════════════════════════════════════════ */
 
+function buildSenderResultFromCentralEngine(txt, lines) {
+  try {
+    const engine = window.FideliorAI?.analyzeDocument?.(txt, lines);
+    const senderField = engine?.fields?.sender;
+
+    if (!senderField?.value) return null;
+
+    return {
+      value: normalizeWs(senderField.value),
+      confidence: senderField.confidence || 'medium',
+      source: senderField.source || 'Zentrale Engine',
+      score: senderField.score || 0
+    };
+  } catch (e) {
+    console.warn('[FideliorKI] Engine bridge failed:', e);
+    return null;
+  }
+}
+
 async function onOcr(txt, lines, assignmentsCfg) {
   try {
     const senderEl = getSenderEl();
     if (!senderEl) return;
 
-    if (senderEl.dataset.userTyped === '1' && senderEl.value.trim()) return;
+    if (senderEl.dataset.userTyped === '1' && senderEl.value.trim()) {
+      return;
+    }
 
     let matchedRule = null;
     if (typeof evaluateAssignmentRules === 'function' && assignmentsCfg) {
-      try { matchedRule = evaluateAssignmentRules(txt, assignmentsCfg); } catch {}
+      try {
+        matchedRule = evaluateAssignmentRules(txt, assignmentsCfg);
+      } catch {}
     }
 
-      let result = null;
-
-    try {
-      const engine = window.FideliorAI?.analyzeDocument?.(txt, lines);
-      const senderField = engine?.fields?.sender;
-
-      if (senderField?.value) {
-        result = {
-          value: senderField.value,
-          confidence: senderField.confidence || 'medium',
-          source: senderField.source || 'Zentrale Engine',
-          score: senderField.score || 0,
-          reference: engine?.fields?.reference?.value || ''
-        };
-      }
-    } catch (e) {
-      console.warn('[FideliorKI] Engine bridge failed:', e);
-    }
+    let result = buildSenderResultFromCentralEngine(txt, lines);
 
     if (!result) {
       result = extractSender(txt, lines, matchedRule);
@@ -906,32 +925,6 @@ async function onOcr(txt, lines, assignmentsCfg) {
         showSenderBadge(result.confidence, result.source);
         setStatus(result.confidence, `Absender erkannt: ${incoming}`);
 
-try {
-  const invEl = getInvNoEl();
-
-  if (invEl && !invEl.value) {
-    const engine = window.FideliorAI?.analyzeDocument
-      ? window.FideliorAI.analyzeDocument(txt, lines)
-      : null;
-
-    const refValue = engine?.fields?.reference?.value || "";
-    const refConfidence = engine?.fields?.reference?.confidence || "low";
-    const isRealInvoice = engine?.type === "rechnung";
-
-    if (
-      isRealInvoice &&
-      refConfidence === "high" &&
-      refValue &&
-      /\d/.test(refValue)
-    ) {
-      invEl.value = refValue;
-      invEl.dataset.kiDetected = "1";
-    } else {
-      invEl.value = "";
-      delete invEl.dataset.kiDetected;
-    }
-  }
-} catch {}
         if (typeof refreshPreview === 'function') {
           try { refreshPreview(); } catch {}
         }
@@ -939,12 +932,16 @@ try {
         if (result.confidence !== 'high') {
           setTimeout(() => {
             const objSel = getObjSel();
-            if (!learnPanelEl && (incoming || objSel?.value)) showLearnPanel(incoming);
+            if (!learnPanelEl && (incoming || objSel?.value)) {
+              showLearnPanel(incoming);
+            }
           }, 550);
         }
       }
+
       return;
     }
+
     removeSenderBadge();
     setStatus('low', 'Kein sicherer Absender erkannt');
 
@@ -972,20 +969,23 @@ function init() {
   if (typeof origHardReset === 'function' && !origHardReset._kiWrapped) {
     const wrapped = function(...args) {
       clearKiUi();
+
       const senderEl = getSenderEl();
       if (senderEl) {
         delete senderEl.dataset.kiDetected;
         delete senderEl.dataset.kiSource;
         delete senderEl.dataset.userTyped;
       }
+
       return origHardReset.apply(this, args);
     };
+
     wrapped._kiWrapped = true;
     window.hardReset = wrapped;
   }
 
   window.fdlKiOnOcr = onOcr;
-  console.info('[FideliorKI v2.0] geladen – robuste Absender-KI aktiv');
+  console.info('[FideliorKI v3.0] geladen – sender-only KI aktiv');
 }
 
 if (document.readyState === 'loading') {
