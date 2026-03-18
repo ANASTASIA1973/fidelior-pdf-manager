@@ -570,6 +570,75 @@
     boostCandidates,
     boostByAnchors,
     detectDateByProfile,
-    detectByAnchor
+    detectByAnchor,
+    learnFromConfirmedDocument
   };
+  /* =========================================================
+   LEARNING: Confirmed Document Learning
+========================================================= */
+
+function learnFromConfirmedDocument(payload) {
+  try {
+    if (!payload || !payload.sender) return;
+
+    const storeKey = "fdl_supplier_learning_v1";
+    const store = JSON.parse(localStorage.getItem(storeKey) || "{}");
+
+    const senderKey = normalizeKey(payload.sender);
+
+    if (!store[senderKey]) {
+      store[senderKey] = {
+        name: payload.sender,
+        invoicePatterns: [],
+        anchors: {
+          sender: [],
+          reference: [],
+          amount: [],
+          date: []
+        },
+        samples: []
+      };
+    }
+
+    const entry = store[senderKey];
+
+    // --- Rechnungsnummer Muster lernen ---
+    if (payload.reference && /\d/.test(payload.reference)) {
+      const pattern = payload.reference.replace(/\d/g, "\\d");
+      if (!entry.invoicePatterns.includes(pattern)) {
+        entry.invoicePatterns.push(pattern);
+      }
+    }
+
+    // --- einfache Text-Anker speichern ---
+    if (payload.rawText) {
+      const lines = payload.rawText.split("\n").slice(0, 10);
+
+      entry.anchors.sender = dedupe([
+        ...entry.anchors.sender,
+        ...lines.slice(0, 3)
+      ]);
+
+      entry.samples.push(lines.join(" ").slice(0, 200));
+      entry.samples = entry.samples.slice(-5);
+    }
+
+    localStorage.setItem(storeKey, JSON.stringify(store));
+
+    console.info("[FideliorLearning] gelernt für:", payload.sender);
+
+  } catch (e) {
+    console.warn("[FideliorLearning] Fehler:", e);
+  }
+}
+
+function normalizeKey(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+function dedupe(arr) {
+  return [...new Set(arr.filter(Boolean))];
+}
 })();
