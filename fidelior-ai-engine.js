@@ -234,26 +234,36 @@
       const text = normalizeWs(lines[i]);
       if (!text) continue;
 
-      if (totalLineRx.test(text)) {
-        const m = text.match(totalMoneyRx);
-        if (m && m.length) {
-          const raw = m[m.length - 1];
+if (totalLineRx.test(text)) {
+  const m = text.match(totalMoneyRx);
+  if (m && m.length) {
+    const raw = m[m.length - 1];
 
-          if (/^\d{1,2}[.\-\/]\d{1,2}$/.test(raw)) continue;
+    if (/^\d{1,2}[.\-\/]\d{1,2}$/.test(raw)) continue;
 
-          const value = parseEuro(raw);
-          if (Number.isFinite(value) && value > 0) {
-            candidates.push({
-              value,
-              raw,
-              score: 50,
-              line: text,
-              index: i,
-              source: 'Totalzeile'
-            });
-          }
-        }
-      }
+    const value = parseEuro(raw);
+
+    if (Number.isFinite(value) && value > 0) {
+
+      // 🔥 HARTE PRIORITÄT für echte Total-Zeilen
+      let score = 70;
+
+      // Extra Schutz gegen Bar / Rückgeld
+      if (/\b(bar|cash)\b/i.test(text)) score -= 30;
+      if (/\b(rückgeld|change)\b/i.test(text)) score -= 40;
+
+      candidates.push({
+        value,
+        raw,
+        score,
+        line: text,
+        index: i,
+        source: 'Totalzeile (priorisiert)'
+      });
+    }
+  }
+}
+
     }
 
     const priorityPatterns = [
