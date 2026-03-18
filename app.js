@@ -1221,10 +1221,18 @@ function attachUpload(){
     await renderAll();
 
 
-    autoRecognize();
-    $("#saveBtn")?.removeAttribute("disabled");
-    toast("<strong>Datei geladen</strong>", 1500);
-    refreshPreview();
+autoRecognize();
+
+// 👉 NEU: Document Record nach Analyse sofort erstellen
+try {
+  updateCurrentDocumentRecord();
+} catch (e) {
+  console.warn("updateCurrentDocumentRecord failed:", e);
+}
+
+$("#saveBtn")?.removeAttribute("disabled");
+toast("<strong>Datei geladen</strong>", 1500);
+refreshPreview();
   }
 
   // für refreshInbox() erreichbar machen
@@ -1860,6 +1868,33 @@ function analyzeDocument(txt, lines){
   }
   return window.FideliorAI.analyzeDocument(txt, lines);
 }
+function applyAnalysisFieldToUi(fieldId, field, analysis){
+  if (!field || field.confidence !== "high") return false;
+
+  if (fieldId === "invoiceNo") {
+    const detectedType = String(
+      analysis?.type ||
+      analysis?.semanticType ||
+      ""
+    ).trim().toLowerCase();
+
+    const isRealInvoice =
+      detectedType === "rechnung" || detectedType === "gutschrift";
+
+    const refValue = String(field.value || "").trim();
+
+    if (!isRealInvoice || !refValue || !/\d/.test(refValue)) {
+      return false;
+    }
+  }
+
+  if (fieldId === "amountInput") {
+    if (!Number.isFinite(field.value)) return false;
+    return __fdlApplyToField(fieldId, numToEuro(field.value));
+  }
+
+  return __fdlApplyToField(fieldId, field.value);
+}
 /* =========================================================
    SMART DOCUMENT TYPE DETECTION
 ========================================================= */
@@ -1985,99 +2020,81 @@ window.__fdlLastAutoLearningContext = {
   lines,
   analysis
 };
-    /* Betrag – nur bei hoher Sicherheit automatisch */
-    if (amountEl && !amountEl.dataset.userTyped) {
-    const amountConfidence =
-  analysis?.fields?.amount?.confidence ||
-  "low";
+ /* Betrag – UI rendert nur Engine-Ergebnis */
+if (amountEl && !amountEl.dataset.userTyped) {
+  const ok = applyAnalysisFieldToUi(
+    "amountInput",
+    analysis?.fields?.amount,
+    analysis
+  );
 
-      const mayAutofillAmount = amountConfidence === "high";
+  if (ok) {
+    amountEl.classList.add("auto");
+  } else {
+    amountEl.dataset.raw = "";
+    amountEl.value = "";
+    amountEl.classList.remove("auto");
+  }
 
-      if (mayAutofillAmount && isFinite(analysis.amount) && !isNaN(analysis.amount)) {
-        const euro = numToEuro(analysis.amount);
-        amountEl.dataset.raw = euro;
-        amountEl.value = euro;
-        amountEl.classList.add("auto");
-      } else {
-        amountEl.dataset.raw = "";
-        amountEl.value = "";
-        amountEl.classList.remove("auto");
-      }
+  if (typeof updateAmountRequiredUI === "function") {
+    updateAmountRequiredUI();
+  }
+}
+  /* Datum – UI rendert nur Engine-Ergebnis */
+if (invDateEl && !invDateEl.dataset.userTyped) {
+  const ok = applyAnalysisFieldToUi(
+    "invoiceDate",
+    analysis?.fields?.date,
+    analysis
+  );
 
-      if (typeof updateAmountRequiredUI === "function") {
-        updateAmountRequiredUI();
-      }
-    }
-    /* Datum – high oder medium erlaubt */
-    if (invDateEl && !invDateEl.value.trim() && analysis.date) {
-   const dateConfidence =
-  analysis?.fields?.date?.confidence ||
-  "low";
-
-if (dateConfidence === "high") {
-        invDateEl.value = analysis.date;
-        invDateEl.classList.add("auto");
-      }
-    }
+  if (ok) {
+    invDateEl.classList.add("auto");
+  } else if (!invDateEl.value.trim() || invDateEl.classList.contains("auto")) {
+    invDateEl.value = "";
+    invDateEl.classList.remove("auto");
+  }
+}
 
     
-         /* Rechnungsnummer – nur für echte Rechnungen relevant */
-    {
-     const refConfidence =
-  analysis?.fields?.reference?.confidence ||
-  "low";
+ /* Rechnungsnummer – UI rendert nur Engine-Ergebnis */
+if (invNoEl) {
+  const currentValue = String(invNoEl.value || "").trim();
+  const currentLooksAuto =
+    invNoEl.classList.contains("auto") ||
+    invNoEl.dataset.kiDetected === "1";
 
-      const currentValue = String(invNoEl?.value || "").trim();
-      const currentLooksAuto =
-        invNoEl?.classList.contains("auto") ||
-        invNoEl?.dataset?.kiDetected === "1";
+  const mayWrite =
+    !invNoEl.dataset.userTyped ||
+    currentLooksAuto ||
+    !currentValue;
 
-      const mayWrite =
-        !!invNoEl &&
-        (
-          !invNoEl.dataset.userTyped ||
-          currentLooksAuto ||
-          !currentValue
-        );
+  if (mayWrite) {
+    const ok = applyAnalysisFieldToUi(
+      "invoiceNo",
+      analysis?.fields?.reference,
+      analysis
+    );
 
-      if (mayWrite) {
-        const detectedType = String(
-          analysis?.type ||
-          analysis?.semanticType ||
-          ""
-        ).trim().toLowerCase();
-
-        const isRealInvoice =
-          detectedType === "rechnung" || detectedType === "gutschrift";
-
-        const refValue = String(analysis?.reference || "").trim();
-
-        const validRef =
-          isRealInvoice &&
-          refConfidence === "high" &&
-          refValue &&
-          /\d/.test(refValue);
-
-        if (validRef) {
-          invNoEl.value = refValue;
-          invNoEl.classList.add("auto");
-          invNoEl.dataset.kiDetected = "1";
-        } else if (!currentValue || currentLooksAuto) {
-          // bei Vertrag / Dokument / Bestätigung Feld bewusst leer lassen
-          invNoEl.value = "";
-          invNoEl.classList.remove("auto");
-          delete invNoEl.dataset.kiDetected;
-        }
-      }
+    if (ok) {
+      invNoEl.classList.add("auto");
+      invNoEl.dataset.kiDetected = "1";
+    } else if (!currentValue || currentLooksAuto) {
+      invNoEl.value = "";
+      invNoEl.classList.remove("auto");
+      delete invNoEl.dataset.kiDetected;
     }
-/* Absender – nur bei hoher Sicherheit setzen */
+  }
+}
+/* Absender – UI rendert nur Engine-Ergebnis */
 if (senderEl && !senderEl.dataset.userTyped) {
-const senderConfidence =
-  analysis?.fields?.sender?.confidence ||
-  "low";
+  const ok = applyAnalysisFieldToUi(
+    "senderInput",
+    analysis?.fields?.sender,
+    analysis
+  );
 
-  if (senderConfidence === "high" && analysis.sender) {
-    senderEl.value = analysis.sender;
+  if (ok) {
     senderEl.classList.add("auto");
   } else {
     senderEl.value = "";
@@ -2577,35 +2594,265 @@ try{
 
   el.innerHTML = `Zielordner: ${lines.join("<br>")}`;
 }
+/* =========================================================
+   DOCUMENT RECORD
+   zentrale Metadaten aus Analyse + UI + Zielen
+========================================================= */
 
+function safeText(v){
+  return String(v || "").trim();
+}
+
+function toIsoMaybe(displayDate){
+  const m = String(displayDate || "").match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (!m) return "";
+  return `${m[3]}-${String(+m[2]).padStart(2, "0")}-${String(+m[1]).padStart(2, "0")}`;
+}
+
+function getSelectedOptionText(sel){
+  if (!sel) return "";
+  const opt = sel.options?.[sel.selectedIndex];
+  return String(opt?.textContent || opt?.label || opt?.value || "").trim();
+}
+
+function getCurrentAnalysis(){
+  return window.__fdlLastAutoLearningContext?.analysis || null;
+}
+
+function buildDocumentTitle(record){
+  const obj = safeText(record?.object?.name || record?.object?.code);
+  const sender = safeText(record?.extracted?.sender);
+  const docType = safeText(record?.docType?.label);
+  const ref = safeText(record?.extracted?.reference);
+  const amt = safeText(record?.extracted?.amountDisplay);
+
+  const parts = [];
+
+  if (docType) parts.push(docType);
+  if (sender) parts.push(sender);
+  if (obj) parts.push(obj);
+  if (ref) parts.push(ref);
+  if (amt) parts.push(amt);
+
+  return parts.filter(Boolean).join(" – ");
+}
+
+function buildDocumentSummary(record){
+  const bits = [];
+
+  const sender = safeText(record?.extracted?.sender);
+  const ref = safeText(record?.extracted?.reference);
+  const amt = safeText(record?.extracted?.amountDisplay);
+  const invDate = safeText(record?.extracted?.invoiceDate);
+  const obj = safeText(record?.object?.name || record?.object?.code);
+  const docType = safeText(record?.docType?.label);
+
+  if (docType) bits.push(docType);
+  if (sender) bits.push(`von ${sender}`);
+  if (obj) bits.push(`für ${obj}`);
+  if (ref) bits.push(`Ref. ${ref}`);
+  if (amt) bits.push(`Betrag ${amt}`);
+  if (invDate) bits.push(`vom ${invDate}`);
+
+  return bits.join(", ");
+}
+
+function summarizeResolvedTarget(targetInfo){
+  if (!targetInfo) return null;
+
+  const out = {};
+
+  if (targetInfo.scope?.root && Array.isArray(targetInfo.scope.seg)) {
+    out.scopevisio = {
+      enabled: true,
+      path: targetInfo.scope.seg.join("/")
+    };
+  } else {
+    out.scopevisio = { enabled: false, path: "" };
+  }
+
+  if (targetInfo.pcloud?.root && Array.isArray(targetInfo.pcloud.seg)) {
+    out.pcloud = {
+      enabled: true,
+      path: targetInfo.pcloud.seg.join("/")
+    };
+  } else {
+    out.pcloud = { enabled: false, path: "" };
+  }
+
+  if (targetInfo.pcloudBucket?.root && Array.isArray(targetInfo.pcloudBucket.seg)) {
+    out.pcloudBucket = {
+      enabled: true,
+      path: targetInfo.pcloudBucket.seg.join("/")
+    };
+  } else {
+    out.pcloudBucket = { enabled: false, path: "" };
+  }
+
+  return out;
+}
+
+function buildDocumentRecord(opts = {}){
+  const analysis = opts.analysis || getCurrentAnalysis() || null;
+  const targetInfo = opts.targets || null;
+
+  const originalFileName = safeText(lastFile?.name || "");
+  const currentFileName =
+    (typeof fileNameInput !== "undefined" && fileNameInput?.value?.trim())
+      ? fileNameInput.value.trim()
+      : (typeof computeFileNameAuto === "function" ? computeFileNameAuto() : "");
+
+  const objectCode = safeText(objSel?.value);
+  const objectLabel = getSelectedOptionText(objSel);
+  const docTypeKey = safeText(typeSel?.value);
+  const docTypeLabel = getSelectedOptionText(typeSel);
+  const subfolder = safeText(subSel?.value);
+  const egyoSuffix = safeText(egyoSuffixEl?.value);
+
+  const sender = safeText(senderEl?.value || analysis?.fields?.sender?.value);
+  const reference = safeText(invNoEl?.value || analysis?.fields?.reference?.value);
+  const invoiceDate = safeText(invDateEl?.value || analysis?.fields?.date?.value);
+  const receivedDate = safeText(recvDateEl?.value);
+  const amountDisplay = safeText(amountEl?.value);
+  const amountNumber =
+    Number.isFinite(analysis?.fields?.amount?.value)
+      ? Number(analysis.fields.amount.value)
+      : null;
+
+  const record = {
+    id: `fdl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: new Date().toISOString(),
+    source: {
+      kind: currentInboxFileName ? "inbox" : "external",
+      inboxFileName: safeText(currentInboxFileName),
+      originalFileName
+    },
+
+    fileName: currentFileName,
+    originalFileName,
+
+    object: {
+      code: objectCode,
+      name: objectLabel
+    },
+
+    docType: {
+      key: docTypeKey,
+      label: docTypeLabel,
+      semanticType: safeText(analysis?.semanticType || ""),
+      storageType: safeText(analysis?.type || "")
+    },
+
+    classification: {
+      type: safeText(analysis?.type || ""),
+      semanticType: safeText(analysis?.semanticType || ""),
+      warnings: Array.isArray(analysis?.warnings) ? [...analysis.warnings] : []
+    },
+
+    extracted: {
+      sender,
+      reference,
+      amountDisplay,
+      amountNumber,
+      invoiceDate,
+      invoiceDateIso: toIsoMaybe(invoiceDate),
+      receivedDate,
+      receivedDateIso: toIsoMaybe(receivedDate),
+
+      confidence: {
+        sender: safeText(analysis?.fields?.sender?.confidence || ""),
+        reference: safeText(analysis?.fields?.reference?.confidence || ""),
+        amount: safeText(analysis?.fields?.amount?.confidence || ""),
+        date: safeText(analysis?.fields?.date?.confidence || "")
+      },
+
+      source: {
+        sender: safeText(analysis?.fields?.sender?.source || ""),
+        reference: safeText(analysis?.fields?.reference?.source || ""),
+        amount: safeText(analysis?.fields?.amount?.source || ""),
+        date: safeText(analysis?.fields?.date?.source || "")
+      }
+    },
+
+    naming: {
+      subfolder,
+      egyoSuffix,
+      proposedFileName: currentFileName
+    },
+
+    storage: summarizeResolvedTarget(targetInfo),
+
+    dashboard: {
+      title: "",
+      summary: "",
+      objectLabel,
+      docTypeLabel,
+      amountDisplay,
+      invoiceDate,
+      sender
+    },
+
+    debug: {
+      candidateCounts: analysis?.debug?.candidateCounts || null,
+      zones: analysis?.debug?.zones || null
+    }
+  };
+
+  record.dashboard.title = buildDocumentTitle(record);
+  record.dashboard.summary = buildDocumentSummary(record);
+
+  return record;
+}
+
+function updateCurrentDocumentRecord(opts = {}){
+  const record = buildDocumentRecord(opts);
+  window.__fdlCurrentDocumentRecord = record;
+  return record;
+}
 
 // ---- Vorschau der Zielordner & Dateiname aktualisieren ----
 function refreshPreview(){
   const hasDoc = !!pdfDoc;
 
-  // Dateiname-Preview
-  if (fileNameInput){
-    if (!hasDoc){
-      if (fileNameInput.dataset.mode !== "manual") fileNameInput.value = "";
-    } else if (fileNameInput.dataset.mode !== "manual"){
-      fileNameInput.value = computeFileNameAuto();
-    }
-  } else if (fileNamePrev){
-    fileNamePrev.textContent = hasDoc ? computeFileNameAuto() : "-";
-  }
-
-  const el = (typeof targetPrev !== "undefined" && targetPrev) ? targetPrev : document.querySelector("#targetPreview");
-
-  if (!el) return;
-
   if (!hasDoc){
-    el.innerHTML = "Zielordner: —";   // eindeutig: kein Dokument → keine Zielauflösung
+    if (fileNameInput){
+      if (fileNameInput.dataset.mode !== "manual") fileNameInput.value = "";
+    } else if (fileNamePrev){
+      fileNamePrev.textContent = "-";
+    }
+
+    const el = (typeof targetPrev !== "undefined" && targetPrev)
+      ? targetPrev
+      : document.querySelector("#targetPreview");
+
+    if (el) el.innerHTML = "Zielordner: —";
+    window.__fdlCurrentDocumentRecord = null;
     return;
   }
 
-  renderTargetSummary();               // nur bei vorhandenem Dokument
-}
+  const targetInfo =
+    (typeof resolveTargets === "function")
+      ? resolveTargets()
+      : null;
 
+  const record = updateCurrentDocumentRecord({ targets: targetInfo });
+
+  if (fileNameInput){
+    if (fileNameInput.dataset.mode !== "manual") {
+      fileNameInput.value = record.fileName || "";
+    }
+  } else if (fileNamePrev){
+    fileNamePrev.textContent = record.fileName || "-";
+  }
+
+  const el = (typeof targetPrev !== "undefined" && targetPrev)
+    ? targetPrev
+    : document.querySelector("#targetPreview");
+
+  if (!el) return;
+
+  renderTargetSummary();
+}
 
 // Zielordner-Preview bei Ziel-/Objektwechsel live aktualisieren
 (function wireTargetPreviewLive(){
@@ -6057,15 +6304,26 @@ async function handleSaveFlow(mode = "save_only") {
 
     // Addon-Hook: Aufgaben & Dashboard (sicher – tut nichts wenn Addon nicht geladen)
     try {
-      window.fdlOnFileSaved?.({
-        fileName:    safeName,
-        objectCode:  objSel?.value   || "",
-        objectName:  objSel?.options[objSel.selectedIndex]?.textContent || objSel?.value || "",
-        docType:     typeSel?.options[typeSel.selectedIndex]?.textContent || typeSel?.value || "",
-        amount:      amountEl?.value  || "",
-        invoiceDate: invDateEl?.value || "",
-        targets:     successTargets,
-      });
+   // Addon-Hook: Aufgaben & Dashboard
+try {
+  const savedRecord = updateCurrentDocumentRecord({
+    targets: t,
+    analysis: getCurrentAnalysis()
+  });
+
+  // finalen Dateinamen nach tatsächlichem Save überschreiben
+  savedRecord.fileName = safeName;
+  savedRecord.naming.proposedFileName = safeName;
+
+  savedRecord.storageResult = {
+    successTargets: successTargets || [],
+    errors: errs || {}
+  };
+
+  window.fdlOnFileSaved?.(savedRecord);
+} catch (_addonErr) {
+  /* Addon-Fehler niemals in die Ablage-Logik durchlassen */
+}
     } catch (_addonErr) { /* Addon-Fehler niemals in die Ablage-Logik durchlassen */ }
 
     if (typeof hardReset === "function") {
@@ -6153,7 +6411,12 @@ if (subSel){ subSel.style.display = ""; }
     fileNamePrev.textContent = "-";
   }
 
-  if (targetPrev) targetPrev.innerHTML = "—";
+ if (targetPrev) targetPrev.innerHTML = "—";
+
+// 👉 NEU
+window.__fdlCurrentDocumentRecord = null;
+window.__fdlLastAutoLearningContext = null;
+
 
   // Mail-State
   Mail.to.clear();

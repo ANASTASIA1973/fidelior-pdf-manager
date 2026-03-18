@@ -278,13 +278,12 @@ async function loadArchiveDocs() {
 }
 
 async function getArchiveDocsCached(force = false) {
-  const now = Date.now();
-  if (!force && _archiveCache.docs.length && (now - _archiveCache.ts) < ARCHIVE_CACHE_MS) {
-    return _archiveCache.docs;
+  try {
+    return await window.FideliorCore.getDocuments(force);
+  } catch (e) {
+    console.error('[FideliorPro] Core error:', e);
+    return [];
   }
-  const docs = await loadArchiveDocs();
-  _archiveCache = { ts: now, docs };
-  return docs;
 }
 
 function invalidateArchiveCache() {

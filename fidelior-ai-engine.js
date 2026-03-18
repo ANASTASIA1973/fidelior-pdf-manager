@@ -1,5 +1,5 @@
 /* =========================================================
-   Fidelior AI Engine v4
+   Fidelior AI Engine v5
    Zentrale Dokumentanalyse – Single Source of Truth
 
    Ziele:
@@ -7,6 +7,7 @@
    - Kandidaten -> Scoring -> Confidence -> Feldwert
    - Supplier Profiles dürfen nur boosten, nicht blind überschreiben
    - UI darf nur noch rendern
+   - lieber leer als falsch
 ========================================================= */
 
 (() => {
@@ -153,34 +154,21 @@
     const list = Array.isArray(candidates) ? candidates : [];
     const best = list[0] || null;
     const second = list[1] || null;
+
     const margin = best ? (best.score || 0) - (second?.score || 0) : 0;
     const confidence = best ? mapConfidence(best.score || 0, margin) : "low";
-    const minScore = Number.isFinite(opts.minScore) ? opts.minScore : 0;
-    const requireHigh = !!opts.requireHigh;
 
-    if (!best || (best.score || 0) < minScore) {
-      return {
-        value: opts.emptyValue ?? "",
-        confidence: "low",
-        score: 0,
-        margin: 0,
-        source: "keine sichere Erkennung",
-        line: "",
-        candidates: list
-      };
-    }
+    const minScore = opts.minScore ?? 12;
+    const minMargin = opts.minMargin ?? 3;
+    const emptyValue = Object.prototype.hasOwnProperty.call(opts, "emptyValue")
+      ? opts.emptyValue
+      : "";
 
-    if (requireHigh && confidence !== "high") {
-      return {
-        value: opts.emptyValue ?? "",
-        confidence,
-        score: best.score || 0,
-        margin,
-        source: best.source || "Dokumentanalyse",
-        line: best.line || "",
-        candidates: list
-      };
-    }
+    if (!best) return empty();
+
+    if ((best.score || 0) < minScore) return empty();
+    if (margin < minMargin) return empty();
+    if (confidence !== "high") return empty();
 
     return {
       value: best.value,
@@ -191,6 +179,18 @@
       line: best.line || "",
       candidates: list
     };
+
+    function empty() {
+      return {
+        value: emptyValue,
+        confidence: "low",
+        score: 0,
+        margin: 0,
+        source: "keine sichere Erkennung",
+        line: "",
+        candidates: list
+      };
+    }
   }
 
   function applyProfileBoost(kind, candidates, profile, payload) {
@@ -275,42 +275,43 @@
     const zones = payload?.zones || {};
     const profile = payload?.profile || null;
 
-    const companyRx = /\b(gmbh|ag|kg|ug|ohg|mbh|ltd|inc|company|corp|llc|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke|wasser)\b/i;
+    const companyRx = /\b(gmbh|ag|kg|ug|ohg|mbh|ltd|inc|company|corp|llc|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke|wasser|praxis|arzt|apotheke|steuerberatung|steuerberater|notar|rechtsanwalt)\b/i;
     const negativeRx = /\b(rechnung|invoice|kundennummer|kundenummer|vertragsnummer|vertrag|iban|bic|swift|telefon|fax|e-?mail|email|www\.|ust|mwst|steuer|datum|seite|page|tarif|lieferadresse|rechnungsadresse|leistungsempfänger)\b/i;
-    const zipCityRx = /\b\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]{2,}/;
-    const streetRx = /\b(straße|str\.|weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive)\b/i;
-    const personRx = /^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]+(?:\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]+){1,3}$/;
     const greetingRx = /^(sehr geehrte|guten tag|hallo)\b/i;
 
     function pushCandidate(line, baseScore, source, index, zoneTag) {
       const s = normalizeWs(line);
-      if (!s || s.length < 3 || s.length > 120) return;
-      if (zipCityRx.test(s)) return;
-      if (streetRx.test(s)) return;
+      if (!s) return;
+
+      if (s.length < 3 || s.length > 80) return;
+      if (s.split(/\s+/).length > 6) return;
+      if (/[.!?]/.test(s)) return;
       if (greetingRx.test(s)) return;
+
+      if (/\b(wir|sie|bitte|danke|hiermit|prüfung|zahlung|überweisen|kontaktieren)\b/i.test(s)) return;
+      if (/\d{5}\s+[A-Za-zÄÖÜäöüß]/.test(s)) return;
+      if (/\b(straße|str\.|weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive)\b/i.test(s)) return;
 
       let score = baseScore;
 
       if (companyRx.test(s)) score += 12;
-      if (personRx.test(s)) score += 3;
       if (!negativeRx.test(s)) score += 2;
       if (!/\d/.test(s)) score += 1;
       if (/^(name|firma)\s*:/i.test(s)) score += 4;
-      if (/^(adresse|anschrift)\s*:/i.test(s)) score -= 10;
-      if (negativeRx.test(s) && !companyRx.test(s)) score -= 10;
-      if (/rechnungsadresse|leistungsempfänger|kunde|customer/i.test(s)) score -= 16;
-      if (zoneTag === "senderZone") score += 4;
-      if (zoneTag === "recipientZone") score -= 18;
 
-      if (score > 0) {
-        candidates.push({
-          value: s.replace(/^(name|firma)\s*:\s*/i, "").trim(),
-          score,
-          line: s,
-          index: Number.isInteger(index) ? index : -1,
-          source
-        });
-      }
+      if (zoneTag === "senderZone") score += 6;
+      if (zoneTag === "recipientZone") score -= 20;
+      if (zoneTag === "metaZone") score -= 2;
+
+      if (score <= 0) return;
+
+      candidates.push({
+        value: s.replace(/^(name|firma)\s*:\s*/i, "").trim(),
+        score,
+        line: s,
+        index: Number.isInteger(index) ? index : -1,
+        source
+      });
     }
 
     (zones.senderZone || zones.headerTop || []).forEach((line, idx) => {
@@ -318,7 +319,7 @@
     });
 
     (zones.metaZone || zones.metaBlock || []).forEach((line, idx) => {
-      pushCandidate(line, 6, "Metazone", idx, "metaZone");
+      pushCandidate(line, 4, "Metazone", idx, "metaZone");
     });
 
     (zones.recipientZone || zones.recipientBlock || []).forEach((line, idx) => {
@@ -362,7 +363,7 @@
     const genericTokenRx = /\b([A-Z]?\d[A-Z0-9._/-]{5,23})\b/g;
     const badPrefix = /^(KDNR|KUNDENNR|KUNDENNUMMER|KUNDE|CUSTOMER|ACCOUNT|AUFTRAG|BESTELL|ORDER|VERTRAG|CONTRACT|CLIENT|ACC|BIC|IBAN|SWIFT|DATUM|DATE|SEITE|PAGE|ERSTELLT|KOPIE|COPY|ORIGINAL)\b/i;
     const badExact = /^(erstellt|datum|date|seite|page|kopie|copy|original|kunde|customer|vertrag|contract)$/i;
-    const badLineRx = /\b(kundennummer|kunden\-?nr|customer\s*(?:no|number)|iban|bic|swift|vertragskonto|mandatsreferenz|mandats\-?ref|rufnummer|telefonnummer|auftragsnummer|bestellnummer)\b/i;
+    const badLineRx = /\b(kundennummer|kunden\-?nr|customer\s*(?:no|number)|iban|bic|swift|vertragskonto|mandatsreferenz|mandats\-?ref|rufnummer|telefonnummer|auftragsnummer|bestellnummer|vertrags\-?nr)\b/i;
     const ibanLike = /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/i;
     const dateLike = /^(\d{1,2}[.\-/]){2}\d{2,4}$/i;
 
@@ -382,7 +383,8 @@
       let nextScore = score;
 
       if (/^(?:[A-Z]{0,3}\d{6,}|[A-Z0-9._/-]*\d[A-Z0-9._/-]*)$/i.test(token)) nextScore += 5;
-      if (/\b(rechnung|invoice|rg-?nr|rn\.?)\b/i.test(lineNorm)) nextScore += 10;
+      if (/\b(rechnung|invoice|rg-?nr|rn\.?)\b/i.test(lineNorm)) nextScore += 12;
+      if (/rechnung\s+[A-Z0-9]/i.test(lineNorm)) nextScore += 10;
       if (semanticType === "rechnung" || semanticType === "gutschrift") nextScore += 2;
 
       candidates.push({
@@ -426,7 +428,13 @@
       let m2;
       const safeGeneric = new RegExp(genericTokenRx.source, "g");
       while ((m2 = safeGeneric.exec(line))) {
-        addCandidate(m2[1], line, lineHasInvoiceLabel ? 10 : 4, lineHasInvoiceLabel ? "Rechnungszeile" : "Generischer Token", idx);
+        addCandidate(
+          m2[1],
+          line,
+          lineHasInvoiceLabel ? 10 : 4,
+          lineHasInvoiceLabel ? "Rechnungszeile" : "Generischer Token",
+          idx
+        );
       }
     });
 
@@ -451,13 +459,18 @@
   ========================================================= */
 
   function detectAmountCandidates(payload, semanticType) {
+    const totalsZone = payload?.zones?.totalsZone || [];
+    const tableZone = payload?.zones?.tableZone || [];
+    const allLines = payload?.lines || [];
+
     const lines = [
-      ...(payload?.zones?.totalsZone || []),
-      ...(payload?.zones?.tableZone || []),
-      ...(payload?.lines || [])
+      ...totalsZone,
+      ...tableZone,
+      ...allLines
     ];
 
     const candidates = [];
+
     const priorityPatterns = [
       /noch\s+offen/i,
       /offener\s+betrag/i,
@@ -476,10 +489,23 @@
       /invoice\s+total/i,
       /\bsumme\b/i,
       /\btotal\b/i,
-      /endbetrag/i
+      /endbetrag/i,
+      /bruttorechnungsbetrag/i,
+      /bruttobetrag/i,
+      /gesamt\s*eur/i
     ];
-    const ignorePattern = /zwischensumme|subtotal|netto\b|rabatt|discount|ust|mwst|steuer|versand|skonto|abschlag/i;
-    const moneyRx = /(-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+\.\d{2})/g;
+
+    const strongTotalLabels =
+      /\b(zu\s+zahlen|gesamtbetrag|rechnungsbetrag|endbetrag|amount\s+due|invoice\s+total|bruttorechnungsbetrag|bruttobetrag)\b/i;
+
+    const ignorePattern =
+      /zwischensumme|subtotal|netto\b|rabatt|discount|ust|mwst|steuer|versand|skonto|abschlag/i;
+
+    const taxOnlyPattern =
+      /\b(mwst|ust|vat|tax|steuer)\b/i;
+
+    const moneyRx =
+      /(-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+\.\d{2})/g;
 
     lines.forEach((rawLine, index) => {
       const text = normalizeWs(rawLine);
@@ -488,21 +514,37 @@
       const matches = [...text.matchAll(moneyRx)].map(m => m[1]).filter(Boolean);
       if (!matches.length) return;
 
+      const hasPriorityLabel = priorityPatterns.some(rx => rx.test(text));
+      const hasStrongTotal = strongTotalLabels.test(text);
+      const hasIgnore = ignorePattern.test(text);
+      const isTaxOnly = taxOnlyPattern.test(text) && !hasStrongTotal;
+
       matches.forEach((raw, pos) => {
         const value = parseEuro(raw);
         if (!Number.isFinite(value) || value <= 0) return;
 
         let score = 2;
 
-        if (priorityPatterns.some(rx => rx.test(text))) score += 22;
-        if (/(gesamt|summe|total|rechnungsbetrag|endbetrag|zu\s+zahlen|zahlbetrag|amount due|invoice total)/i.test(text)) score += 12;
-        if (ignorePattern.test(text)) score -= 8;
-        if (/(mwst|ust|vat|tax|netto)/i.test(text) && !/(gesamt|summe|total|endbetrag|zu\s+zahlen|zahlbetrag|amount due|invoice total)/i.test(text)) score -= 7;
+        if (hasPriorityLabel) score += 22;
+        if (hasStrongTotal) score += 20;
+
+        if (/(gesamt|summe|total|rechnungsbetrag|endbetrag|zu\s+zahlen|zahlbetrag|amount due|invoice total)/i.test(text)) {
+          score += 12;
+        }
+
+        if (hasIgnore) score -= 8;
+        if (isTaxOnly) score -= 10;
+
         if (pos === matches.length - 1) score += 2;
         if (value < 10) score -= 10;
         if (/de\d{2}/i.test(text)) score -= 14;
-        if (semanticType === "rechnung" || semanticType === "gutschrift" || semanticType === "mahnung") score += 2;
+
+        if (semanticType === "rechnung" || semanticType === "gutschrift" || semanticType === "mahnung") {
+          score += 2;
+        }
+
         if (index >= lines.length - 12) score += 2;
+        if (index > lines.length - 10) score += 8;
 
         candidates.push({
           value,
@@ -510,12 +552,15 @@
           score,
           line: text,
           index,
-          source: priorityPatterns.some(rx => rx.test(text)) ? "Totalzeile" : "Betrag aus Dokument"
+          source: hasPriorityLabel || hasStrongTotal ? "Totalzeile" : "Betrag aus Dokument"
         });
       });
     });
 
-    return dedupeCandidates(candidates, c => String(Number(c.value).toFixed(2)));
+    return dedupeCandidates(
+      candidates,
+      c => String(Number(c.value).toFixed(2))
+    );
   }
 
   /* =========================================================
@@ -648,14 +693,14 @@
 
     const senderField = finalizeField(senderCandidates, {
       minScore: 14,
-      requireHigh: true,
+      minMargin: 4,
       emptyValue: ""
     });
 
     const referenceField = (type === "rechnung")
       ? finalizeField(referenceCandidates, {
           minScore: 14,
-          requireHigh: true,
+          minMargin: 4,
           emptyValue: ""
         })
       : {
@@ -670,13 +715,13 @@
 
     const amountField = finalizeField(amountCandidates, {
       minScore: 16,
-      requireHigh: true,
+      minMargin: 4,
       emptyValue: NaN
     });
 
     const dateField = finalizeField(dateCandidates, {
       minScore: 14,
-      requireHigh: true,
+      minMargin: 3,
       emptyValue: ""
     });
 
