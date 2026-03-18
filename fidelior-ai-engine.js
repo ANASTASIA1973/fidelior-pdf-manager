@@ -135,6 +135,11 @@
 
 function detectInvoiceDate(payload) {
   const zones = payload?.zones || {};
+    const profileDate = window.FideliorSupplierProfiles?.detectDateByProfile
+    ? window.FideliorSupplierProfiles.detectDateByProfile(payload, payload?.profile || null)
+    : "";
+
+  if (profileDate) return profileDate;
   const scopedText = [
     ...(zones.metaZone || zones.metaBlock || []),
     ...(zones.senderZone || zones.headerTop || []),
@@ -446,15 +451,29 @@ function analyzeDocument(text, linesInput) {
   const semanticType = detectSemanticType(textString);
   const type = detectTypeFromSemantic(semanticType);
 
-  const senderCandidates = detectSenderCandidates(payload);
-  const referenceCandidates = detectReferenceCandidates(payload);
+  const supplierApi = window.FideliorSupplierProfiles || null;
+
+  const senderCandidatesRaw = detectSenderCandidates(payload);
+  const referenceCandidatesRaw = detectReferenceCandidates(payload);
 
   const amountSourceLines = [
     ...(zones.totalsZone || []),
     ...(zones.tableZone || []),
     ...(lines || [])
   ];
-  const amountCandidates = detectAmountCandidates(amountSourceLines);
+  const amountCandidatesRaw = detectAmountCandidates(amountSourceLines);
+
+  const senderCandidates = supplierApi?.boostCandidates
+    ? supplierApi.boostCandidates("sender", senderCandidatesRaw, payload.profile, payload)
+    : senderCandidatesRaw;
+
+  const referenceCandidates = supplierApi?.boostCandidates
+    ? supplierApi.boostCandidates("reference", referenceCandidatesRaw, payload.profile, payload)
+    : referenceCandidatesRaw;
+
+  const amountCandidates = supplierApi?.boostCandidates
+    ? supplierApi.boostCandidates("amount", amountCandidatesRaw, payload.profile, payload)
+    : amountCandidatesRaw;
 
   const senderField = buildField(senderCandidates[0]);
   const referenceField = (type === 'rechnung') ? buildField(referenceCandidates[0]) : buildField(null);
@@ -468,7 +487,25 @@ function analyzeDocument(text, linesInput) {
     }
   }
 
-  const amountField = buildField(bestAmount);
+ let amountField;
+
+if (window.FideliorCandidateVoter) {
+
+  const voted = window.FideliorCandidateVoter.pickBestCandidate(amountCandidates);
+
+  amountField = {
+    value: voted.value,
+    confidence: voted.confidence,
+    score: voted.score,
+    source: voted.source,
+    line: voted.line
+  };
+
+} else {
+
+  amountField = buildField(bestAmount);
+
+}
   const dateValue = detectInvoiceDate(payload);
 
   const warnings = [];

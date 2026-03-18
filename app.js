@@ -2016,11 +2016,24 @@ try {
     ? window.FideliorDocumentPresenter.buildUiModel(validated)
     : null;
 
-  analysis = analyzeDocument(txt, lines);
+   analysis = analyzeDocument(txt, lines);
+
+  window.__fdlLastAutoLearningContext = {
+    text: txt,
+    lines,
+    analysis
+  };
 } catch (e) {
+
   console.warn("Central document pipeline failed, fallback active:", e);
   analysis = analyzeDocument(txt, lines);
   uiModel = null;
+
+  window.__fdlLastAutoLearningContext = {
+    text: txt,
+    lines,
+    analysis
+  };
 }
 
     /* Betrag – nur bei hoher Sicherheit automatisch */
@@ -5978,7 +5991,34 @@ async function handleSaveFlow(mode = "save_only") {
   }
 }
 
+    // 7b) Selbstlernende Lieferantenlogik – nur nach erfolgreichem Speichern
+    try {
+      const learnText = window.__fdlLastAutoLearningContext?.text || "";
+      const confirmedSender = (senderEl?.value || "").trim();
+      const confirmedInvoiceNo = (invNoEl?.value || "").trim();
+      const confirmedInvoiceDate = (invDateEl?.value || "").trim();
+      const confirmedAmount = (
+        amountEl?.dataset?.raw ||
+        amountEl?.value ||
+        ""
+      ).trim();
+      const confirmedDocType = (typeSel?.value || "").trim();
 
+      if (learnText && confirmedSender && window.FideliorSupplierProfiles?.learnFromDocument) {
+        window.FideliorSupplierProfiles.learnFromDocument({
+          text: learnText,
+          confirmedFields: {
+            sender: confirmedSender,
+            invoiceNumber: confirmedInvoiceNo,
+            invoiceDate: confirmedInvoiceDate,
+            amount: confirmedAmount,
+            docType: confirmedDocType
+          }
+        });
+      }
+    } catch (learnErr) {
+      console.warn("[SupplierLearning] Lernen fehlgeschlagen:", learnErr);
+    }
     // 8) Inbox → Bearbeitet (nur wenn irgendwo gespeichert wurde)
     if (currentInboxFileHandle && (okScope || okScopeBk || okPcl || okPclBucket || okLocal)) {
       try {
