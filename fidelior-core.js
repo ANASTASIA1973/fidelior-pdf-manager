@@ -1,10 +1,11 @@
 /* ==========================================================================
-   Fidelior Core v1.0  —  SINGLE SOURCE OF TRUTH
+   Fidelior Core v1.1  —  SINGLE SOURCE OF TRUTH
    ==========================================================================
    - EIN zentraler Zugriff auf alle Dokumente
    - Nutzt NUR echtes Archiv (Scopevisio)
    - Einheitliches Datenmodell
    - Cache integriert
+   - Betrag nur bei Rechnungen, niemals bei Dokumenten
    ========================================================================== */
 
 (() => {
@@ -88,35 +89,67 @@ async function navigateTo(root, segs) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   PARSER (einheitlich!)
+   PARSER
+   WICHTIG:
+   - nur für bereits archivierte, final benannte Dateien
+   - Datum immer am Ende
+   - Betrag nur bei Rechnungen
 ───────────────────────────────────────────────────────────── */
-function parseName(name) {
-  const stem = name.replace(/\.pdf$/i, '');
-  const parts = stem.split('_');
+function isAmountToken(s) {
+  const t = String(s || '').trim();
+  return /^\d{1,3}(?:\.\d{3})*,\d{2}$/.test(t) || /^\d+,\d{2}$/.test(t);
+}
+
+function isDateToken(s) {
+  const t = String(s || '').trim();
+  return /^(\d{4})[.\-](\d{2})[.\-](\d{2})$/.test(t);
+}
+
+function parseName(name, docType) {
+  const stem = String(name || '').replace(/\.pdf$/i, '');
+  const parts = stem.split('_').filter(Boolean);
+
+  if (!parts.length) {
+    return {
+      amount: null,
+      sender: null,
+      date: null,
+      objectCode: null
+    };
+  }
 
   let rest = [...parts];
-  let datum = null;
-  let betrag = null;
+  let amount = null;
+  let date = null;
+  let objectCode = null;
 
+  // 1) Datum immer vom Ende lesen
   const last = rest[rest.length - 1];
-
-  if (/^(\d{4})[.\-](\d{2})[.\-](\d{2})$/.test(last)) {
-    datum = last.replace(/[.\-]/g, '.');
+  if (isDateToken(last)) {
+    date = last.replace(/-/g, '.');
     rest.pop();
   }
 
-  if (rest[0] && /^\d/.test(rest[0])) {
-    betrag = rest.shift() + ' €';
-  }
-
-  if (rest[0] && /^[A-ZÄÖÜ0-9]{2,10}$/.test(rest[0])) {
+  // 2) Betrag NUR bei Rechnungen
+  if (docType === 'Rechnung' && rest[0] && isAmountToken(rest[0])) {
+    amount = rest[0] + ' €';
     rest.shift();
   }
 
+  // 3) Objektcode typischerweise direkt danach
+  if (rest[0] && /^[A-ZÄÖÜ0-9]{2,12}$/.test(rest[0])) {
+    objectCode = rest[0];
+    rest.shift();
+  }
+
+  // 4) Rest = Titel / Absender / Freitext
+  const sender = rest.join(' ').replace(/-/g, ' ').trim() || null;
+
   return {
-    amount: betrag,
-    sender: rest.join(' ').replace(/-/g, ' ').trim() || null,
-    date: datum
+    amount,
+    sender,
+    date,
+    objectCode
   };
 }
 
@@ -129,7 +162,7 @@ function extractYear(segs, modified) {
 
 function toISO(d) {
   if (!d) return '';
-  const m = d.match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
+  const m = String(d).match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
   if (!m) return '';
   return `${m[1]}-${m[2]}-${m[3]}`;
 }
@@ -137,26 +170,25 @@ function toISO(d) {
 /* ─────────────────────────────────────────────────────────────
    SCAN
 ───────────────────────────────────────────────────────────── */
-async function scanPDFs(dir, basePath, depth, out, seen, objectCode) {
+async function scanPDFs(dir, basePath, depth, out, seen, objectCode, rootType) {
   if (!dir || depth < 0) return;
 
   for await (const entry of dir.values()) {
     if (entry.kind === 'file' && /\.pdf$/i.test(entry.name)) {
-
       const key = basePath.join('/') + '/' + entry.name;
       if (seen.has(key)) continue;
       seen.add(key);
 
       try {
         const f = await entry.getFile();
-        const meta = parseName(entry.name);
+        const meta = parseName(entry.name, rootType);
 
         out.push({
           id: key,
           fileName: entry.name,
           objectCode,
           objectName: getScopeName(objectCode),
-          type: meta.amount ? 'Rechnung' : 'Dokument',
+          type: rootType,
           amount: meta.amount,
           sender: meta.sender,
           date: meta.date,
@@ -165,11 +197,18 @@ async function scanPDFs(dir, basePath, depth, out, seen, objectCode) {
           handle: entry,
           source: 'archive'
         });
-
       } catch {}
 
     } else if (entry.kind === 'directory' && depth > 0) {
-      await scanPDFs(entry, [...basePath, entry.name], depth - 1, out, seen, objectCode);
+      await scanPDFs(
+        entry,
+        [...basePath, entry.name],
+        depth - 1,
+        out,
+        seen,
+        objectCode,
+        rootType
+      );
     }
   }
 }
@@ -196,11 +235,11 @@ async function loadDocuments() {
   for (const code of objects) {
     const roots = buildScanRoots(code);
 
-    for (const { segs } of roots) {
+    for (const { segs, type } of roots) {
       const dir = await navigateTo(root, segs);
       if (!dir) continue;
 
-      await scanPDFs(dir, segs, 2, all, seen, code);
+      await scanPDFs(dir, segs, 2, all, seen, code, type);
     }
   }
 
