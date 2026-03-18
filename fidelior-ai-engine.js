@@ -224,25 +224,30 @@ function detectInvoiceDate(payload) {
       }
     }
   }
-    const priorityPatterns = [
-      /noch\s+offen/i,
-      /offener\s+betrag/i,
-      /offene\s+forderung/i,
-      /restbetrag/i,
-      /zu\s+zahlen/i,
-      /zu\s+überweisen/i,
-      /bitte\s+überweisen/i,
-      /gesamtforderung/i,
-      /zu\s+zahlender\s+betrag/i,
-      /zahlbetrag/i,
-      /amount\s+due/i,
-      /total\s+amount\s+due/i,
-      /gesamtbetrag/i,
-      /rechnungsbetrag/i,
-      /invoice\s+total/i,
-      /\bsumme\b/i,
-      /\btotal\b/i
-    ];
+  const priorityPatterns = [
+  /noch\s+offen/i,
+  /offener\s+betrag/i,
+  /offene\s+forderung/i,
+  /restbetrag/i,
+  /zu\s+zahlen/i,
+  /zu\s+überweisen/i,
+  /bitte\s+überweisen/i,
+  /gesamtforderung/i,
+  /zu\s+zahlender\s+betrag/i,
+  /zahlbetrag/i,
+  /amount\s+due/i,
+  /total\s+amount\s+due/i,
+  /gesamtbetrag/i,
+  /rechnungsbetrag/i,
+  /invoice\s+total/i,
+  /\bsumme\b/i,
+  /\btotal\b/i,
+
+  // 🔥 NEU (entscheidend!)
+  /jahresbeitrag/i,
+  /beitrag/i,
+  /fällig/i
+];
 
     const ignorePattern = /zwischensumme|subtotal|netto\b|rabatt|discount|ust|mwst|steuer|versand|skonto|abschlag/i;
     const moneyRx = /(-?\d{1,3}(?:[.\s]\d{3})*,\d{2}|-?\d+\.\d{2})/g;
@@ -259,7 +264,7 @@ function detectInvoiceDate(payload) {
         if (!Number.isFinite(value) || value <= 0) return;
 
         let score = 1;
-        if (priorityPatterns.some(rx => rx.test(text))) score += 12;
+       if (priorityPatterns.some(rx => rx.test(text))) score += 20;
         if (ignorePattern.test(text)) score -= 6;
         if (pos === matches.length - 1) score += 1;
         if (value > 0 && value < 1000000) score += 1;
@@ -616,13 +621,20 @@ if (!voted || voted.score < 10) {
   if (type === 'rechnung' && !referenceField.value) warnings.push('Rechnungsnummer nicht sicher erkannt');
   if (!Number.isFinite(amountField.value)) warnings.push('Betrag nicht sicher erkannt');
   if (!dateValue) warnings.push('Rechnungsdatum nicht sicher erkannt');
-
+if (!referenceField.value) {
+  referenceField = {
+    value: "",
+    confidence: "low",
+    source: "keine gültige Rechnungsnummer",
+    score: 0
+  };
+}
   return {
     type,
     semanticType,
 
     sender: senderField.value || '',
-    reference: referenceField.value || '',
+   reference: referenceField.value ?? '',
     amount: Number.isFinite(amountField.value) ? amountField.value : NaN,
     date: dateValue || '',
 
