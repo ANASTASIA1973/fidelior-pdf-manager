@@ -99,33 +99,44 @@ async function scanPDFs(dir, basePath, depth, out, seen) {
 }
 
 async function loadFiles(code) {
-  const root  = window.scopeRootHandle || null;
-  if (!root) return [];
+  const core = window.FideliorCore;
+  if (!core?.getDocuments) return [];
 
-  const roots = buildScanRoots(code);
-  const all = [];
-  const seen = new Set();
+  const docs = await core.getDocuments();
 
-  for (const { segs, label } of roots) {
-    const dir   = await navigateTo(root, segs);
-    if (!dir) continue;
+  return docs
+    .filter(d => d.objectCode === code)
+    .map(d => {
+      const pathSegs = String(d.id || "")
+        .split("/")
+        .slice(0, -1);
 
-    const batch = [];
-    await scanPDFs(dir, segs, 2, batch, seen);
+      const modifiedMs = d.savedAt ? new Date(d.savedAt).getTime() : 0;
+      const folderType =
+        d.type === "Rechnung"
+          ? "Rechnungsbelege"
+          : "Dokumente";
 
-    for (const f of batch) {
-      f.folderType = label;
-      f.meta       = parseName(f.name);
-      f.year       = extractYear(f.pathSegs, f.modified);
-      f.subfolder  = extractSub(f.pathSegs, segs, f.year);
-      f.objectCode = code;
-      f.objectName = getScopeName(code);
-    }
-    all.push(...batch);
-  }
-
-  all.sort((a, b) => docDateMs(b) - docDateMs(a));
-  return all;
+      return {
+        handle: d.handle || null,
+        name: d.fileName,
+        size: 0,
+        modified: Number.isFinite(modifiedMs) ? modifiedMs : 0,
+        pathSegs,
+        folderType,
+        year: d.year || "",
+        subfolder: extractSub(pathSegs, pathSegs.slice(0, pathSegs.length - ((d.year && /^20\d{2}$/.test(d.year)) ? 1 : 0))),
+        objectCode: d.objectCode,
+        objectName: d.objectName,
+        meta: {
+          betrag: d.amount || null,
+          absender: d.sender || null,
+          datum: d.date || null
+        },
+        __core: d
+      };
+    })
+    .sort((a, b) => docDateMs(b) - docDateMs(a));
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -947,9 +958,24 @@ async function renderPanel(file) {
     return;
   }
 
-  const m     = file.meta || {};
+  const m = file.meta || {};
+  const core = file.__core || null;
   const tasks = await loadTasks(file.name);
-  const open  = tasks.filter(t => t.status !== 'done');
+  const open = tasks.filter(t => t.status !== 'done');
+
+  const docTitle = [
+    core?.type || fmtFolderType(file.folderType),
+    core?.sender || m.absender || "",
+    core?.objectName || file.objectName || "",
+    core?.amount || m.betrag || ""
+  ].filter(Boolean).join(" – ");
+
+  const docSummary = [
+    core?.sender || m.absender ? `Absender: ${core?.sender || m.absender}` : "",
+    core?.amount || m.betrag ? `Betrag: ${core?.amount || m.betrag}` : "",
+    core?.date || m.datum ? `Datum: ${core?.date || m.datum}` : "",
+    core?.objectCode || file.objectCode ? `Objekt: ${core?.objectCode || file.objectCode}` : ""
+  ].filter(Boolean).join(" · ");
 
   const catPills = [
     S.obj ? `<span class="av3-cat-pill">${S.obj.code}</span>` : '',
@@ -975,13 +1001,16 @@ async function renderPanel(file) {
     </div>
     <div class="av3-panel-content">
       <div class="av3-panel-meta">
-        <div class="av3-ph-date">${fmtDate(file.modified)}</div>
-        <div class="av3-ph-name">${file.name}</div>
+             <div class="av3-ph-date">${fmtDate(file.modified)}</div>
+        <div class="av3-ph-name">${docTitle || file.name}</div>
+        ${docSummary ? `<div style="font-size:11px;color:#6B7280;line-height:1.45;margin:-2px 0 10px 0">${docSummary}</div>` : ''}
         <div class="av3-cat-pills">${catPills || '<span style="color:#9CA3AF;font-size:11px">—</span>'}</div>
         <div class="av3-meta">
-          ${m.betrag    ? `<div class="av3-meta-row"><span class="av3-meta-label">Betrag</span><span class="av3-meta-val">${m.betrag}</span></div>` : ''}
-          ${m.datum     ? `<div class="av3-meta-row"><span class="av3-meta-label">Belegdatum</span><span class="av3-meta-val">${m.datum}</span></div>` : ''}
-          ${m.absender  ? `<div class="av3-meta-row"><span class="av3-meta-label">Absender</span><span class="av3-meta-val">${m.absender}</span></div>` : ''}
+          ${(core?.type || file.folderType) ? `<div class="av3-meta-row"><span class="av3-meta-label">Typ</span><span class="av3-meta-val">${core?.type || fmtFolderType(file.folderType)}</span></div>` : ''}
+          ${(core?.amount || m.betrag) ? `<div class="av3-meta-row"><span class="av3-meta-label">Betrag</span><span class="av3-meta-val">${core?.amount || m.betrag}</span></div>` : ''}
+          ${(core?.date || m.datum) ? `<div class="av3-meta-row"><span class="av3-meta-label">Belegdatum</span><span class="av3-meta-val">${core?.date || m.datum}</span></div>` : ''}
+          ${(core?.sender || m.absender) ? `<div class="av3-meta-row"><span class="av3-meta-label">Absender</span><span class="av3-meta-val">${core?.sender || m.absender}</span></div>` : ''}
+          ${(core?.objectCode || file.objectCode) ? `<div class="av3-meta-row"><span class="av3-meta-label">Objekt</span><span class="av3-meta-val">${core?.objectCode || file.objectCode}</span></div>` : ''}
           <div class="av3-meta-row"><span class="av3-meta-label">Dateigröße</span><span class="av3-meta-val">${fmtSize(file.size)}</span></div>
           <div class="av3-meta-row"><span class="av3-meta-label">Geändert</span><span class="av3-meta-val">${fmtDate(file.modified)}</span></div>
           ${file.subfolder ? `<div class="av3-meta-row"><span class="av3-meta-label">Unterordner</span><span class="av3-meta-val">${file.subfolder}</span></div>` : ''}
@@ -1800,12 +1829,24 @@ async function getArchiveSearchIndex(force = false) {
   if (__fdlArchivSearchCache.pending) return __fdlArchivSearchCache.pending;
 
   __fdlArchivSearchCache.pending = (async () => {
-    await loadObjectsConfig();
-    const list = [];
-    for (const o of getObjList()) {
-      const files = await loadFiles(o.code);
-      for (const f of files) list.push(buildArchiveSearchEntry(f));
-    }
+    const docs = await (window.FideliorCore?.getDocuments?.(force) || Promise.resolve([]));
+
+    const list = docs.map(d => buildArchiveSearchEntry({
+      name: d.fileName || '',
+      objectCode: d.objectCode || '',
+      objectName: d.objectName || '',
+      folderType: d.type === 'Rechnung' ? 'Rechnungsbelege' : 'Dokumente',
+      year: d.year || '',
+      subfolder: '',
+      modified: d.savedAt ? new Date(d.savedAt).getTime() : 0,
+      meta: {
+        absender: d.sender || '',
+        betrag: d.amount || '',
+        datum: d.date || ''
+      },
+      __core: d
+    }));
+
     __fdlArchivSearchCache.ts = Date.now();
     __fdlArchivSearchCache.data = list;
     return list;
@@ -1859,8 +1900,8 @@ async function getArchiveDashboardStats(force = false) {
   if (__fdlArchivStatsCache.pending) return __fdlArchivStatsCache.pending;
 
   __fdlArchivStatsCache.pending = (async () => {
-    await loadObjectsConfig();
-    if (!window.scopeRootHandle) return null;
+    const docs = await (window.FideliorCore?.getDocuments?.(force) || Promise.resolve([]));
+    if (!docs.length) return null;
 
     const now = new Date();
     const weekStartMs = nowTs - (7 * 86400000);
@@ -1877,46 +1918,44 @@ async function getArchiveDashboardStats(force = false) {
       thisYear: now.getFullYear()
     };
 
-    const objs = getObjList();
-    for (const o of objs) {
-      const files = await loadFiles(o.code);
-      let objAmount = 0;
-      let objLastSaved = null;
+    for (const d of docs) {
+      const ms = d.savedAt ? new Date(d.savedAt).getTime() : 0;
+      const amt = parseMetaAmount(d.amount || '');
 
-      for (const f of files) {
-        const ms = docDateMs(f);
-        const amt = parseMetaAmount(f.meta?.betrag);
-
-        out.total++;
-        if (ms >= weekStartMs) out.weekCount++;
-        if (ms >= monthStartMs) {
-          out.monthCount++;
-          out.monthAmount += amt;
-        }
-
-        objAmount += amt;
-        if (!objLastSaved || ms > objLastSaved) objLastSaved = ms;
-
-        out.recent.push({
-          fileName: f.name || '',
-          objectCode: f.objectCode || '',
-          docType: fmtFolderType(f.folderType || ''),
-          amount: amt,
-          savedAt: new Date(f.modified || ms || Date.now()).toISOString()
-        });
+      out.total++;
+      if (ms >= weekStartMs) out.weekCount++;
+      if (ms >= monthStartMs) {
+        out.monthCount++;
+        out.monthAmount += amt;
       }
 
-      out.byObj[o.code] = {
-        code: o.code,
-        name: o.name,
-        count: files.length,
-        amount: objAmount,
-        lastSaved: objLastSaved ? new Date(objLastSaved).toISOString() : null,
-        openTasks: 0
-      };
+      if (!out.byObj[d.objectCode]) {
+        out.byObj[d.objectCode] = {
+          code: d.objectCode,
+          name: d.objectName,
+          count: 0,
+          amount: 0,
+          lastSaved: null,
+          openTasks: 0
+        };
+      }
 
-      const cat = window.fdlDeriveCategory ? window.fdlDeriveCategory(o.code) : 'Objekte';
-      out.categoryCounts[cat] = (out.categoryCounts[cat] || 0) + files.length;
+      out.byObj[d.objectCode].count++;
+      out.byObj[d.objectCode].amount += amt;
+      if (!out.byObj[d.objectCode].lastSaved || ms > new Date(out.byObj[d.objectCode].lastSaved).getTime()) {
+        out.byObj[d.objectCode].lastSaved = d.savedAt;
+      }
+
+      const cat = window.fdlDeriveCategory ? window.fdlDeriveCategory(d.objectCode) : 'Objekte';
+      out.categoryCounts[cat] = (out.categoryCounts[cat] || 0) + 1;
+
+      out.recent.push({
+        fileName: d.fileName || '',
+        objectCode: d.objectCode || '',
+        docType: d.type || '',
+        amount: amt,
+        savedAt: d.savedAt || ''
+      });
     }
 
     out.recent.sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
