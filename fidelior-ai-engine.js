@@ -618,35 +618,38 @@ if (bestAmount) {
       line: anchoredAmount
     };
   }
-  let amountField;
+let amountField;
 
-  if (window.FideliorCandidateVoter) {
-    const votedPool = bestAmount
-      ? [bestAmount, ...amountCandidates.filter(c => c !== bestAmount)]
-      : amountCandidates;
+// Wenn wir schon einen guten Hauptkandidaten haben, darf der Voter ihn nicht verschlechtern.
+if (bestAmount && bestAmount.score >= 20) {
+  amountField = buildField(bestAmount);
+} else if (window.FideliorCandidateVoter) {
+  const votedPool = bestAmount
+    ? [bestAmount, ...amountCandidates.filter(c => c !== bestAmount)]
+    : amountCandidates;
 
-    const voted = window.FideliorCandidateVoter.pickBestCandidate(votedPool);
+  const voted = window.FideliorCandidateVoter.pickBestCandidate(votedPool);
 
-    if (!voted || voted.score < 10) {
-      amountField = buildField(bestAmount);
-    } else {
-      const votedValue = Number.isFinite(voted.value) ? voted.value : parseEuro(voted.value);
+  if (!voted || voted.score < 10) {
+    amountField = buildField(bestAmount);
+  } else {
+    const votedValue = Number.isFinite(voted.value) ? voted.value : parseEuro(voted.value);
 
+    if (Number.isFinite(votedValue)) {
       amountField = {
         value: votedValue,
-        confidence: voted.confidence,
-        score: voted.score,
-        source: voted.source,
+        confidence: voted.confidence || mapConfidence(voted.score || 0),
+        score: voted.score || 0,
+        source: voted.source || 'Candidate Voter',
         line: voted.line || ''
       };
-
-      if (!Number.isFinite(amountField.value)) {
-        amountField = buildField(bestAmount);
-      }
+    } else {
+      amountField = buildField(bestAmount);
     }
-  } else {
-    amountField = buildField(bestAmount);
   }
+} else {
+  amountField = buildField(bestAmount);
+}
   const dateValue = detectInvoiceDate(payload);
 
   const warnings = [];
