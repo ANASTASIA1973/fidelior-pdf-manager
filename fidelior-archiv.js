@@ -1032,6 +1032,7 @@ function isSel(f) {
    ══════════════════════════════════════════════════════════════════════════ */
 const __av3DocRecordCache = new Map();
 const __av3InsightCache = new Map();
+const __av3PdfInsightCache = new Map();
 
 async function loadIndexedDocumentRecord(file) {
   try {
@@ -1138,54 +1139,118 @@ async function buildDocumentInsights(file) {
   const cacheKey = `${file.name}__${file.modified || ''}__${file.size || ''}`;
   if (__av3InsightCache.has(cacheKey)) return __av3InsightCache.get(cacheKey);
 
+  const archiveFallback = fallbackInsightsFromArchive(file);
   const rec = await loadIndexedDocumentRecord(file);
+  const pdf = await extractPdfTextInsights(file);
 
   let out;
+
   if (rec) {
     out = {
       title:
         rec.title ||
         rec.dashboard?.title ||
-        buildArchivTitle({
-          file,
-          docType: rec.docType || '',
-          sender: rec.sender || '',
-          amount: rec.amountRaw || '',
-          objectCode: rec.objectCode || file.objectCode || '',
-          objectName: file.objectName || ''
-        }),
+        archiveFallback.title,
+
       summary:
         rec.serviceDesc ||
         rec.dashboard?.summary ||
-        buildArchivSummary({
-          file,
-          docType: rec.docType || '',
-          sender: rec.sender || '',
-          amount: rec.amountRaw || '',
-          docDate: rec.invoiceDate ? fmtDate(rec.invoiceDate) : '',
-          objectCode: rec.objectCode || file.objectCode || '',
-          objectName: file.objectName || ''
-        }),
-      keywords: uniqClean(rec.keywords || []),
-   emails: uniqClean(
-  Array.isArray(rec.emailsFound) ? rec.emailsFound :
-  rec.email ? [rec.email] : []
-),
-      dueDate: rec.dueDate || '',
-      invoiceNo: rec.invoiceNo || '',
-      iban: rec.iban || '',
-      ustId: rec.ustId || '',
-      importantFacts: uniqClean([
-        rec.sender ? `Absender: ${rec.sender}` : '',
-        rec.amountRaw ? `Betrag: ${rec.amountRaw}` : '',
-        rec.invoiceDate ? `Belegdatum: ${fmtDate(rec.invoiceDate)}` : '',
-        rec.invoiceNo ? `Referenz: ${rec.invoiceNo}` : '',
-        rec.objectCode ? `Objekt: ${rec.objectCode}` : ''
+        pdf?.summary ||
+        archiveFallback.summary,
+
+      keywords: uniqLower([
+        ...(rec.keywords || []),
+        ...(pdf?.keywords || []),
+        ...(archiveFallback.keywords || [])
       ]),
-      source: 'document-index'
+
+      emails: uniqLower([
+        ...(Array.isArray(rec.emailsFound) ? rec.emailsFound : []),
+        ...(rec.email ? [rec.email] : []),
+        ...(pdf?.emails || [])
+      ]),
+
+      dueDate:
+        rec.dueDate ||
+        pdf?.dueDate ||
+        archiveFallback.dueDate ||
+        '',
+
+      invoiceNo:
+        rec.invoiceNo ||
+        pdf?.invoiceNo ||
+        archiveFallback.invoiceNo ||
+        '',
+
+      iban:
+        rec.iban ||
+        pdf?.iban ||
+        archiveFallback.iban ||
+        '',
+
+      ustId:
+        rec.ustId ||
+        pdf?.ustId ||
+        archiveFallback.ustId ||
+        '',
+
+      importantFacts: buildImportantFactsFromPdf(pdf || {}, {
+        importantFacts: uniqLower([
+          rec.sender ? `Absender: ${rec.sender}` : '',
+          rec.amountRaw ? `Betrag: ${rec.amountRaw}` : '',
+          rec.invoiceDate ? `Belegdatum: ${fmtDate(rec.invoiceDate)}` : '',
+          rec.invoiceNo ? `Referenz: ${rec.invoiceNo}` : '',
+          rec.objectCode ? `Objekt: ${rec.objectCode}` : '',
+          ...(archiveFallback.importantFacts || [])
+        ])
+      }),
+
+      source: pdf ? 'document-index+pdf' : 'document-index'
+    };
+  } else if (pdf) {
+    out = {
+      title:
+        archiveFallback.title,
+
+      summary:
+        pdf.summary ||
+        archiveFallback.summary,
+
+      keywords: uniqLower([
+        ...(pdf.keywords || []),
+        ...(archiveFallback.keywords || [])
+      ]),
+
+      emails: uniqLower([
+        ...(pdf.emails || []),
+        ...(archiveFallback.emails || [])
+      ]),
+
+      dueDate:
+        pdf.dueDate ||
+        archiveFallback.dueDate ||
+        '',
+
+      invoiceNo:
+        pdf.invoiceNo ||
+        archiveFallback.invoiceNo ||
+        '',
+
+      iban:
+        pdf.iban ||
+        archiveFallback.iban ||
+        '',
+
+      ustId:
+        pdf.ustId ||
+        archiveFallback.ustId ||
+        '',
+
+      importantFacts: buildImportantFactsFromPdf(pdf, archiveFallback),
+      source: 'pdf'
     };
   } else {
-    out = fallbackInsightsFromArchive(file);
+    out = archiveFallback;
   }
 
   __av3InsightCache.set(cacheKey, out);
@@ -1198,6 +1263,233 @@ function esc(v) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+function normalizeInsightText(v) {
+  return String(v || '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\r/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function splitInsightLines(text) {
+  return normalizeInsightText(text)
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function uniqLower(list) {
+  const seen = new Set();
+  const out = [];
+  for (const item of (list || [])) {
+    const raw = String(item || '').trim();
+    if (!raw) continue;
+    const key = raw.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(raw);
+  }
+  return out;
+}
+
+function extractEmailsFromText(text) {
+  const matches = String(text || '').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  return uniqLower(matches);
+}
+
+function extractIbansFromText(text) {
+  const matches = String(text || '').match(/\b[A-Z]{2}\d{2}[A-Z0-9 ]{10,34}\b/g) || [];
+  return uniqLower(matches.map(v => v.replace(/\s+/g, ' ').trim()));
+}
+
+function extractUstIdFromText(text) {
+  const rxList = [
+    /\b(?:USt-IdNr\.?|USt-ID\.?|Umsatzsteuer-ID\.?|VAT ID\.?)[:\s]*([A-Z]{2}[A-Z0-9\- ]{6,20})/i,
+    /\b(DE[0-9]{9})\b/i
+  ];
+  for (const rx of rxList) {
+    const m = String(text || '').match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+  return '';
+}
+
+function extractInvoiceNoFromText(text, lines) {
+  const rxList = [
+    /\b(?:Rechnungsnummer|Rechnung-Nr\.?|Rechn\.?-?Nr\.?|Invoice Number|Invoice No\.?|Belegnummer|Referenz)[:\s#]*([A-Z0-9\-\/\.]{4,40})/i,
+    /\b(?:Kundennummer|Vertragsnummer)[:\s#]*([A-Z0-9\-\/\.]{4,40})/i
+  ];
+
+  for (const rx of rxList) {
+    const m = String(text || '').match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+
+  for (const line of (lines || []).slice(0, 30)) {
+    if (/rechnung|invoice|referenz|beleg/i.test(line) && /[A-Z0-9][A-Z0-9\-\/\.]{3,}/.test(line)) {
+      const mm = line.match(/([A-Z0-9][A-Z0-9\-\/\.]{3,})/);
+      if (mm && mm[1]) return mm[1].trim();
+    }
+  }
+
+  return '';
+}
+
+function extractDueDateFromText(text) {
+  const rxList = [
+    /\b(?:fällig am|faellig am|zahlbar bis|due date|due on)[:\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i,
+    /\b(?:Zahlungsziel|Fälligkeit|Faelligkeit)[:\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i
+  ];
+  for (const rx of rxList) {
+    const m = String(text || '').match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+  return '';
+}
+
+function detectDocumentKindFromText(text) {
+  const t = String(text || '').toLowerCase();
+
+  if (/\bgutschrift\b/.test(t)) return 'Gutschrift';
+  if (/\bmahnung\b/.test(t)) return 'Mahnung';
+  if (/\bangebot\b|\boffer\b|\bofferte\b/.test(t)) return 'Angebot';
+  if (/\bversicherung\b|\bpolice\b|\bschaden\b/.test(t)) return 'Versicherung';
+  if (/\bvertrag\b|\bmietvertrag\b|\bdienstleistungsvertrag\b/.test(t)) return 'Vertrag';
+  if (/\brechnung\b|\binvoice\b/.test(t)) return 'Rechnung';
+  if (/\babrechnung\b/.test(t)) return 'Abrechnung';
+
+  return '';
+}
+
+function extractKeywordsFromText(text, lines) {
+  const hay = String(text || '').toLowerCase();
+  const found = [];
+
+  const keywordMap = [
+    ['Versicherung', /\bversicherung\b|\bpolice\b|\bschaden\b/],
+    ['Steuer', /\bsteuer\b|\bfinanzamt\b|\bust\b|\bvat\b/],
+    ['Energie', /\bstrom\b|\bgas\b|\benergie\b|\bversorger\b/],
+    ['Wasser', /\bwasser\b|\babwasser\b/],
+    ['Telekommunikation', /\btelekom\b|\bvodafone\b|\bo2\b|\binternet\b|\bdsl\b|\bmobilfunk\b/],
+    ['Handwerker', /\breparatur\b|\bwartung\b|\bmontage\b|\belektriker\b|\bheizung\b|\bsanit/i],
+    ['Nebenkosten', /\bnebenkosten\b|\bbetriebskosten\b|\bhausgeld\b/],
+    ['Zahlung', /\bfällig\b|\bfaellig\b|\bzahlbar\b|\büberweisung\b|\bueberweisung\b/],
+    ['IBAN', /\biban\b/],
+    ['Rechnungsnummer', /\brechnungsnummer\b|\binvoice number\b|\bbelegnummer\b/]
+  ];
+
+  for (const [label, rx] of keywordMap) {
+    if (rx.test(hay)) found.push(label);
+  }
+
+  for (const line of (lines || []).slice(0, 20)) {
+    if (/objekt|liegenschaft/i.test(line)) found.push('Objektbezug');
+    if (/fällig|faellig|zahlbar/i.test(line)) found.push('Frist');
+  }
+
+  return uniqLower(found);
+}
+
+function buildSummaryFromPdfText(text, lines, fallbackTitle) {
+  const cleanedLines = (lines || []).filter(Boolean);
+
+  const useful = cleanedLines.filter(line => {
+    if (line.length < 8) return false;
+    if (/^seite\s+\d+/i.test(line)) return false;
+    if (/^\d+$/.test(line)) return false;
+    return true;
+  });
+
+  const first = useful.slice(0, 6);
+
+  if (!first.length) return fallbackTitle || 'Keine inhaltliche Zusammenfassung verfügbar.';
+
+  let joined = first.join(' · ');
+  joined = joined.replace(/\s*[·|]\s*/g, ' · ');
+  joined = joined.replace(/\s{2,}/g, ' ').trim();
+
+  if (joined.length > 320) joined = joined.slice(0, 317).trim() + '…';
+  return joined;
+}
+
+function buildImportantFactsFromPdf(parsed, archiveFallback) {
+  const facts = [];
+
+  if (parsed.documentKind) facts.push(`Dokumenttyp erkannt: ${parsed.documentKind}`);
+  if (parsed.invoiceNo) facts.push(`Referenz: ${parsed.invoiceNo}`);
+  if (parsed.dueDate) facts.push(`Frist: ${parsed.dueDate}`);
+  if (parsed.iban) facts.push(`IBAN erkannt: ${parsed.iban}`);
+  if (parsed.ustId) facts.push(`USt-Id erkannt: ${parsed.ustId}`);
+  if ((parsed.emails || []).length) facts.push(`E-Mail-Kontakte: ${parsed.emails.slice(0, 3).join(', ')}`);
+
+  for (const item of (archiveFallback?.importantFacts || [])) {
+    facts.push(item);
+  }
+
+  return uniqLower(facts).slice(0, 8);
+}
+
+async function extractPdfTextInsights(file) {
+  if (!file?.handle || typeof file.handle.getFile !== 'function') return null;
+
+  const cacheKey = `${file.name}__${file.modified || ''}__${file.size || ''}`;
+  if (__av3PdfInsightCache.has(cacheKey)) return __av3PdfInsightCache.get(cacheKey);
+
+  try {
+    const raw = await file.handle.getFile();
+    const buf = await raw.arrayBuffer();
+    const pjs = window.pdfjsLib;
+    if (!pjs) return null;
+
+    if (!pjs.GlobalWorkerOptions?.workerSrc) {
+      pjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+
+    const doc = await pjs.getDocument({ data: buf }).promise;
+    const pages = Math.min(doc.numPages, 3);
+
+    let textChunks = [];
+
+    for (let i = 1; i <= pages; i++) {
+      const page = await doc.getPage(i);
+      const tc = await page.getTextContent();
+      const pageText = (tc.items || [])
+        .map(it => String(it.str || '').trim())
+        .filter(Boolean)
+        .join('\n');
+      if (pageText) textChunks.push(pageText);
+    }
+
+    const text = normalizeInsightText(textChunks.join('\n'));
+    const lines = splitInsightLines(text);
+
+    if (!text) {
+      __av3PdfInsightCache.set(cacheKey, null);
+      return null;
+    }
+
+    const out = {
+      text,
+      lines,
+      documentKind: detectDocumentKindFromText(text),
+      emails: extractEmailsFromText(text),
+      dueDate: extractDueDateFromText(text),
+      invoiceNo: extractInvoiceNoFromText(text, lines),
+      iban: (extractIbansFromText(text)[0] || ''),
+      ustId: extractUstIdFromText(text),
+      keywords: extractKeywordsFromText(text, lines),
+      summary: buildSummaryFromPdfText(text, lines, file?.name || '')
+    };
+
+    __av3PdfInsightCache.set(cacheKey, out);
+    return out;
+  } catch (e) {
+    console.warn('[FideliorArchiv] PDF insight extraction failed:', e);
+    __av3PdfInsightCache.set(cacheKey, null);
+    return null;
+  }
 }
 async function renderPanel(file) {
   const el = document.getElementById('fdl-av3-panel');
@@ -1461,6 +1753,10 @@ function railButtons(taskCount) {
 async function renderPDF(file) {
   const wrap = document.getElementById('fdl-av3-prev');
   if (!wrap) return;
+  if (!file?.handle || typeof file.handle.getFile !== 'function') {
+  wrap.innerHTML = `<div class="av3-prev-label">Vorschau</div><div class="av3-empty" style="flex:1"><div class="av3-empty-icon">${SVG.warn}</div><div class="av3-empty-sub">Keine Datei-Verbindung vorhanden</div></div>`;
+  return;
+}
 if (!file?.handle || typeof file.handle.getFile !== 'function') {
   wrap.innerHTML = `<div class="av3-prev-label">Vorschau</div><div class="av3-empty" style="flex:1"><div class="av3-empty-icon">${SVG.warn}</div><div class="av3-empty-sub">Keine Datei-Verbindung vorhanden</div></div>`;
   return;
