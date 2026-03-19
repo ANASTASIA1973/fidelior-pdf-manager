@@ -1317,26 +1317,31 @@ function extractUstIdFromText(text) {
 }
 
 function extractInvoiceNoFromText(text, lines) {
-  const rxList = [
-    /\b(?:Rechnungsnummer|Rechnung-Nr\.?|Rechn\.?-?Nr\.?|Invoice Number|Invoice No\.?|Belegnummer|Referenz)[:\s#]*([A-Z0-9\-\/\.]{4,40})/i,
-    /\b(?:Kundennummer|Vertragsnummer)[:\s#]*([A-Z0-9\-\/\.]{4,40})/i
+  const t = String(text || '');
+
+  // Spezifischer für deutsche + internationale Rechnungen
+  const patterns = [
+    /Rechnung\s*(?:No\.?|Nr\.?)\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
+    /Invoice\s*(?:No\.?|Number)\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
+    /Belegnummer\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
+    /Referenz\s*[:#]?\s*([A-Z0-9\/\-]+)/i
   ];
 
-  for (const rx of rxList) {
-    const m = String(text || '').match(rx);
+  for (const rx of patterns) {
+    const m = t.match(rx);
     if (m && m[1]) return m[1].trim();
   }
 
-  for (const line of (lines || []).slice(0, 30)) {
-    if (/rechnung|invoice|referenz|beleg/i.test(line) && /[A-Z0-9][A-Z0-9\-\/\.]{3,}/.test(line)) {
-      const mm = line.match(/([A-Z0-9][A-Z0-9\-\/\.]{3,})/);
-      if (mm && mm[1]) return mm[1].trim();
+  // Fallback: starke Zeile mit "Rechnung"
+  for (const line of (lines || []).slice(0, 20)) {
+    if (/rechnung/i.test(line) && /[A-Z0-9\/\-]{5,}/.test(line)) {
+      const mm = line.match(/([A-Z0-9\/\-]{5,})/);
+      if (mm && mm[1]) return mm[1];
     }
   }
 
   return '';
 }
-
 function extractDueDateFromText(text) {
   const rxList = [
     /\b(?:fällig am|faellig am|zahlbar bis|due date|due on)[:\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i,
@@ -1393,25 +1398,31 @@ function extractKeywordsFromText(text, lines) {
 }
 
 function buildSummaryFromPdfText(text, lines, fallbackTitle) {
-  const cleanedLines = (lines || []).filter(Boolean);
+  const t = String(text || '');
 
-  const useful = cleanedLines.filter(line => {
-    if (line.length < 8) return false;
-    if (/^seite\s+\d+/i.test(line)) return false;
-    if (/^\d+$/.test(line)) return false;
-    return true;
-  });
+  // 1. Rechnungsnummer priorisieren
+  const invMatch = t.match(/Rechnung\s*(?:No\.?|Nr\.?)\s*[:#]?\s*([A-Z0-9\/\-]+)/i);
 
-  const first = useful.slice(0, 6);
+  // 2. Betrag suchen (Gesamtbetrag)
+  const amountMatch = t.match(/(Gesamtbetrag|Summe|Total)[^0-9]{0,20}([\d.,]+\s?€?)/i);
 
-  if (!first.length) return fallbackTitle || 'Keine inhaltliche Zusammenfassung verfügbar.';
+  // 3. Firma (erste starke Zeile)
+  const companyLine = (lines || []).find(l =>
+    l.length > 10 &&
+    /gmbh|ag|kg|ltd|system|gbr/i.test(l)
+  );
 
-  let joined = first.join(' · ');
-  joined = joined.replace(/\s*[·|]\s*/g, ' · ');
-  joined = joined.replace(/\s{2,}/g, ' ').trim();
+  let parts = [];
 
-  if (joined.length > 320) joined = joined.slice(0, 317).trim() + '…';
-  return joined;
+  if (invMatch) parts.push(`Rechnung ${invMatch[1]}`);
+  if (companyLine) parts.push(companyLine.trim());
+  if (amountMatch) parts.push(amountMatch[2]);
+
+  if (!parts.length) {
+    return fallbackTitle || 'Keine inhaltliche Zusammenfassung verfügbar.';
+  }
+
+  return parts.join(' · ');
 }
 
 function buildImportantFactsFromPdf(parsed, archiveFallback) {
