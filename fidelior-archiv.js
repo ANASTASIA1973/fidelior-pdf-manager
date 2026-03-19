@@ -1188,10 +1188,11 @@ async function buildDocumentInsights(file) {
   ...(archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.3, source: 'archive' }] : [])
 ]).value,
 
-      invoiceDate:
-        pdf?.invoiceDate ||
-        rec.invoiceDate ||
-        '',
+   invoiceDate: resolveField([
+  ...(pdf?.dateCandidates || []),
+  ...(pdf?.invoiceDate ? [{ value: pdf.invoiceDate, score: 0.8, source: 'pdf' }] : []),
+  ...(rec.invoiceDate ? [{ value: rec.invoiceDate, score: 0.6, source: 'rec' }] : [])
+]).value,
 
       customerNo:
         pdf?.customerNo ||
@@ -1511,6 +1512,101 @@ function extractInvoiceNoCandidates(text, lines) {
 
   return dedupeCandidates(candidates);
 }
+// ═════════════════════════════════════════════════════════════
+// AMOUNT CANDIDATE ENGINE
+// ═════════════════════════════════════════════════════════════
+
+function extractAmountCandidates(text) {
+  const t = String(text || '');
+
+  const candidates = [];
+
+  const matches = t.match(/\d{1,3}(?:\.\d{3})*,\d{2}\s?(€|eur)?/gi) || [];
+
+  for (const raw of matches) {
+    const val = raw.trim();
+
+    // Kontext bewerten
+    let score = 0.5;
+    let reason = 'generic';
+
+    const contextWindow = getContext(t, val);
+
+    if (/gesamt|summe|betrag|total|amount/i.test(contextWindow)) {
+      score = 0.95;
+      reason = 'total-context';
+    } else if (/netto/i.test(contextWindow)) {
+      score = 0.7;
+      reason = 'net';
+    } else if (/mwst|ust|tax/i.test(contextWindow)) {
+      score = 0.6;
+      reason = 'tax';
+    }
+
+    candidates.push({
+      value: normalizeAmount(val),
+      score,
+      reason
+    });
+  }
+
+  return dedupeCandidates(candidates);
+}
+// ═════════════════════════════════════════════════════════════
+// COMPANY CANDIDATE ENGINE
+// ═════════════════════════════════════════════════════════════
+
+function extractCompanyCandidates(text, lines) {
+  const t = String(text || '');
+  const cleanLines = (lines || [])
+    .map(l => String(l || '').trim())
+    .filter(Boolean);
+
+  const candidates = [];
+
+  // 1️⃣ STRONG LEGAL FORM
+  const legal = t.match(/\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,80}\b(?:GmbH|AG|KG|UG|OHG|e\.K\.|GbR)\b/g) || [];
+
+  for (const val of legal) {
+    candidates.push({
+      value: val.trim(),
+      score: 0.95,
+      reason: 'legal-form'
+    });
+  }
+
+  // 2️⃣ HEADER (erste Zeilen extrem wichtig)
+  for (let i = 0; i < Math.min(cleanLines.length, 10); i++) {
+    const line = cleanLines[i];
+
+    if (
+      line.length > 5 &&
+      !isBadSummaryLine(line) &&
+      !/\d{2,}/.test(line)
+    ) {
+      candidates.push({
+        value: line,
+        score: 0.7,
+        reason: 'header'
+      });
+    }
+  }
+
+  return dedupeCandidates(candidates);
+}
+function getContext(text, value) {
+  const idx = text.indexOf(value);
+  if (idx === -1) return '';
+
+  return text.slice(Math.max(0, idx - 50), idx + 50);
+}
+
+function normalizeAmount(val) {
+  return val
+    .replace(/\./g, '')
+    .replace(',', '.')
+    .replace(/[^\d.]/g, '');
+}
 function isBadInvoiceCandidate(val) {
   if (!val) return true;
 
@@ -1631,7 +1727,116 @@ function extractInvoiceDateFromText(text) {
   );
   return m ? m[2] : '';
 }
+// ═════════════════════════════════════════════════════════════
+// DATE CANDIDATE ENGINE
+// ═════════════════════════════════════════════════════════════
 
+function extractDateCandidates(text, lines) {
+  const t = String(text || '');
+  const cleanLines = (lines || [])
+    .map(l => String(l || '').trim())
+    .filter(Boolean);
+
+  const candidates = [];
+
+  const labelPatterns = [
+    {
+      rx: /\b(?:rechnungsdatum|invoice date|belegdatum|datum)\b\s*[:\-]?\s*(\d{2}\.\d{2}\.\d{4})/i,
+      score: 0.95,
+      reason: 'date-label'
+    },
+    {
+      rx: /\b(?:leistungsdatum)\b\s*[:\-]?\s*(\d{2}\.\d{2}\.\d{4})/i,
+      score: 0.75,
+      reason: 'service-date'
+    },
+    {
+      rx: /\b(?:fällig am|faellig am|zahlbar bis|due date)\b\s*[:\-]?\s*(\d{2}\.\d{2}\.\d{4})/i,
+      score: 0.55,
+      reason: 'due-date'
+    }
+  ];
+
+  for (const p of labelPatterns) {
+    const m = t.match(p.rx);
+    if (m && m[1] && !isBadDateCandidate(m[1])) {
+      candidates.push({
+        value: m[1].trim(),
+        score: p.score,
+        reason: p.reason
+      });
+    }
+  }
+
+  const genericDates = t.match(/\b\d{2}\.\d{2}\.\d{4}\b/g) || [];
+  for (const val of genericDates) {
+    if (isBadDateCandidate(val)) continue;
+
+    const context = getContext(t, val);
+
+    let score = 0.45;
+    let reason = 'generic-date';
+
+    if (/rechnungsdatum|belegdatum|invoice date|datum/i.test(context)) {
+      score = 0.9;
+      reason = 'invoice-date-context';
+    } else if (/leistungsdatum|leistungszeitraum/i.test(context)) {
+      score = 0.7;
+      reason = 'service-context';
+    } else if (/fällig|faellig|zahlbar|due/i.test(context)) {
+      score = 0.5;
+      reason = 'due-context';
+    }
+
+    candidates.push({
+      value: val,
+      score,
+      reason
+    });
+  }
+
+  for (let i = 0; i < Math.min(cleanLines.length, 15); i++) {
+    const line = cleanLines[i];
+    const m = line.match(/\b\d{2}\.\d{2}\.\d{4}\b/);
+    if (!m) continue;
+
+    const val = m[0];
+    if (isBadDateCandidate(val)) continue;
+
+    let score = 0.5;
+    let reason = 'header-date';
+
+    if (/rechnungsdatum|belegdatum|datum/i.test(line)) {
+      score = 0.88;
+      reason = 'header-label';
+    }
+
+    candidates.push({
+      value: val,
+      score,
+      reason
+    });
+  }
+
+  return dedupeCandidates(candidates);
+}
+
+function isBadDateCandidate(val) {
+  if (!val) return true;
+
+  const m = String(val).match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (!m) return true;
+
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+
+  if (day < 1 || day > 31) return true;
+  if (month < 1 || month > 12) return true;
+  if (year < 2000 || year > 2100) return true;
+
+  return false;
+}
 function extractCustomerNoFromText(text) {
   return extractFieldByLabel(text, [
     'Kundennr\\.?', 'Kundennummer', 'Customer No\\.?', 'Customer Number'
@@ -1807,19 +2012,20 @@ function buildSummaryFromPdfText(text, lines, fallbackTitle) {
   // 1. RAW EXTRACTION (keine Entscheidung mehr!)
   // ═══════════════════════════════════════════════
 
-  const raw = {
-    invoiceCandidates: extractInvoiceNoCandidates(t, cleanLines),
-    amountCandidates: extractAmountCandidates(t),
-    companyCandidates: extractCompanyCandidates(t, cleanLines)
-  };
+const raw = {
+  invoiceCandidates: extractInvoiceNoCandidates(t, cleanLines),
+  amountCandidates: extractAmountCandidates(t),
+  companyCandidates: extractCompanyCandidates(t, cleanLines),
+  dateCandidates: extractDateCandidates(t, cleanLines)
+};
 
   // ═══════════════════════════════════════════════
   // 2. RESOLUTION (beste Wahl + confidence)
   // ═══════════════════════════════════════════════
-
-  const invoice = resolveBestCandidate(raw.invoiceCandidates);
-  const amount = resolveBestCandidate(raw.amountCandidates);
-  const company = resolveBestCandidate(raw.companyCandidates);
+const invoice = resolveBestCandidate(raw.invoiceCandidates);
+const amount = resolveBestCandidate(raw.amountCandidates);
+const company = resolveBestCandidate(raw.companyCandidates);
+const date = resolveBestCandidate(raw.dateCandidates);
 
   // ═══════════════════════════════════════════════
   // 3. STRUCTURED SUMMARY (wie vorher, aber sauber)
@@ -1878,12 +2084,13 @@ function buildSummaryFromPdfText(text, lines, fallbackTitle) {
       : structuredSummary || textSummary || fallbackTitle || 'Keine inhaltliche Zusammenfassung verfügbar.';
 
   // 🔥 WICHTIG: DEBUG ENGINE (für nächsten Schritt)
-  console.log('[FDL SUMMARY ENGINE]', {
-    invoice,
-    amount,
-    company,
-    raw
-  });
+console.log('[FDL SUMMARY ENGINE]', {
+  invoice,
+  amount,
+  company,
+  date,
+  raw
+});
 
   return finalSummary;
 }
@@ -2026,6 +2233,10 @@ const pageText = pageLines.join('\n');
   documentKind: detectDocumentKindFromText(text),
   invoiceNo: extractInvoiceNoFromText(text, lines),
   invoiceDate: extractInvoiceDateFromText(text),
+    invoiceCandidates: extractInvoiceNoCandidates(text, lines),
+  amountCandidates: extractAmountCandidates(text),
+  companyCandidates: extractCompanyCandidates(text, lines),
+  dateCandidates: extractDateCandidates(text, lines),
   dueDate: extractDueDateFromText(text),
   customerNo: extractCustomerNoFromText(text),
   orderNo: extractOrderNoFromText(text),
