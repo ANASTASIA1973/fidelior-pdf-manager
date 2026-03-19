@@ -391,8 +391,11 @@ function injectCSS() {
 
 /* ── 3-SPALTEN BODY ── */
 .av3-body {
-  flex: 1; display: grid; grid-template-columns: 200px 1fr 380px;
-  min-height: 0; overflow: hidden;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 200px 1fr minmax(520px, 560px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* ── SIDEBAR ── */
@@ -502,13 +505,87 @@ function injectCSS() {
 .av3-rail-sep { height: 1px; width: 24px; background: #E5E7EB; margin: 4px 0; }
 
 .av3-panel-content {
-  flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  flex: 1;
+  display: grid;
+  grid-template-rows: minmax(260px, 42%) 1fr;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .av3-panel-meta {
-  flex-shrink: 0; overflow-y: auto; max-height: 260px;
-  border-bottom: 1px solid #E5E7EB; padding: 14px 16px;
+  overflow-y: auto;
+  min-height: 0;
+  border-bottom: 1px solid #E5E7EB;
+  padding: 16px 18px;
   background: #fff;
+}
+  .av3-doc-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.av3-doc-hero {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #EEF0F3;
+}
+
+.av3-doc-file {
+  font-size: 11px;
+  color: #9CA3AF;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+
+.av3-doc-title {
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 10px;
+}
+
+.av3-doc-summary {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #374151;
+  margin-bottom: 10px;
+}
+
+.av3-doc-date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.av3-doc-date-main {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6B7280;
+}
+
+.av3-doc-section {
+  padding-bottom: 12px;
+  border-bottom: 1px solid #F3F4F6;
+}
+
+.av3-doc-section:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.av3-doc-section-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #9CA3AF;
+  margin-bottom: 8px;
+}
+
+.av3-doc-section-tasks {
+  padding-top: 2px;
 }
 .av3-ph-name {
   font-size: 12.5px; font-weight: 700; color: #111827; line-height: 1.4;
@@ -550,9 +627,12 @@ function injectCSS() {
 .av3-no-tasks { font-size: 11.5px; color: #9CA3AF; padding: 4px 0; }
 
 .av3-panel-preview {
-  flex: 1; overflow-y: auto; background: #F4F5F7;
-  display: flex; flex-direction: column; min-height: 0;
-  padding: 16px;
+  overflow: auto;
+  background: #F3F4F6;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px;
 }
 .av3-prev-label {
   font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
@@ -560,8 +640,12 @@ function injectCSS() {
 }
 .av3-prev-canvas-wrap { display: flex; flex-direction: column; gap: 8px; }
 .av3-prev-canvas-wrap canvas {
-  width: 100%; height: auto; display: block;
-  border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  background: #fff;
 }
 .av3-prev-more { font-size: 11.5px; color: #9CA3AF; text-align: center; padding: 8px 0; }
 
@@ -575,8 +659,14 @@ function injectCSS() {
 .av3-loading { display: flex; align-items: center; gap: 10px; padding: 24px; color: #9CA3AF; font-size: 13px; }
 .av3-spinner { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; border: 2px solid #E5E7EB; border-top-color: #5B1B70; animation: av3spin .65s linear infinite; }
 
-@media (max-width: 1100px) { .av3-body { grid-template-columns: 180px 1fr 320px; } }
-@media (max-width: 900px)  { .av3-body { grid-template-columns: 160px 1fr; } .av3-panel { display: none; } }
+@media (max-width: 1280px) {
+  .av3-body { grid-template-columns: 180px 1fr minmax(420px, 480px); }
+}
+
+@media (max-width: 980px)  {
+  .av3-body { grid-template-columns: 160px 1fr; }
+  .av3-panel { display: none; }
+}
   `;
   document.head.appendChild(s);
 }
@@ -940,7 +1030,175 @@ function isSel(f) {
 /* ══════════════════════════════════════════════════════════════════════════
    RENDER: RECHTES PANEL
    ══════════════════════════════════════════════════════════════════════════ */
+const __av3DocRecordCache = new Map();
+const __av3InsightCache = new Map();
 
+async function loadIndexedDocumentRecord(file) {
+  try {
+    if (!file?.name) return null;
+    if (__av3DocRecordCache.has(file.name)) return __av3DocRecordCache.get(file.name);
+
+    const req = indexedDB.open('fidelior_index_v1', 1);
+
+    const record = await new Promise((resolve) => {
+      req.onerror = () => resolve(null);
+      req.onsuccess = () => {
+        try {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('documents')) return resolve(null);
+
+          const tx = db.transaction('documents', 'readonly');
+          const store = tx.objectStore('documents');
+          const idx = store.index('fileName');
+          const q = idx.getAll(file.name);
+
+          q.onerror = () => resolve(null);
+          q.onsuccess = () => {
+            const all = Array.isArray(q.result) ? q.result : [];
+            if (!all.length) return resolve(null);
+
+            const best = all
+              .slice()
+              .sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')))[0] || null;
+
+            resolve(best);
+          };
+        } catch {
+          resolve(null);
+        }
+      };
+    });
+
+    __av3DocRecordCache.set(file.name, record || null);
+    return record || null;
+  } catch {
+    return null;
+  }
+}
+
+function uniqClean(list) {
+  return Array.from(new Set([].concat(list || []).map(x => String(x || '').trim()).filter(Boolean)));
+}
+
+function fallbackInsightsFromArchive(file) {
+  const m = file?.meta || {};
+  const c = file?.__core || {};
+
+  const docType = c.type || fmtFolderType(file?.folderType) || '';
+  const sender = c.sender || m.absender || '';
+  const amount = c.amount || m.betrag || '';
+  const docDate = c.date || m.datum || '';
+  const objectCode = c.objectCode || file?.objectCode || '';
+  const objectName = c.objectName || file?.objectName || '';
+  const subfolder = file?.subfolder || '';
+
+  const title = buildArchivTitle({
+    file,
+    core: c,
+    docType,
+    amount,
+    sender,
+    objectCode,
+    objectName
+  });
+
+  const summary = buildArchivSummary({
+    file,
+    core: c,
+    docType,
+    amount,
+    docDate,
+    sender,
+    objectCode,
+    objectName
+  });
+
+  return {
+    title,
+    summary,
+    keywords: uniqClean([docType, objectCode, subfolder]),
+    emails: [],
+    dueDate: '',
+    invoiceNo: '',
+    iban: '',
+    ustId: '',
+    importantFacts: uniqClean([
+      sender ? `Absender: ${sender}` : '',
+      amount ? `Betrag: ${amount}` : '',
+      docDate ? `Datum: ${docDate}` : '',
+      objectCode ? `Objekt: ${objectCode}${objectName ? ` (${objectName})` : ''}` : ''
+    ]),
+    source: 'fallback'
+  };
+}
+
+async function buildDocumentInsights(file) {
+  if (!file?.name) return fallbackInsightsFromArchive(file);
+
+  const cacheKey = `${file.name}__${file.modified || ''}__${file.size || ''}`;
+  if (__av3InsightCache.has(cacheKey)) return __av3InsightCache.get(cacheKey);
+
+  const rec = await loadIndexedDocumentRecord(file);
+
+  let out;
+  if (rec) {
+    out = {
+      title:
+        rec.title ||
+        rec.dashboard?.title ||
+        buildArchivTitle({
+          file,
+          docType: rec.docType || '',
+          sender: rec.sender || '',
+          amount: rec.amountRaw || '',
+          objectCode: rec.objectCode || file.objectCode || '',
+          objectName: file.objectName || ''
+        }),
+      summary:
+        rec.serviceDesc ||
+        rec.dashboard?.summary ||
+        buildArchivSummary({
+          file,
+          docType: rec.docType || '',
+          sender: rec.sender || '',
+          amount: rec.amountRaw || '',
+          docDate: rec.invoiceDate ? fmtDate(rec.invoiceDate) : '',
+          objectCode: rec.objectCode || file.objectCode || '',
+          objectName: file.objectName || ''
+        }),
+      keywords: uniqClean(rec.keywords || []),
+   emails: uniqClean(
+  Array.isArray(rec.emailsFound) ? rec.emailsFound :
+  rec.email ? [rec.email] : []
+),
+      dueDate: rec.dueDate || '',
+      invoiceNo: rec.invoiceNo || '',
+      iban: rec.iban || '',
+      ustId: rec.ustId || '',
+      importantFacts: uniqClean([
+        rec.sender ? `Absender: ${rec.sender}` : '',
+        rec.amountRaw ? `Betrag: ${rec.amountRaw}` : '',
+        rec.invoiceDate ? `Belegdatum: ${fmtDate(rec.invoiceDate)}` : '',
+        rec.invoiceNo ? `Referenz: ${rec.invoiceNo}` : '',
+        rec.objectCode ? `Objekt: ${rec.objectCode}` : ''
+      ]),
+      source: 'document-index'
+    };
+  } else {
+    out = fallbackInsightsFromArchive(file);
+  }
+
+  __av3InsightCache.set(cacheKey, out);
+  return out;
+}
+function esc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 async function renderPanel(file) {
   const el = document.getElementById('fdl-av3-panel');
   if (!el) return;
@@ -962,6 +1220,7 @@ async function renderPanel(file) {
   const core = file.__core || null;
   const tasks = await loadTasks(file.name);
   const open = tasks.filter(t => t.status !== 'done');
+  const insights = await buildDocumentInsights(file);
 
   const docType = core?.type || fmtFolderType(file.folderType);
   const amount = core?.amount || m.betrag || '';
@@ -974,26 +1233,26 @@ async function renderPanel(file) {
   const filePath = (file.pathSegs || []).join(' › ');
 
   const smallFileName = file.name || '';
-  const largeTitle = buildArchivTitle({
-    file,
-    core,
-    docType,
-    amount,
-    sender,
-    objectCode,
-    objectName
-  });
+const largeTitle = insights?.title || buildArchivTitle({
+  file,
+  core,
+  docType,
+  amount,
+  sender,
+  objectCode,
+  objectName
+});
 
-  const summary = buildArchivSummary({
-    file,
-    core,
-    docType,
-    amount,
-    docDate,
-    sender,
-    objectCode,
-    objectName
-  });
+const summary = insights?.summary || buildArchivSummary({
+  file,
+  core,
+  docType,
+  amount,
+  docDate,
+  sender,
+  objectCode,
+  objectName
+});
 
   const catPills = [
     objectCode ? `<span class="av3-cat-pill">${objectCode}</span>` : '',
@@ -1012,65 +1271,128 @@ async function renderPanel(file) {
         </div>`;
       }).join('')
     : '<div class="av3-no-tasks">Noch keine Aufgaben vorhanden.</div>';
+const keywordsHtml = (insights?.keywords || []).length
+  ? `<div class="av3-cat-pills">${insights.keywords.slice(0, 10).map(k => `<span class="av3-cat-pill">${esc(k)}</span>`).join('')}</div>`
+  : '<div class="av3-no-tasks">Keine Schlagwörter erkannt.</div>';
 
+const emailsHtml = (insights?.emails || []).length
+  ? insights.emails.slice(0, 8).map(mail => `
+      <div class="av3-meta-row">
+        <span class="av3-meta-label">E-Mail</span>
+        <span class="av3-meta-val">${esc(mail)}</span>
+      </div>
+    `).join('')
+  : '<div class="av3-no-tasks">Keine E-Mail-Adressen erkannt.</div>';
+
+const factsHtml = (insights?.importantFacts || []).length
+  ? insights.importantFacts.slice(0, 8).map(f => `
+      <div class="av3-task-row">
+        <span style="color:#9CA3AF">•</span>
+        <span>${esc(f)}</span>
+      </div>
+    `).join('')
+  : '<div class="av3-no-tasks">Keine zusätzlichen Inhalte erkannt.</div>';
   el.innerHTML = `
-    <div class="av3-panel-rail">
-      ${railButtons(open.length)}
+  <div class="av3-panel-rail">
+    ${railButtons(open.length)}
+  </div>
+
+  <div class="av3-panel-content">
+    <div class="av3-panel-meta av3-doc-shell">
+
+      <div class="av3-doc-hero">
+        <div class="av3-doc-file">${esc(smallFileName || '—')}</div>
+        <div class="av3-doc-title">${esc(largeTitle || smallFileName || 'Dokument')}</div>
+        <div class="av3-doc-date-row">
+          ${docDate
+            ? `<span class="av3-doc-date-main">${esc(docDate)}</span>`
+            : `<span class="av3-doc-date-main">${esc(modifiedLabel)}</span>`}
+        </div>
+        <div class="av3-cat-pills">${catPills || '<span style="color:#9CA3AF;font-size:11px">—</span>'}</div>
+      </div>
+
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Zusammenfassung</div>
+        <div class="av3-doc-summary" style="margin:0">
+          ${summary ? esc(summary) : 'Keine inhaltliche Zusammenfassung verfügbar.'}
+        </div>
+      </div>
+
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Schlagwörter</div>
+        ${keywordsHtml}
+      </div>
+
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Erkannte Kontakte / E-Mails</div>
+        <div class="av3-meta">
+          ${emailsHtml}
+        </div>
+      </div>
+
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Wichtige Inhalte</div>
+        <div class="av3-meta" style="display:block">
+          ${factsHtml}
+        </div>
+      </div>
+
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Dokumentdaten</div>
+        <div class="av3-meta">
+          ${docType ? `<div class="av3-meta-row"><span class="av3-meta-label">Typ</span><span class="av3-meta-val">${esc(docType)}</span></div>` : ''}
+          ${amount ? `<div class="av3-meta-row"><span class="av3-meta-label">Betrag</span><span class="av3-meta-val">${esc(amount)}</span></div>` : ''}
+          ${docDate ? `<div class="av3-meta-row"><span class="av3-meta-label">Belegdatum</span><span class="av3-meta-val">${esc(docDate)}</span></div>` : ''}
+          ${sender ? `<div class="av3-meta-row"><span class="av3-meta-label">Absender</span><span class="av3-meta-val">${esc(sender)}</span></div>` : ''}
+          ${objectCode ? `<div class="av3-meta-row"><span class="av3-meta-label">Objekt</span><span class="av3-meta-val">${esc(objectCode)}${objectName ? ` · ${esc(objectName)}` : ''}</span></div>` : ''}
+          ${file.subfolder ? `<div class="av3-meta-row"><span class="av3-meta-label">Unterordner</span><span class="av3-meta-val">${esc(file.subfolder)}</span></div>` : ''}
+          ${insights?.dueDate ? `<div class="av3-meta-row"><span class="av3-meta-label">Frist</span><span class="av3-meta-val">${esc(insights.dueDate)}</span></div>` : ''}
+          ${insights?.invoiceNo ? `<div class="av3-meta-row"><span class="av3-meta-label">Referenz</span><span class="av3-meta-val">${esc(insights.invoiceNo)}</span></div>` : ''}
+          ${insights?.iban ? `<div class="av3-meta-row"><span class="av3-meta-label">IBAN</span><span class="av3-meta-val mono">${esc(insights.iban)}</span></div>` : ''}
+          ${insights?.ustId ? `<div class="av3-meta-row"><span class="av3-meta-label">USt-Id</span><span class="av3-meta-val mono">${esc(insights.ustId)}</span></div>` : ''}
+          ${filePath ? `<div class="av3-meta-row"><span class="av3-meta-label">Pfad</span><span class="av3-meta-val mono">${esc(filePath)}</span></div>` : ''}
+        </div>
+      </div>
+
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Dateiinformationen</div>
+        <div class="av3-meta">
+          <div class="av3-meta-row">
+            <span class="av3-meta-label">Dateiname</span>
+            <span class="av3-meta-val mono">${esc(smallFileName || '—')}</span>
+          </div>
+          <div class="av3-meta-row">
+            <span class="av3-meta-label">Größe</span>
+            <span class="av3-meta-val">${esc(fileSizeLabel || '—')}</span>
+          </div>
+          <div class="av3-meta-row">
+            <span class="av3-meta-label">Geändert</span>
+            <span class="av3-meta-val">${esc(modifiedLabel || '—')}</span>
+          </div>
+          <div class="av3-meta-row">
+            <span class="av3-meta-label">Quelle</span>
+            <span class="av3-meta-val">${esc(insights?.source === 'document-index' ? 'Dokumentenindex' : 'Archiv')}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="av3-doc-section av3-doc-section-tasks">
+        <div class="av3-tasks-mini">
+          <div class="av3-tasks-mini-hdr">
+            <span class="av3-tasks-mini-title">Aufgaben${open.length ? ' (' + open.length + ')' : ''}</span>
+            <button class="av3-task-add" onclick="window.__av3.task()">+ Erstellen</button>
+          </div>
+          ${taskHTML}
+        </div>
+      </div>
+
     </div>
 
-    <div class="av3-panel-content">
-      <div class="av3-panel-meta av3-doc-shell">
-
-        <div class="av3-doc-hero">
-          <div class="av3-doc-file">${smallFileName || '—'}</div>
-          <div class="av3-doc-title">${largeTitle || smallFileName || 'Dokument'}</div>
-          ${summary ? `<div class="av3-doc-summary">${summary}</div>` : ''}
-          <div class="av3-doc-date-row">
-            ${docDate ? `<span class="av3-doc-date-main">${docDate}</span>` : `<span class="av3-doc-date-main">${modifiedLabel}</span>`}
-          </div>
-          <div class="av3-cat-pills">${catPills || '<span style="color:#9CA3AF;font-size:11px">—</span>'}</div>
-        </div>
-
-        <div class="av3-doc-section">
-          <div class="av3-doc-section-title">Dokumentdaten</div>
-          <div class="av3-meta">
-            ${docType ? `<div class="av3-meta-row"><span class="av3-meta-label">Typ</span><span class="av3-meta-val">${docType}</span></div>` : ''}
-            ${amount ? `<div class="av3-meta-row"><span class="av3-meta-label">Betrag</span><span class="av3-meta-val">${amount}</span></div>` : ''}
-            ${docDate ? `<div class="av3-meta-row"><span class="av3-meta-label">Belegdatum</span><span class="av3-meta-val">${docDate}</span></div>` : ''}
-            ${sender ? `<div class="av3-meta-row"><span class="av3-meta-label">Absender</span><span class="av3-meta-val">${sender}</span></div>` : ''}
-            ${objectCode ? `<div class="av3-meta-row"><span class="av3-meta-label">Objekt</span><span class="av3-meta-val">${objectCode}${objectName ? ` · ${objectName}` : ''}</span></div>` : ''}
-            ${file.subfolder ? `<div class="av3-meta-row"><span class="av3-meta-label">Unterordner</span><span class="av3-meta-val">${file.subfolder}</span></div>` : ''}
-            ${filePath ? `<div class="av3-meta-row"><span class="av3-meta-label">Pfad</span><span class="av3-meta-val mono">${filePath}</span></div>` : ''}
-          </div>
-        </div>
-
-        <div class="av3-doc-section">
-          <div class="av3-doc-section-title">Dateiinformationen</div>
-          <div class="av3-meta">
-            <div class="av3-meta-row"><span class="av3-meta-label">Dateiname</span><span class="av3-meta-val mono">${smallFileName || '—'}</span></div>
-            <div class="av3-meta-row"><span class="av3-meta-label">Größe</span><span class="av3-meta-val">${fileSizeLabel || '—'}</span></div>
-            <div class="av3-meta-row"><span class="av3-meta-label">Geändert</span><span class="av3-meta-val">${modifiedLabel || '—'}</span></div>
-            <div class="av3-meta-row"><span class="av3-meta-label">Quelle</span><span class="av3-meta-val">Archiv</span></div>
-          </div>
-        </div>
-
-        <div class="av3-doc-section av3-doc-section-tasks">
-          <div class="av3-tasks-mini">
-            <div class="av3-tasks-mini-hdr">
-              <span class="av3-tasks-mini-title">Aufgaben${open.length ? ' (' + open.length + ')' : ''}</span>
-              <button class="av3-task-add" onclick="window.__av3.task()">+ Erstellen</button>
-            </div>
-            ${taskHTML}
-          </div>
-        </div>
-
-      </div>
-
-      <div class="av3-panel-preview" id="fdl-av3-prev">
-        <div class="av3-prev-label">Vorschau</div>
-        <div class="av3-loading"><div class="av3-spinner"></div> PDF wird gerendert…</div>
-      </div>
-    </div>`;
+    <div class="av3-panel-preview" id="fdl-av3-prev">
+      <div class="av3-prev-label">Vorschau</div>
+      <div class="av3-loading"><div class="av3-spinner"></div> PDF wird gerendert…</div>
+    </div>
+  </div>`;
 
   renderPDF(file);
 }
@@ -1082,14 +1404,14 @@ function buildArchivTitle(ctx) {
 
   const nameStem = String(file?.name || '').replace(/\.pdf$/i, '');
 
-  if (docType === 'Rechnung') {
-    const parts = [];
-    if (docType) parts.push(docType);
-    if (sender) parts.push(sender);
-    if (objectCode) parts.push(objectCode);
-    if (amount) parts.push(amount);
-    return parts.filter(Boolean).join(' – ');
-  }
+if (String(docType || '').toLowerCase().startsWith('rechnung')) {
+  const parts = [];
+  if (docType) parts.push(docType);
+  if (sender) parts.push(sender);
+  if (objectCode) parts.push(objectCode);
+  if (amount) parts.push(amount);
+  return parts.filter(Boolean).join(' – ');
+}
 
   if (sender) return sender;
   return nameStem || 'Dokument';
