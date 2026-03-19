@@ -1114,9 +1114,10 @@ function fallbackInsightsFromArchive(file) {
     objectName
   });
 
-  return {
+   return {
     title,
     summary,
+    documentKind: detectDocumentKindFromText(`${docType} ${file?.name || ''}`),
     keywords: uniqClean([docType, objectCode, subfolder]),
     emails: [],
     dueDate: '',
@@ -1169,7 +1170,11 @@ async function buildDocumentInsights(file) {
         ...(rec.email ? [rec.email] : []),
         ...(pdf?.emails || [])
       ]),
-
+      documentKind:
+        pdf?.documentKind ||
+        detectDocumentKindFromText(`${rec.title || ''} ${rec.serviceDesc || ''}`) ||
+        archiveFallback.documentKind ||
+        '',
       dueDate:
         rec.dueDate ||
         pdf?.dueDate ||
@@ -1279,7 +1284,10 @@ async function buildDocumentInsights(file) {
         ...(pdf.emails || []),
         ...(archiveFallback.emails || [])
       ]),
-
+      documentKind:
+        pdf.documentKind ||
+        archiveFallback.documentKind ||
+        '',
       dueDate:
         pdf.dueDate ||
         archiveFallback.dueDate ||
@@ -1462,14 +1470,15 @@ function detectDocumentKindFromText(text) {
   const t = String(text || '').toLowerCase();
 
   if (/\bgutschrift\b/.test(t)) return 'Gutschrift';
+  if (/\bstornorechnung\b|\bstorno\b/.test(t)) return 'Storno';
   if (/\bmahnung\b/.test(t)) return 'Mahnung';
   if (/\bangebot\b|\boffer\b|\bofferte\b/.test(t)) return 'Angebot';
   if (/\bversicherung\b|\bpolice\b|\bschaden\b/.test(t)) return 'Versicherung';
   if (/\bvertrag\b|\bmietvertrag\b|\bdienstleistungsvertrag\b/.test(t)) return 'Vertrag';
-  if (/\brechnung\b|\binvoice\b/.test(t)) return 'Rechnung';
   if (/\babrechnung\b/.test(t)) return 'Abrechnung';
+  if (/\brechnung\b|\binvoice\b/.test(t)) return 'Rechnung';
 
-  return '';
+  return 'Dokument';
 }
 
 function extractKeywordsFromText(text, lines) {
@@ -1805,11 +1814,19 @@ function buildImportantFactsFromPdf(parsed, archiveFallback) {
 
   if (parsed.documentKind) facts.push(`Dokumenttyp erkannt: ${parsed.documentKind}`);
   if (parsed.invoiceNo) facts.push(`Referenz: ${parsed.invoiceNo}`);
+  if (parsed.invoiceDate) facts.push(`Rechnungsdatum: ${parsed.invoiceDate}`);
+  if (parsed.orderNo) facts.push(`Auftragsnr.: ${parsed.orderNo}`);
+  if (parsed.customerNo) facts.push(`Kundennr.: ${parsed.customerNo}`);
+  if (parsed.propertyNo) facts.push(`Objektnr.: ${parsed.propertyNo}`);
+  if (parsed.servicePeriod) facts.push(`Zeitraum: ${parsed.servicePeriod}`);
+  if (parsed.grossAmount) facts.push(`Brutto: ${parsed.grossAmount}`);
+  if (parsed.netAmount) facts.push(`Netto: ${parsed.netAmount}`);
+  if (parsed.taxAmount) facts.push(`MwSt.: ${parsed.taxAmount}`);
   if (parsed.dueDate) facts.push(`Frist: ${parsed.dueDate}`);
   if (parsed.iban) facts.push(`IBAN erkannt: ${parsed.iban}`);
+  if (parsed.bic) facts.push(`BIC erkannt: ${parsed.bic}`);
   if (parsed.ustId) facts.push(`USt-Id erkannt: ${parsed.ustId}`);
   if ((parsed.emails || []).length) facts.push(`E-Mail-Kontakte: ${parsed.emails.slice(0, 3).join(', ')}`);
-
   for (const item of (archiveFallback?.importantFacts || [])) {
     facts.push(item);
   }
@@ -1931,10 +1948,28 @@ async function renderPanel(file) {
   const open = tasks.filter(t => t.status !== 'done');
   const insights = await buildDocumentInsights(file);
 
-  const docType = core?.type || fmtFolderType(file.folderType);
-  const amount = core?.amount || m.betrag || '';
-  const docDate = core?.date || m.datum || '';
-  const sender = core?.sender || m.absender || '';
+  const docType =
+    insights?.documentKind ||
+    (core?.type === 'Rechnung' ? 'Rechnung' : core?.type) ||
+    fmtFolderType(file.folderType);
+
+  const amount =
+    insights?.grossAmount ||
+    core?.amount ||
+    m.betrag ||
+    '';
+
+  const docDate =
+    insights?.invoiceDate ||
+    core?.date ||
+    m.datum ||
+    '';
+
+  const sender =
+    insights?.company ||
+    core?.sender ||
+    m.absender ||
+    '';
   const objectCode = core?.objectCode || file.objectCode || '';
   const objectName = core?.objectName || file.objectName || '';
   const modifiedLabel = fmtDate(file.modified);
@@ -2149,9 +2184,14 @@ el.innerHTML = `
             <span class="av3-meta-label">Geändert</span>
             <span class="av3-meta-val">${esc(modifiedLabel || '—')}</span>
           </div>
-          <div class="av3-meta-row">
+                <div class="av3-meta-row">
             <span class="av3-meta-label">Quelle</span>
-            <span class="av3-meta-val">${esc(insights?.source || 'Archiv')}</span>
+            <span class="av3-meta-val">${esc(
+              insights?.source === 'document-index+pdf' ? 'Dokumentenindex + PDF' :
+              insights?.source === 'document-index' ? 'Dokumentenindex' :
+              insights?.source === 'pdf' ? 'PDF-Analyse' :
+              'Archiv'
+            )}</span>
           </div>
         </div>
       </div>
@@ -2184,7 +2224,16 @@ function buildArchivTitle(ctx) {
 
   const nameStem = String(file?.name || '').replace(/\.pdf$/i, '');
 
-if (String(docType || '').toLowerCase().startsWith('rechnung')) {
+const kind = String(docType || '').toLowerCase();
+
+if (
+  kind.startsWith('rechnung') ||
+  kind.startsWith('gutschrift') ||
+  kind.startsWith('storno') ||
+  kind.startsWith('mahnung') ||
+  kind.startsWith('angebot') ||
+  kind.startsWith('abrechnung')
+) {
   const parts = [];
   if (docType) parts.push(docType);
   if (sender) parts.push(sender);
