@@ -1472,9 +1472,9 @@ function extractInvoiceNoCandidates(text, lines) {
 
   const candidates = [];
 
-  // 1️⃣ STRONG LABEL MATCH (höchste Priorität)
+  // 1) Starke Label-Treffer
   const labelPatterns = [
-    /\b(rechnungsnummer|rechnungsnr|invoice\s*no|invoice\s*number|belegnr|referenz)\b\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i
+    /\b(rechnungsnummer|rechnungsnr\.?|rechnung\s*nr\.?|invoice\s*no\.?|invoice\s*number|belegnummer|belegnr\.?|referenz)\b\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i
   ];
 
   for (const rx of labelPatterns) {
@@ -1483,35 +1483,89 @@ function extractInvoiceNoCandidates(text, lines) {
       candidates.push({
         value: m[2].trim(),
         score: 1.0,
-        reason: 'Strong label'
+        reason: 'strong-label'
       });
     }
   }
 
-  // 2️⃣ HEADER-ZONE (extrem wichtig!)
-  for (let i = 0; i < Math.min(cleanLines.length, 15); i++) {
+  // 2) Label in einer Zeile, Wert in der nächsten Zeile
+  for (let i = 0; i < cleanLines.length - 1; i++) {
     const line = cleanLines[i];
+    const next = cleanLines[i + 1];
 
-    if (/rechnung|invoice/i.test(line)) {
-      const m = line.match(/([A-Z0-9\-\/]{5,})/);
-      if (m && !isBadInvoiceCandidate(m[1])) {
+    if (/\b(rechnungsnummer|rechnungsnr\.?|rechnung\s*nr\.?|invoice\s*no\.?|invoice\s*number|belegnummer|belegnr\.?|referenz)\b/i.test(line)) {
+      const m = String(next || '').match(/\b([A-Z0-9\-\/]{4,})\b/);
+      if (m && m[1] && !isBadInvoiceCandidate(m[1])) {
         candidates.push({
-          value: m[1],
-          score: 0.85,
-          reason: 'Header context'
+          value: m[1].trim(),
+          score: 0.96,
+          reason: 'label-next-line'
         });
       }
     }
   }
 
-  // 3️⃣ PATTERN (Fallback)
-  const generic = t.match(/\b[A-Z]{1,4}[-\/]?\d{4,}\b/g) || [];
-  for (const val of generic) {
-    if (!isBadInvoiceCandidate(val)) {
+  // 3) Kopfbereich mit Kontextprüfung
+  for (let i = 0; i < Math.min(cleanLines.length, 20); i++) {
+    const line = cleanLines[i];
+    const m = line.match(/\b([A-Z0-9\-\/]{5,})\b/);
+    if (!m || !m[1]) continue;
+
+    const val = m[1].trim();
+    if (isBadInvoiceCandidate(val)) continue;
+
+    let score = 0.6;
+    let reason = 'header-pattern';
+
+    const context = getContext(t, val);
+
+    if (/rechnungsnummer|rechnungsnr|rechnung\s*nr|invoice\s*no|invoice\s*number|belegnummer|belegnr|referenz/i.test(line)) {
+      score = 0.92;
+      reason = 'header-label';
+    } else if (/rechnung|invoice/i.test(line)) {
+      score = 0.8;
+      reason = 'header-context';
+    }
+
+    if (/objekt|liegenschaft|kundennummer|kundenummer|kunde|auftragsnummer|bestellnummer/i.test(context)) {
+      score -= 0.45;
+      reason = 'non-invoice-context';
+    }
+
+    if (score > 0.1) {
       candidates.push({
         value: val,
-        score: 0.6,
-        reason: 'Pattern'
+        score: Math.min(1, score),
+        reason
+      });
+    }
+  }
+
+  // 4) Generische Pattern-Fallbacks
+  const generic = t.match(/\b(?:[A-Z]{1,4}[-\/]?\d{4,}|\d{6,})\b/g) || [];
+  for (const val of generic) {
+    if (isBadInvoiceCandidate(val)) continue;
+
+    const context = getContext(t, val);
+
+    let score = 0.45;
+    let reason = 'pattern';
+
+    if (/rechnungsnummer|rechnungsnr|rechnung\s*nr|invoice\s*no|invoice\s*number|belegnummer|belegnr|referenz/i.test(context)) {
+      score = 0.82;
+      reason = 'pattern-with-label';
+    }
+
+    if (/objekt|liegenschaft|kundennummer|kundenummer|kunde|auftragsnummer|bestellnummer/i.test(context)) {
+      score -= 0.4;
+      reason = 'pattern-non-invoice';
+    }
+
+    if (score > 0.1) {
+      candidates.push({
+        value: String(val).trim(),
+        score: Math.min(1, score),
+        reason
       });
     }
   }
@@ -1524,30 +1578,54 @@ function extractInvoiceNoCandidates(text, lines) {
 
 function extractAmountCandidates(text) {
   const t = String(text || '');
-
   const candidates = [];
 
-  const matches = t.match(/\d{1,3}(?:\.\d{3})*,\d{2}\s?(€|eur)?/gi) || [];
+  const matches = t.match(/\d{1,3}(?:\.\d{3})*,\d{2}\s?(?:€|eur)?/gi) || [];
 
   for (const raw of matches) {
-    const val = raw.trim();
+    const val = String(raw || '').trim();
+    if (!val) continue;
 
-    // Kontext bewerten
+    const context = getContext(t, val);
+
     let score = 0.5;
     let reason = 'generic';
 
-    const contextWindow = getContext(t, val);
-
-    if (/gesamt|summe|betrag|total|amount/i.test(contextWindow)) {
-      score = 0.95;
+    // starke Positive
+    if (/rechnungsbetrag/i.test(context)) {
+      score = 1.0;
+      reason = 'invoice-total';
+    } else if (/gesamtbetrag/i.test(context)) {
+      score = 0.96;
+      reason = 'grand-total';
+    } else if (/summe\s*brutto|gesamtbetrag\s*brutto|endbetrag|grand total|total amount/i.test(context)) {
+      score = 0.94;
+      reason = 'gross-total';
+    } else if (/gesamt|summe|betrag|total|amount/i.test(context)) {
+      score = 0.88;
       reason = 'total-context';
-    } else if (/netto/i.test(contextWindow)) {
-      score = 0.7;
+    } else if (/brutto/i.test(context)) {
+      score = 0.82;
+      reason = 'gross';
+    } else if (/netto/i.test(context)) {
+      score = 0.62;
       reason = 'net';
-    } else if (/mwst|ust|tax/i.test(contextWindow)) {
-      score = 0.6;
+    } else if (/mwst|ust|umsatzsteuer|tax|vat/i.test(context)) {
+      score = 0.42;
       reason = 'tax';
     }
+
+    // gezielte Korrekturen
+    if (/rechnungsbetrag/i.test(context)) score += 0.12;
+    if (/gesamtbetrag/i.test(context)) score += 0.10;
+    if (/brutto/i.test(context)) score += 0.08;
+
+    if (/netto/i.test(context)) score -= 0.18;
+    if (/mwst|ust|umsatzsteuer|tax|vat/i.test(context)) score -= 0.22;
+    if (/einzelbetrag|stückpreis|preis je|anzahl/i.test(context)) score -= 0.18;
+
+    // Normalisieren + Begrenzen
+    score = Math.max(0.05, Math.min(1.0, score));
 
     candidates.push({
       value: normalizeAmount(val),
@@ -1561,7 +1639,6 @@ function extractAmountCandidates(text) {
 // ═════════════════════════════════════════════════════════════
 // COMPANY CANDIDATE ENGINE
 // ═════════════════════════════════════════════════════════════
-
 function extractCompanyCandidates(text, lines) {
   const t = String(text || '');
   const cleanLines = (lines || [])
@@ -1570,32 +1647,71 @@ function extractCompanyCandidates(text, lines) {
 
   const candidates = [];
 
-  // 1️⃣ STRONG LEGAL FORM
-  const legal = t.match(/\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,80}\b(?:GmbH|AG|KG|UG|OHG|e\.K\.|GbR)\b/g) || [];
+  // 1) Label + nächste Zeile, z. B.:
+  // Firma
+  // Arndt & Cie. Vermögensverwaltung KG
+  for (let i = 0; i < cleanLines.length - 1; i++) {
+    const line = cleanLines[i];
+    const next = cleanLines[i + 1];
 
-  for (const val of legal) {
+    if (/^(firma|unternehmen|rechnungsempfänger|auftraggeber)$/i.test(line)) {
+      if (
+        next &&
+        next.length > 3 &&
+        !/^\d/.test(next) &&
+        !isBadSummaryLine(next)
+      ) {
+        candidates.push({
+          value: next.trim(),
+          score: 0.98,
+          reason: 'label-next-line'
+        });
+      }
+    }
+  }
+
+  // 2) Starke Firmenformen im gesamten Text
+  const legalMatches =
+    t.match(/\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,120}\b(?:GmbH|AG|KG|UG|OHG|e\.K\.|GbR|SE)\b/g) || [];
+
+  for (const val of legalMatches) {
+    const cleaned = String(val || '').trim();
+    if (!cleaned) continue;
+
     candidates.push({
-      value: val.trim(),
+      value: cleaned,
       score: 0.95,
       reason: 'legal-form'
     });
   }
 
-  // 2️⃣ HEADER (erste Zeilen extrem wichtig)
-  for (let i = 0; i < Math.min(cleanLines.length, 10); i++) {
+  // 3) Kopfbereich prüfen
+  for (let i = 0; i < Math.min(cleanLines.length, 12); i++) {
     const line = cleanLines[i];
 
-    if (
-      line.length > 5 &&
-      !isBadSummaryLine(line) &&
-      !/\d{2,}/.test(line)
-    ) {
-      candidates.push({
-        value: line,
-        score: 0.7,
-        reason: 'header'
-      });
+    if (!line) continue;
+    if (isBadSummaryLine(line)) continue;
+    if (/^\d/.test(line)) continue;
+    if (/rechnung|invoice|angebot|gutschrift|mahnung|abrechnung/i.test(line)) continue;
+    if (/^(firma|unternehmen|rechnungsempfänger|auftraggeber)$/i.test(line)) continue;
+    if (/kundencenter|kontakt|telefon|fax|e-mail|homepage|www\.|ust-id|iban|bic/i.test(line)) continue;
+
+    let score = 0.65;
+    let reason = 'header';
+
+    if (/\b(gmbh|ag|kg|ug|ohg|e\.k\.|gbr|se)\b/i.test(line)) {
+      score = 0.9;
+      reason = 'header-legal-form';
+    } else if (/&|verwaltung|immobilien|holding|service|services/i.test(line)) {
+      score = 0.78;
+      reason = 'header-company-like';
     }
+
+    candidates.push({
+      value: line.trim(),
+      score,
+      reason
+    });
   }
 
   return dedupeCandidates(candidates);
