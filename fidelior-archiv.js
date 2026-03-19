@@ -1134,6 +1134,7 @@ function fallbackInsightsFromArchive(file) {
   };
 }
 
+
 async function buildDocumentInsights(file) {
   if (!file?.name) return fallbackInsightsFromArchive(file);
 
@@ -1144,141 +1145,174 @@ async function buildDocumentInsights(file) {
   const rec = await loadIndexedDocumentRecord(file);
   const pdf = await extractPdfTextInsights(file);
 
+  // ── Sanitize helpers ──
+  // Prevent raw label words from leaking into the company field
+  function sanitizeCompany(val) {
+    if (!val) return '';
+    const v = String(val).trim();
+    if (/^(?:firma|lieferant|absender|rechnungsaussteller|kreditor|auftragnehmer|vendor|supplier|from)$/i.test(v)) return '';
+    if (v.length < 3) return '';
+    return v;
+  }
+
+  // Combine and resolve a field from multiple candidate sources
+  function resolve(...candidateSets) {
+    const merged = [].concat(...candidateSets.filter(Array.isArray));
+    return resolveField(merged);
+  }
+
+  // For fields where we want any non-empty value (no strict confidence gate)
+  function firstValue(...vals) {
+    for (const v of vals) {
+      const s = String(v || '').trim();
+      if (s) return s;
+    }
+    return '';
+  }
+
   let out;
 
+  // ══════════════════════════════════════════
+  // PATH A: Indexed document record available
+  // ══════════════════════════════════════════
   if (rec) {
-    out = {
-   title:
-  rec.title ||
-  rec.dashboard?.title ||
-  archiveFallback.title,
+    // Amount: prefer PDF candidates (context-aware) over record's flat amount string
+    const amountResolved = resolve(
+      pdf?.amountCandidates,
+      pdf?.grossAmount ? [{ value: pdf.grossAmount, score: 0.78, reason: 'pdf-gross' }] : [],
+      rec.amountRaw    ? [{ value: rec.amountRaw,   score: 0.58, reason: 'rec-raw'   }] : []
+    );
 
-   summary:
-  pdf?.summary ||
-  rec.dashboard?.summary ||
-  archiveFallback.summary ||
-  rec.serviceDesc,
+    // Invoice no: rec (trusted index) > PDF candidates > PDF fallback
+    const invoiceResolved = resolve(
+      rec.invoiceNo   ? [{ value: rec.invoiceNo, score: 0.96, reason: 'rec-index'  }] : [],
+      pdf?.invoiceCandidates,
+      pdf?.invoiceNo  ? [{ value: pdf.invoiceNo, score: 0.68, reason: 'pdf-fallbk' }] : [],
+      archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.28, reason: 'archive' }] : []
+    );
+
+    // Invoice date: PDF candidates (context-aware) > PDF date > rec date
+    const dateResolved = resolve(
+      pdf?.dateCandidates,
+      pdf?.invoiceDate  ? [{ value: pdf.invoiceDate,  score: 0.78, reason: 'pdf-date'  }] : [],
+      rec.invoiceDate   ? [{ value: rec.invoiceDate,  score: 0.58, reason: 'rec-date'  }] : []
+    );
+
+    // Company: PDF label-based candidates (score ≥ 0.99) beat everything;
+    // rec.sender used as fallback only
+    const companyResolved = resolve(
+      pdf?.companyCandidates,
+      pdf?.company ? [{ value: pdf.company, score: 0.72, reason: 'pdf-company' }] : [],
+      rec.sender   ? [{ value: rec.sender,   score: 0.55, reason: 'rec-sender'  }] : []
+    );
+
+    out = {
+      title: firstValue(
+        rec.title,
+        rec.dashboard?.title,
+        archiveFallback.title
+      ),
+
+      summary: firstValue(
+        pdf?.summary,
+        rec.dashboard?.summary,
+        archiveFallback.summary,
+        rec.serviceDesc
+      ),
 
       keywords: uniqLower([
-        ...(rec.keywords || []),
+        ...(rec.keywords  || []),
         ...(pdf?.keywords || []),
         ...(archiveFallback.keywords || [])
       ]),
 
       emails: uniqLower([
         ...(Array.isArray(rec.emailsFound) ? rec.emailsFound : []),
-        ...(rec.email ? [rec.email] : []),
-        ...(pdf?.emails || [])
+        ...(rec.email      ? [rec.email]      : []),
+        ...(pdf?.emails    || [])
       ]),
-   documentKind:
-  pdf?.ai?.type ||
-  pdf?.documentKind ||
-  detectDocumentKindFromText(`${rec.title || ''} ${rec.serviceDesc || ''}`) ||
-  archiveFallback.documentKind ||
-  '',
-      dueDate:
-        rec.dueDate ||
-        pdf?.dueDate ||
-        archiveFallback.dueDate ||
-        '',
 
-   invoiceNo: resolveField([
-  ...(rec.invoiceNo ? [{ value: rec.invoiceNo, score: 0.95, source: 'rec' }] : []),
-  ...(pdf?.invoiceCandidates || []),
-  ...(pdf?.invoiceNo ? [{ value: pdf.invoiceNo, score: 0.7, source: 'pdf_fallback' }] : []),
-  ...(archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.3, source: 'archive' }] : [])
-]).value,
+      documentKind: firstValue(
+        pdf?.ai?.type,
+        pdf?.documentKind,
+        detectDocumentKindFromText(`${rec.title || ''} ${rec.serviceDesc || ''}`),
+        archiveFallback.documentKind
+      ),
 
-   invoiceDate: resolveField([
-  ...(pdf?.dateCandidates || []),
-  ...(pdf?.invoiceDate ? [{ value: pdf.invoiceDate, score: 0.8, source: 'pdf' }] : []),
-  ...(rec.invoiceDate ? [{ value: rec.invoiceDate, score: 0.6, source: 'rec' }] : [])
-]).value,
+      dueDate: firstValue(rec.dueDate, pdf?.dueDate, archiveFallback.dueDate),
 
-      customerNo:
-        pdf?.customerNo ||
-        '',
+      invoiceNo:   invoiceResolved.value,
+      invoiceDate: dateResolved.value,
 
-      orderNo:
-        pdf?.orderNo ||
-        '',
+      customerNo:    firstValue(pdf?.customerNo),
+      orderNo:       firstValue(pdf?.orderNo),
+      propertyNo:    firstValue(pdf?.propertyNo),
+      servicePeriod: firstValue(pdf?.servicePeriod),
 
-      propertyNo:
-        pdf?.propertyNo ||
-        '',
+      grossAmount: amountResolved.value,
+      netAmount:   firstValue(pdf?.netAmount),
+      taxAmount:   firstValue(pdf?.taxAmount),
 
-      servicePeriod:
-        pdf?.servicePeriod ||
-        '',
+      iban:  firstValue(rec.iban, pdf?.iban, archiveFallback.iban),
+      bic:   firstValue(pdf?.bic),
+      ustId: firstValue(rec.ustId, pdf?.ustId, archiveFallback.ustId),
 
-  grossAmount: resolveField([
-  ...(pdf?.amountCandidates || []),
-  ...(pdf?.grossAmount ? [{ value: pdf.grossAmount, score: 0.8, source: 'pdf' }] : []),
-  ...(rec.amountRaw ? [{ value: rec.amountRaw, score: 0.6, source: 'rec' }] : [])
-]).value,
-
-      netAmount:
-        pdf?.netAmount ||
-        '',
-
-      taxAmount:
-        pdf?.taxAmount ||
-        '',
-
-      iban:
-        rec.iban ||
-        pdf?.iban ||
-        archiveFallback.iban ||
-        '',
-
-      bic:
-        pdf?.bic ||
-        '',
-
-      ustId:
-        rec.ustId ||
-        pdf?.ustId ||
-        archiveFallback.ustId ||
-        '',
-
-   company: resolveField([
-  ...(pdf?.companyCandidates || []),
-  ...(pdf?.company ? [{ value: pdf.company, score: 0.8, source: 'pdf' }] : []),
-  ...(rec.sender ? [{ value: rec.sender, score: 0.6, source: 'rec' }] : [])
-]).value,
-
-      recipient:
-        pdf?.recipient ||
-        '',
-
-      subjectLine:
-        pdf?.subjectLine ||
-        '',
-
-      services:
-        pdf?.services || [],
+      company:    sanitizeCompany(companyResolved.value),
+      recipient:  firstValue(pdf?.recipient),
+      subjectLine: firstValue(pdf?.subjectLine),
+      services:   pdf?.services || [],
 
       importantFacts: buildImportantFactsFromPdf(pdf || {}, {
         importantFacts: uniqLower([
-          rec.sender ? `Absender: ${rec.sender}` : '',
-          rec.amountRaw ? `Betrag: ${rec.amountRaw}` : '',
+          rec.sender      ? `Absender: ${rec.sender}` : '',
+          rec.amountRaw   ? `Betrag: ${rec.amountRaw}` : '',
           rec.invoiceDate ? `Belegdatum: ${fmtDate(rec.invoiceDate)}` : '',
-          rec.invoiceNo ? `Referenz: ${rec.invoiceNo}` : '',
-          rec.objectCode ? `Objekt: ${rec.objectCode}` : '',
+          rec.invoiceNo   ? `Referenz: ${rec.invoiceNo}` : '',
+          rec.objectCode  ? `Objekt: ${rec.objectCode}` : '',
           ...(archiveFallback.importantFacts || [])
         ])
       }),
 
+      // Candidate arrays for external consumers / debug
+      invoiceCandidates: pdf?.invoiceCandidates || [],
+      amountCandidates:  pdf?.amountCandidates  || [],
+      companyCandidates: pdf?.companyCandidates  || [],
+      dateCandidates:    pdf?.dateCandidates     || [],
+
+      invoiceConfidence: invoiceResolved.confidence || 'low',
+      amountConfidence:  amountResolved.confidence  || 'low',
+      companyConfidence: companyResolved.confidence || 'low',
+      dateConfidence:    dateResolved.confidence    || 'low',
+
       source: pdf ? 'document-index+pdf' : 'document-index'
     };
-  } else if (pdf) {
-    out = {
-      title:
-        archiveFallback.title,
 
-      summary:
-        pdf.summary ||
-        archiveFallback.summary,
+  // ══════════════════════════════════════════
+  // PATH B: PDF only (no indexed record)
+  // ══════════════════════════════════════════
+  } else if (pdf) {
+    const amountResolved  = resolve(
+      pdf.amountCandidates,
+      pdf.grossAmount ? [{ value: pdf.grossAmount, score: 0.78, reason: 'pdf-gross' }] : []
+    );
+    const invoiceResolved = resolve(
+      pdf.invoiceCandidates,
+      pdf.invoiceNo ? [{ value: pdf.invoiceNo, score: 0.72, reason: 'pdf-fallbk' }] : [],
+      archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.28, reason: 'archive' }] : []
+    );
+    const dateResolved    = resolve(
+      pdf.dateCandidates,
+      pdf.invoiceDate ? [{ value: pdf.invoiceDate, score: 0.78, reason: 'pdf-date' }] : []
+    );
+    const companyResolved = resolve(
+      pdf.companyCandidates,
+      pdf.company ? [{ value: pdf.company, score: 0.72, reason: 'pdf-company' }] : []
+    );
+
+    out = {
+      title: archiveFallback.title,
+
+      summary: firstValue(pdf.summary, archiveFallback.summary),
 
       keywords: uniqLower([
         ...(pdf.keywords || []),
@@ -1289,89 +1323,54 @@ async function buildDocumentInsights(file) {
         ...(pdf.emails || []),
         ...(archiveFallback.emails || [])
       ]),
-   documentKind:
-  pdf?.ai?.type ||
-  pdf.documentKind ||
-  archiveFallback.documentKind ||
-  '',
-      dueDate:
-        pdf.dueDate ||
-        archiveFallback.dueDate ||
-        '',
 
-  invoiceNo: resolveField([
-  ...(pdf?.invoiceCandidates || []),
-  ...(pdf?.invoiceNo ? [{ value: pdf.invoiceNo, score: 0.8, source: 'pdf' }] : []),
-  ...(archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.3, source: 'archive' }] : [])
-]).value,
+      documentKind: firstValue(
+        pdf?.ai?.type,
+        pdf.documentKind,
+        archiveFallback.documentKind
+      ),
 
-   invoiceDate: resolveField([
-  ...(pdf?.dateCandidates || []),
-  ...(pdf?.invoiceDate ? [{ value: pdf.invoiceDate, score: 0.8, source: 'pdf' }] : [])
-]).value,
+      dueDate: firstValue(pdf.dueDate, archiveFallback.dueDate),
 
-      customerNo:
-        pdf.customerNo ||
-        '',
+      invoiceNo:   invoiceResolved.value,
+      invoiceDate: dateResolved.value,
 
-      orderNo:
-        pdf.orderNo ||
-        '',
+      customerNo:    firstValue(pdf.customerNo),
+      orderNo:       firstValue(pdf.orderNo),
+      propertyNo:    firstValue(pdf.propertyNo),
+      servicePeriod: firstValue(pdf.servicePeriod),
 
-      propertyNo:
-        pdf.propertyNo ||
-        '',
+      grossAmount: amountResolved.value,
+      netAmount:   firstValue(pdf.netAmount),
+      taxAmount:   firstValue(pdf.taxAmount),
 
-      servicePeriod:
-        pdf.servicePeriod ||
-        '',
+      iban:  firstValue(pdf.iban, archiveFallback.iban),
+      bic:   firstValue(pdf.bic),
+      ustId: firstValue(pdf.ustId, archiveFallback.ustId),
 
-  grossAmount: resolveField([
-  ...(pdf?.amountCandidates || []),
-  ...(pdf?.grossAmount ? [{ value: pdf.grossAmount, score: 0.8, source: 'pdf' }] : [])
-]).value,
-
-      netAmount:
-        pdf.netAmount ||
-        '',
-
-      taxAmount:
-        pdf.taxAmount ||
-        '',
-
-      iban:
-        pdf.iban ||
-        archiveFallback.iban ||
-        '',
-
-      bic:
-        pdf.bic ||
-        '',
-
-      ustId:
-        pdf.ustId ||
-        archiveFallback.ustId ||
-        '',
-
- company: resolveField([
-  ...(pdf?.companyCandidates || []),
-  ...(pdf?.company ? [{ value: pdf.company, score: 0.8, source: 'pdf' }] : [])
-]).value,
-
-      recipient:
-        pdf.recipient ||
-        '',
-
-      subjectLine:
-        pdf.subjectLine ||
-        '',
-
-      services:
-        pdf.services || [],
+      company:     sanitizeCompany(companyResolved.value),
+      recipient:   firstValue(pdf.recipient),
+      subjectLine: firstValue(pdf.subjectLine),
+      services:    pdf.services || [],
 
       importantFacts: buildImportantFactsFromPdf(pdf, archiveFallback),
+
+      invoiceCandidates: pdf.invoiceCandidates || [],
+      amountCandidates:  pdf.amountCandidates  || [],
+      companyCandidates: pdf.companyCandidates  || [],
+      dateCandidates:    pdf.dateCandidates     || [],
+
+      invoiceConfidence: invoiceResolved.confidence || 'low',
+      amountConfidence:  amountResolved.confidence  || 'low',
+      companyConfidence: companyResolved.confidence || 'low',
+      dateConfidence:    dateResolved.confidence    || 'low',
+
       source: 'pdf'
     };
+
+  // ══════════════════════════════════════════
+  // PATH C: No PDF, no index → archive fallback
+  // ══════════════════════════════════════════
   } else {
     out = archiveFallback;
   }
@@ -1379,6 +1378,7 @@ async function buildDocumentInsights(file) {
   __av3InsightCache.set(cacheKey, out);
   return out;
 }
+
 function esc(v) {
   return String(v == null ? '' : v)
     .replace(/&/g, '&amp;')
@@ -1466,389 +1466,425 @@ function extractInvoiceNoFromText(text, lines) {
 }
 function extractInvoiceNoCandidates(text, lines) {
   const t = String(text || '');
-  const cleanLines = (lines || [])
-    .map(l => String(l || '').trim())
-    .filter(Boolean);
-
+  const cleanLines = (lines || []).map(l => String(l || '').trim()).filter(Boolean);
   const candidates = [];
 
-  // 1) Starke Label-Treffer
-  const labelPatterns = [
-    /\b(rechnungsnummer|rechnungsnr\.?|rechnung\s*nr\.?|invoice\s*no\.?|invoice\s*number|belegnummer|belegnr\.?|referenz)\b\s*[:\-]?\s*([A-Z0-9\-\/]{4,})/i
-  ];
+  // ── Contexts that disqualify a value from being a Rechnungsnummer ──
+  const NON_INVOICE_CTX = /\b(?:kundennr?\.?|kundennummer|customer[\s\-]*(?:no\.?|number|id)|auftragsnr?\.?|auftragsnummer|bestellnr?\.?|bestellnummer|objektnr?\.?|objektnummer|projektnr?\.?|projektnummer|vertragsnr?\.?|vertragsnummer|angebotsnr?\.?|angebotsnummer|liegenschaftsnr?\.?|debitorennr?\.?|lieferantennr?\.?|sachkonto|kostenstelle)\b/i;
 
-  for (const rx of labelPatterns) {
-    const m = t.match(rx);
-    if (m && m[2] && !isBadInvoiceCandidate(m[2])) {
-      candidates.push({
-        value: m[2].trim(),
-        score: 1.0,
-        reason: 'strong-label'
-      });
-    }
+  // ── Strong invoice-number label context ──
+  const INVOICE_LABEL = /\b(?:rechnungsnr?\.?|rechnungsnummer|rechnung(?:\s*nr\.?|\s*no\.?|\s*#)?|invoice[\s\-]*(?:no\.?|number|#)|belegnr?\.?|belegnummer)\b/i;
+
+  // ── Weak / secondary label context ──
+  const INVOICE_WEAK_LABEL = /\b(?:referenz(?:nr?\.?|nummer)?|re\.?\s*nr\.?|dokument(?:en)?nr?\.?|vorgangsnr?\.?|our\s*ref\.?|your\s*ref\.?)\b/i;
+
+  // ── Value-level bad-value guard ──
+  function isBadValue(val) {
+    if (!val) return true;
+    const v = String(val).trim();
+
+    if (v.length < 3 || v.length > 32) return true;
+
+    // Date pattern
+    if (/\d{2}[.\-\/]\d{2}[.\-\/]\d{2,4}/.test(v)) return true;
+
+    // Amount: comma-decimal
+    if (/\d+,\d{2}$/.test(v)) return true;
+
+    // IBAN prefix
+    if (/^[A-Z]{2}\d{2}/.test(v)) return true;
+
+    // Bank/account keywords
+    if (/iban|bic|konto|bank/i.test(v)) return true;
+
+    // Pure 4-digit year
+    if (/^\d{4}$/.test(v) && +v >= 1990 && +v <= 2099) return true;
+
+    // Postal code (5 digits)
+    if (/^\d{5}$/.test(v)) return true;
+
+    // Very short pure-digit (extension numbers, page numbers, etc.)
+    if (/^\d{1,4}$/.test(v)) return true;
+
+    // Looks like a phone number (many digits, no letters)
+    if (/^[\d\s\-\+\(\)\/]{9,}$/.test(v) && !/[A-Za-z]/.test(v)) return true;
+
+    // All zeros
+    if (/^0+$/.test(v)) return true;
+
+    return false;
   }
 
-  // 2) Label in einer Zeile, Wert in der nächsten Zeile
+  function getCtx(t, val) {
+    const idx = t.indexOf(val);
+    if (idx === -1) return '';
+    return t.slice(Math.max(0, idx - 100), idx + val.length + 100);
+  }
+
+  function lineIndex(val) {
+    for (let i = 0; i < cleanLines.length; i++) {
+      if (cleanLines[i].includes(val)) return i;
+    }
+    return -1;
+  }
+
+  // ── PASS 1: Label + value on SAME line (strongest signal) ──
+  // Match label followed (on same line) by an alphanumeric token
+  const SAME_LINE_RX = /\b(?:rechnungsnr?\.?|rechnungsnummer|rechnung\s*(?:nr\.?|no\.?|#)|invoice[\s\-]*(?:no\.?|number|#)|belegnr?\.?|belegnummer)\s*[:\-#]?\s*([A-Z0-9][A-Z0-9\.\-\/]{2,28})/gi;
+  let slm;
+  while ((slm = SAME_LINE_RX.exec(t)) !== null) {
+    const val = slm[1].replace(/[.\-\/]$/, '').trim(); // strip trailing separators
+    if (isBadValue(val)) continue;
+    if (NON_INVOICE_CTX.test(val)) continue;
+    candidates.push({ value: val, score: 1.0, reason: 'label-sameline' });
+  }
+
+  // ── PASS 2: Label on its own line → value on NEXT line ──
+  const LABEL_ONLY_RX = /^(?:rechnungsnr?\.?|rechnungsnummer|rechnung\s*(?:nr\.?|no\.?|#)|invoice[\s\-]*(?:no\.?|number|#)|belegnr?\.?|belegnummer)\s*[:\-#]?\s*$/i;
   for (let i = 0; i < cleanLines.length - 1; i++) {
-    const line = cleanLines[i];
+    if (!LABEL_ONLY_RX.test(cleanLines[i])) continue;
     const next = cleanLines[i + 1];
-
-    if (/\b(rechnungsnummer|rechnungsnr\.?|rechnung\s*nr\.?|invoice\s*no\.?|invoice\s*number|belegnummer|belegnr\.?|referenz)\b/i.test(line)) {
-      const m = String(next || '').match(/\b([A-Z0-9\-\/]{4,})\b/);
-      if (m && m[1] && !isBadInvoiceCandidate(m[1])) {
-        candidates.push({
-          value: m[1].trim(),
-          score: 0.96,
-          reason: 'label-next-line'
-        });
-      }
-    }
+    // Value on next line: take the first alphanumeric token
+    const nm = next.match(/^([A-Z0-9][A-Z0-9\.\-\/]{2,28})(?:\s|$)/i);
+    if (!nm) continue;
+    const val = nm[1].replace(/[.\-\/]$/, '').trim();
+    if (isBadValue(val)) continue;
+    if (NON_INVOICE_CTX.test(next)) continue;
+    candidates.push({ value: val, score: 0.97, reason: 'label-nextline' });
   }
 
-  // 3) Kopfbereich mit Kontextprüfung
-  for (let i = 0; i < Math.min(cleanLines.length, 20); i++) {
-    const line = cleanLines[i];
-    const m = line.match(/\b([A-Z0-9\-\/]{5,})\b/);
-    if (!m || !m[1]) continue;
-
-    const val = m[1].trim();
-    if (isBadInvoiceCandidate(val)) continue;
-
-    let score = 0.6;
-    let reason = 'header-pattern';
-
-    const context = getContext(t, val);
-
-    if (/rechnungsnummer|rechnungsnr|rechnung\s*nr|invoice\s*no|invoice\s*number|belegnummer|belegnr|referenz/i.test(line)) {
-      score = 0.92;
-      reason = 'header-label';
-    } else if (/rechnung|invoice/i.test(line)) {
-      score = 0.8;
-      reason = 'header-context';
-    }
-
-    if (/objekt|liegenschaft|kundennummer|kundenummer|kunde|auftragsnummer|bestellnummer/i.test(context)) {
-      score -= 0.45;
-      reason = 'non-invoice-context';
-    }
-
-    if (score > 0.1) {
-      candidates.push({
-        value: val,
-        score: Math.min(1, score),
-        reason
-      });
-    }
+  // ── PASS 3: Weak label (Referenz etc.) same-line ──
+  const WEAK_SAME_RX = /\b(?:referenz(?:nr?\.?|nummer)?|re\.?\s*nr\.?|dokument(?:en)?nr?\.?\s*(?:nr\.?)?|vorgangsnr?\.?)\s*[:\-#]?\s*([A-Z0-9][A-Z0-9\.\-\/]{2,28})/gi;
+  let wsm;
+  while ((wsm = WEAK_SAME_RX.exec(t)) !== null) {
+    const val = wsm[1].replace(/[.\-\/]$/, '').trim();
+    if (isBadValue(val)) continue;
+    if (NON_INVOICE_CTX.test(getCtx(t, val))) continue;
+    candidates.push({ value: val, score: 0.74, reason: 'weak-label-sameline' });
   }
 
-  // 4) Generische Pattern-Fallbacks
-  const generic = t.match(/\b(?:[A-Z]{1,4}[-\/]?\d{4,}|\d{6,})\b/g) || [];
-  for (const val of generic) {
-    if (isBadInvoiceCandidate(val)) continue;
+  // ── PASS 4: Pattern scan across the full text (context-scored) ──
+  // Typical invoice number patterns: letter prefix + digits, or long digit strings
+  const PATTERN_RX = /\b([A-Z]{1,5}[-\/]?(?:20\d{2}[-\/])?\d{4,}(?:[-\/][A-Z0-9]{1,6})?|\d{4,}[-\/][A-Z]{1,5}|\d{7,})\b/g;
+  let pm;
+  while ((pm = PATTERN_RX.exec(t)) !== null) {
+    const val = pm[1];
+    if (isBadValue(val)) continue;
 
-    const context = getContext(t, val);
+    const ctx = getCtx(t, val);
 
-    let score = 0.45;
-    let reason = 'pattern';
+    // Hard skip: clearly in non-invoice context
+    if (NON_INVOICE_CTX.test(ctx)) continue;
 
-    if (/rechnungsnummer|rechnungsnr|rechnung\s*nr|invoice\s*no|invoice\s*number|belegnummer|belegnr|referenz/i.test(context)) {
-      score = 0.82;
-      reason = 'pattern-with-label';
+    let score = 0.38;
+    let reason = 'pattern-generic';
+
+    if (INVOICE_LABEL.test(ctx)) {
+      score = 0.88;
+      reason = 'pattern-invoice-ctx';
+    } else if (INVOICE_WEAK_LABEL.test(ctx)) {
+      score = 0.66;
+      reason = 'pattern-weak-ctx';
     }
 
-    if (/objekt|liegenschaft|kundennummer|kundenummer|kunde|auftragsnummer|bestellnummer/i.test(context)) {
-      score -= 0.4;
-      reason = 'pattern-non-invoice';
-    }
+    // Position bonus: header zone (first 20 lines)
+    const li = lineIndex(val);
+    if (li >= 0 && li < 20) score = Math.min(1.0, score + 0.06);
 
-    if (score > 0.1) {
-      candidates.push({
-        value: String(val).trim(),
-        score: Math.min(1, score),
-        reason
-      });
-    }
+    // Only emit if worth considering
+    if (score < 0.40) continue;
+
+    candidates.push({ value: val.trim(), score, reason });
   }
 
   return dedupeCandidates(candidates);
 }
+
 // ═════════════════════════════════════════════════════════════
 // AMOUNT CANDIDATE ENGINE
 // ═════════════════════════════════════════════════════════════
 
-function extractAmountCandidates(text) {
+function extractDateCandidates(text, lines) {
   const t = String(text || '');
+  const cleanLines = (lines || []).map(l => String(l || '').trim()).filter(Boolean);
   const candidates = [];
 
-  const matches = t.match(/\d{1,3}(?:\.\d{3})*,\d{2}\s?(?:€|eur)?/gi) || [];
+  // ── Validation ──
+  function validDate(d, mo, y) {
+    return d >= 1 && d <= 31 && mo >= 1 && mo <= 12 && y >= 1990 && y <= 2050;
+  }
 
-  for (const raw of matches) {
-    const val = String(raw || '').trim();
-    if (!val) continue;
+  function parseDE(val) {
+    const m = String(val).match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (!m) return null;
+    const [, ds, ms, ys] = m;
+    const d = +ds, mo = +ms, y = +ys;
+    if (!validDate(d, mo, y)) return null;
+    return `${String(d).padStart(2,'0')}.${String(mo).padStart(2,'0')}.${y}`;
+  }
 
-    const context = getContext(t, val);
+  function parseISO(val) {
+    const m = String(val).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    const [, ys, ms, ds] = m;
+    const d = +ds, mo = +ms, y = +ys;
+    if (!validDate(d, mo, y)) return null;
+    return `${String(d).padStart(2,'0')}.${String(mo).padStart(2,'0')}.${y}`;
+  }
 
-    let score = 0.5;
-    let reason = 'generic';
+  const MONTH_NAMES = {
+    januar:'01', januar:'01', february:'02', februar:'02',
+    'märz':'03', maerz:'03', march:'03', april:'04',
+    mai:'05', may:'05', juni:'06', june:'06',
+    juli:'07', july:'07', august:'08', september:'09',
+    oktober:'10', october:'10', november:'11', dezember:'12', december:'12'
+  };
 
-    // starke Positive
-    if (/rechnungsbetrag/i.test(context)) {
-      score = 1.0;
-      reason = 'invoice-total';
-    } else if (/gesamtbetrag/i.test(context)) {
-      score = 0.96;
-      reason = 'grand-total';
-    } else if (/summe\s*brutto|gesamtbetrag\s*brutto|endbetrag|grand total|total amount/i.test(context)) {
-      score = 0.94;
-      reason = 'gross-total';
-    } else if (/gesamt|summe|betrag|total|amount/i.test(context)) {
-      score = 0.88;
-      reason = 'total-context';
-    } else if (/brutto/i.test(context)) {
-      score = 0.82;
-      reason = 'gross';
-    } else if (/netto/i.test(context)) {
-      score = 0.62;
-      reason = 'net';
-    } else if (/mwst|ust|umsatzsteuer|tax|vat/i.test(context)) {
-      score = 0.42;
-      reason = 'tax';
+  function parseWritten(val) {
+    const m = String(val).match(/^(\d{1,2})\s*\.?\s*(Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember|January|February|March|June|July|August|September|October|November|December)\s+(\d{4})$/i);
+    if (!m) return null;
+    const d = +m[1];
+    const mo = MONTH_NAMES[m[2].toLowerCase()];
+    const y = +m[3];
+    if (!mo || !validDate(d, +mo, y)) return null;
+    return `${String(d).padStart(2,'0')}.${mo}.${y}`;
+  }
+
+  function leftCtx(t, idx, n) {
+    return t.slice(Math.max(0, idx - n), idx);
+  }
+
+  function isDueDateCtx(lc) {
+    return /\b(?:fällig(?:\s*am)?|faellig(?:\s*am)?|zahlbar\s*bis|zahlungsziel|due\s*(?:date|on|by)?|frist)\b/i.test(lc);
+  }
+
+  function isServiceDateCtx(lc) {
+    return /\b(?:leistungsdatum|leistungszeitraum|abrechnungszeitraum|berechnet\s*(?:am|vom))\b/i.test(lc);
+  }
+
+  function isInvoiceDateCtx(lc) {
+    return /\b(?:rechnungsdatum|belegdatum|invoice\s*date|datum\s*der\s*rechnung)\b/i.test(lc);
+  }
+
+  function isDatumCtx(lc) {
+    return /(?:^|\s)datum\s*[:\-]?\s*$/i.test(lc.trimEnd());
+  }
+
+  // ── PASS 1: Strong label + date on SAME line ──
+  const INVOICE_DATE_SAME = /\b(?:rechnungsdatum|belegdatum|invoice\s*date|datum\s*der\s*rechnung)\s*[:\-]?\s*(\d{1,2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})/gi;
+  let idm;
+  while ((idm = INVOICE_DATE_SAME.exec(t)) !== null) {
+    const parsed = parseDE(idm[1]) || parseISO(idm[1]);
+    if (parsed) candidates.push({ value: parsed, score: 1.0, reason: 'invoice-date-sameline' });
+  }
+
+  // ── PASS 2: "Datum:" label + date on same line ──
+  const DATUM_SAME = /(?:^|\s)datum\s*[:\-]?\s*(\d{1,2}\.\d{2}\.\d{4})/gi;
+  let dsm;
+  while ((dsm = DATUM_SAME.exec(t)) !== null) {
+    const parsed = parseDE(dsm[1]);
+    if (parsed) candidates.push({ value: parsed, score: 0.88, reason: 'datum-sameline' });
+  }
+
+  // ── PASS 3: Label on its own line → date on next line ──
+  const DATE_LABEL_ONLY = /^(?:rechnungsdatum|belegdatum|invoice\s*date|datum)\s*[:\-.]?\s*$/i;
+  for (let i = 0; i < cleanLines.length - 1; i++) {
+    if (!DATE_LABEL_ONLY.test(cleanLines[i])) continue;
+    const next = cleanLines[i + 1];
+    const parsed = parseDE(next) || parseISO(next);
+    if (parsed) candidates.push({ value: parsed, score: 0.97, reason: 'date-label-nextline' });
+  }
+
+  // ── PASS 4: Written dates (e.g. "15. Januar 2025") ──
+  const WRITTEN_RX = /\b(\d{1,2})\s*\.?\s*(Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember|January|February|March|June|July|August|September|October|November|December)\s+(\d{4})\b/gi;
+  let wm;
+  while ((wm = WRITTEN_RX.exec(t)) !== null) {
+    const parsed = parseWritten(wm[0].trim());
+    if (!parsed) continue;
+    const lc = leftCtx(t, wm.index, 100);
+    let score = 0.70;
+    if (isInvoiceDateCtx(lc)) score = 0.95;
+    else if (isDatumCtx(lc)) score = 0.86;
+    else if (isServiceDateCtx(lc)) score = 0.62;
+    else if (isDueDateCtx(lc)) score = 0.32;
+    candidates.push({ value: parsed, score, reason: 'written-date' });
+  }
+
+  // ── PASS 5: Service date labels (lower priority) ──
+  const SERVICE_DATE_RX = /\b(?:leistungsdatum|berechnet\s*am)\s*[:\-]?\s*(\d{1,2}\.\d{2}\.\d{4})/gi;
+  let sm;
+  while ((sm = SERVICE_DATE_RX.exec(t)) !== null) {
+    const parsed = parseDE(sm[1]);
+    if (parsed) candidates.push({ value: parsed, score: 0.58, reason: 'service-date' });
+  }
+
+  // ── PASS 6: Due-date labels (do NOT use as invoice date, keep separate context for dueDate extraction) ──
+  // We include these at low score so they are not chosen as the invoice date.
+  const DUE_DATE_RX = /\b(?:fällig(?:\s*am)?|faellig(?:\s*am)?|zahlbar\s*bis|zahlungsziel\s*(?:bis)?|due\s*(?:date|on|by)?)\s*[:\-]?\s*(\d{1,2}\.\d{2}\.\d{4})/gi;
+  let udm;
+  while ((udm = DUE_DATE_RX.exec(t)) !== null) {
+    const parsed = parseDE(udm[1]);
+    if (parsed) candidates.push({ value: parsed, score: 0.28, reason: 'due-date' });
+  }
+
+  // ── PASS 7: Generic German dates across all text (context-scored) ──
+  const GEN_DE_RX = /\b(\d{1,2}\.\d{2}\.\d{4})\b/g;
+  let gm;
+  while ((gm = GEN_DE_RX.exec(t)) !== null) {
+    const raw = gm[1];
+    const parsed = parseDE(raw);
+    if (!parsed) continue;
+
+    const lc = leftCtx(t, gm.index, 110);
+
+    // Skip if this is a due-date context (already captured above with lower score)
+    if (isDueDateCtx(lc)) continue;
+
+    let score = 0.44;
+    let reason = 'generic-de';
+
+    if (isInvoiceDateCtx(lc)) {
+      score = 0.95; reason = 'generic-invoice-ctx';
+    } else if (isDatumCtx(lc)) {
+      score = 0.84; reason = 'generic-datum-ctx';
+    } else if (isServiceDateCtx(lc)) {
+      score = 0.58; reason = 'generic-service-ctx';
+    } else {
+      // Header-zone bonus for generic dates
+      const li = cleanLines.findIndex(l => l.includes(raw));
+      if (li >= 0 && li < 12) score = Math.min(0.65, score + 0.14);
     }
 
-    // gezielte Korrekturen
-    if (/rechnungsbetrag/i.test(context)) score += 0.12;
-    if (/gesamtbetrag/i.test(context)) score += 0.10;
-    if (/brutto/i.test(context)) score += 0.08;
+    candidates.push({ value: parsed, score: Math.max(0.20, Math.min(1.0, score)), reason });
+  }
 
-    if (/netto/i.test(context)) score -= 0.18;
-    if (/mwst|ust|umsatzsteuer|tax|vat/i.test(context)) score -= 0.22;
-    if (/einzelbetrag|stückpreis|preis je|anzahl/i.test(context)) score -= 0.18;
-
-    // Normalisieren + Begrenzen
-    score = Math.max(0.05, Math.min(1.0, score));
-
-    candidates.push({
-      value: normalizeAmount(val),
-      score,
-      reason
-    });
+  // ── PASS 8: ISO dates ──
+  const ISO_RX = /\b(\d{4}-\d{2}-\d{2})\b/g;
+  let im;
+  while ((im = ISO_RX.exec(t)) !== null) {
+    const parsed = parseISO(im[1]);
+    if (!parsed) continue;
+    const lc = leftCtx(t, im.index, 110);
+    let score = 0.50;
+    if (isInvoiceDateCtx(lc)) score = 0.92;
+    else if (isDatumCtx(lc)) score = 0.80;
+    candidates.push({ value: parsed, score, reason: 'iso-date' });
   }
 
   return dedupeCandidates(candidates);
 }
+
+
 // ═════════════════════════════════════════════════════════════
 // COMPANY CANDIDATE ENGINE
 // ═════════════════════════════════════════════════════════════
 function extractCompanyCandidates(text, lines) {
   const t = String(text || '');
-  const cleanLines = (lines || [])
-    .map(l => String(l || '').trim())
-    .filter(Boolean);
-
+  const cleanLines = (lines || []).map(l => String(l || '').trim()).filter(Boolean);
   const candidates = [];
 
-  // 1) Label + nächste Zeile, z. B.:
-  // Firma
-  // Arndt & Cie. Vermögensverwaltung KG
+  // ── Label words that signal "next line = company name" ──
+  const COMPANY_LABEL_ONLY_RX = /^(?:firma|lieferant|rechnungsaussteller|kreditor|absender|auftragnehmer|leistungserbringer|dienstleister|von|from|supplier|vendor)\s*[:\.\-]?\s*$/i;
+
+  // ── Inline label: "Firma: XY GmbH" ──
+  const COMPANY_LABEL_INLINE_RX = /\b(?:firma|lieferant|rechnungsaussteller|kreditor|absender|auftragnehmer|leistungserbringer)\s*[:\-]\s*(.{3,120})/i;
+
+  // ── Lines that can NEVER be a company name ──
+  const DISQUALIFY_RX = /\b(?:rechnung|invoice|angebot|gutschrift|mahnung|abrechnung|lieferung|bestellung|beleg|quittung|storno|seite\s*\d|page\s*\d|mwst|ust|steuer(?:nr|nummer|id)?|bank(?:verbindung)?|iban|bic|tel\.?|telefon|fax|mobil|www\.|\.(?:de|com|eu|net|org)|gericht|handelsregister|vorstand|aufsichtsrat|prokura|amtsgericht)\b/i;
+
+  // ── Address line signals ──
+  const ADDRESS_RX = /\b(?:str(?:aße|asse)?\.?|straße|strasse|weg|allee|platz|ring|gasse|damm|ufer|chaussee)\b|\b\d{5}\s+[A-ZÄÖÜ]|\bpostfach\b/i;
+
+  // ── Legal form (strong signal) ──
+  const LEGAL_RX = /\b(?:GmbH|AG\b|KG\b|UG\b|OHG\b|GbR\b|e\.K\.|SE\b|mbH|Co\.\s*KG|Ltd\.?|S\.A\.|S\.r\.l\.)\b/;
+
+  // ── 1. Inline label match ──
+  const inlineM = t.match(COMPANY_LABEL_INLINE_RX);
+  if (inlineM && inlineM[1]) {
+    const val = inlineM[1]
+      .replace(/\s*[,;:]\s*$/, '')           // strip trailing punctuation
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    if (val.length > 2 && !DISQUALIFY_RX.test(val) && !ADDRESS_RX.test(val)) {
+      candidates.push({ value: val, score: 1.0, reason: 'label-inline' });
+    }
+  }
+
+  // ── 2. Label line → next line is company name ──
   for (let i = 0; i < cleanLines.length - 1; i++) {
     const line = cleanLines[i];
     const next = cleanLines[i + 1];
 
-    if (/^(firma|unternehmen|rechnungsempfänger|auftraggeber)$/i.test(line)) {
-      if (
-        next &&
-        next.length > 3 &&
-        !/^\d/.test(next) &&
-        !isBadSummaryLine(next)
-      ) {
-        candidates.push({
-          value: next.trim(),
-          score: 0.98,
-          reason: 'label-next-line'
-        });
-      }
-    }
+    if (!COMPANY_LABEL_ONLY_RX.test(line)) continue;
+    if (!next || next.length < 3) continue;
+    if (DISQUALIFY_RX.test(next)) continue;
+    if (ADDRESS_RX.test(next)) continue;
+    if (/^\d/.test(next)) continue;             // starts with digit → not a name
+    if (/^[A-Z0-9]{1,6}$/.test(next)) continue; // short all-caps code
+
+    candidates.push({ value: next.trim(), score: 0.99, reason: 'label-nextline' });
   }
 
-  // 2) Starke Firmenformen im gesamten Text
-  const legalMatches =
-    t.match(/\b[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,120}\b(?:GmbH|AG|KG|UG|OHG|e\.K\.|GbR|SE)\b/g) || [];
+  // ── 3. Legal-form pattern in full text ──
+  // Match: "Word Word ... GmbH" — require start with uppercase
+  const LEGAL_MATCH_RX = /\b([A-ZÄÖÜ][A-Za-zÄÖÜäöüß0-9&,.\s\-]{1,80}?)\s+(GmbH(?:\s*&\s*Co\.?\s*KG)?|AG|KG|UG(?:\s*\(haftungsbeschränkt\))?|OHG|GbR|e\.K\.|SE|mbH|Co\.\s*KG|Ltd\.?)/g;
+  let lm;
+  while ((lm = LEGAL_MATCH_RX.exec(t)) !== null) {
+    const full = (lm[1] + ' ' + lm[2]).replace(/\s{2,}/g, ' ').trim();
 
-  for (const val of legalMatches) {
-    const cleaned = String(val || '').trim();
-    if (!cleaned) continue;
+    if (full.length > 120 || full.length < 4) continue;
+    if (DISQUALIFY_RX.test(full)) continue;
+    if (ADDRESS_RX.test(full)) continue;
 
-    candidates.push({
-      value: cleaned,
-      score: 0.95,
-      reason: 'legal-form'
-    });
+    // Find position
+    const li = cleanLines.findIndex(l => l.includes(lm[1].trim()) || l.includes(full));
+    let score = 0.86;
+    if (li >= 0 && li < 4)  score = 0.95;
+    else if (li >= 0 && li < 8)  score = 0.90;
+    else if (li >= 0 && li < 14) score = 0.87;
+
+    candidates.push({ value: full, score, reason: 'legal-form' });
   }
 
-  // 3) Kopfbereich prüfen
-  for (let i = 0; i < Math.min(cleanLines.length, 12); i++) {
+  // ── 4. Header zone scan (first 10 lines, no legal form needed) ──
+  for (let i = 0; i < Math.min(cleanLines.length, 10); i++) {
     const line = cleanLines[i];
 
-    if (!line) continue;
-    if (isBadSummaryLine(line)) continue;
+    if (!line || line.length < 4 || line.length > 100) continue;
+    if (DISQUALIFY_RX.test(line)) continue;
+    if (ADDRESS_RX.test(line)) continue;
+    if (COMPANY_LABEL_ONLY_RX.test(line)) continue;  // skip pure label lines
     if (/^\d/.test(line)) continue;
-    if (/rechnung|invoice|angebot|gutschrift|mahnung|abrechnung/i.test(line)) continue;
-    if (/^(firma|unternehmen|rechnungsempfänger|auftraggeber)$/i.test(line)) continue;
-    if (/kundencenter|kontakt|telefon|fax|e-mail|homepage|www\.|ust-id|iban|bic/i.test(line)) continue;
+    if (/^[A-Z0-9\/\-\.]{2,20}$/.test(line)) continue; // short code
+    if (/@/.test(line)) continue;                         // email address in line
+    if (/\b\d{5}\b/.test(line)) continue;                 // postal code in line
 
-    let score = 0.65;
-    let reason = 'header';
+    // Reject high digit-ratio lines (reference numbers, amounts)
+    const digitCount = (line.match(/\d/g) || []).length;
+    if (digitCount / line.length > 0.30) continue;
 
-    if (/\b(gmbh|ag|kg|ug|ohg|e\.k\.|gbr|se)\b/i.test(line)) {
-      score = 0.9;
-      reason = 'header-legal-form';
-    } else if (/&|verwaltung|immobilien|holding|service|services/i.test(line)) {
-      score = 0.78;
-      reason = 'header-company-like';
+    let score = 0.58;
+    let reason = 'header-zone';
+
+    if (LEGAL_RX.test(line)) {
+      score = 0.88; reason = 'header-legal';
+    } else if (/\b(?:&|verwaltung|immobilien|holding|service(?:s)?|beratung|logistik|handel|bau|gebäude|facilit|consulting|engineering|group|GmbH|AG)\b/i.test(line)) {
+      score = 0.72; reason = 'header-company-like';
+    } else if (/[a-zäöüß]{4,}/.test(line) && line.split(/\s+/).length >= 2) {
+      // Multi-word line with genuine lowercase letters: plausible company name
+      score = 0.62; reason = 'header-multiword';
+    } else {
+      // Single word, all-uppercase or mixed short → only keep for very early lines
+      if (i >= 3) continue;
+      score = 0.56; reason = 'header-early';
     }
 
-    candidates.push({
-      value: line.trim(),
-      score,
-      reason
-    });
+    candidates.push({ value: line.trim(), score, reason });
   }
 
   return dedupeCandidates(candidates);
 }
-function getContext(text, value) {
-  const idx = text.indexOf(value);
-  if (idx === -1) return '';
 
-  return text.slice(Math.max(0, idx - 50), idx + 50);
-}
-
-function normalizeAmount(val) {
-  return val
-    .replace(/\./g, '')
-    .replace(',', '.')
-    .replace(/[^\d.]/g, '');
-}
-function isBadInvoiceCandidate(val) {
-  if (!val) return true;
-
-  const v = val.toLowerCase();
-
-  // ❌ Datum
-  if (/\d{2}[.\-\/]\d{2}[.\-\/]\d{2,4}/.test(v)) return true;
-
-  // ❌ Betrag
-  if (/\d+,\d{2}/.test(v)) return true;
-
-  // ❌ IBAN / Bank
-  if (/iban|bic|konto|bank/.test(v)) return true;
-
-  // ❌ zu lang (IBAN etc.)
-  if (val.length > 25) return true;
-
-  // ❌ zu kurz
-  if (val.length < 4) return true;
-
-  // ❌ nur Zahlen (meist falsch)
-  if (/^\d+$/.test(val)) return true;
-
-  return false;
-}
-function extractDueDateFromText(text) {
-  const rxList = [
-    /\b(?:fällig am|faellig am|zahlbar bis|due date|due on)[:\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i,
-    /\b(?:Zahlungsziel|Fälligkeit|Faelligkeit)[:\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i
-  ];
-  for (const rx of rxList) {
-    const m = String(text || '').match(rx);
-    if (m && m[1]) return m[1].trim();
-  }
-  return '';
-}
-
-function detectDocumentKindFromText(text) {
-  const t = String(text || '').toLowerCase();
-
-  if (/\bgutschrift\b/.test(t)) return 'Gutschrift';
-  if (/\bstornorechnung\b|\bstorno\b/.test(t)) return 'Storno';
-  if (/\bmahnung\b/.test(t)) return 'Mahnung';
-  if (/\bangebot\b|\boffer\b|\bofferte\b/.test(t)) return 'Angebot';
-  if (/\bversicherung\b|\bpolice\b|\bschaden\b/.test(t)) return 'Versicherung';
-  if (/\bvertrag\b|\bmietvertrag\b|\bdienstleistungsvertrag\b/.test(t)) return 'Vertrag';
-  if (/\babrechnung\b/.test(t)) return 'Abrechnung';
-  if (/\brechnung\b|\binvoice\b/.test(t)) return 'Rechnung';
-
-  return 'Dokument';
-}
-
-function extractKeywordsFromText(text, lines) {
-  const hay = String(text || '').toLowerCase();
-  const found = [];
-
-  const keywordMap = [
-    ['Versicherung', /\bversicherung\b|\bpolice\b|\bschaden\b/],
-    ['Steuer', /\bsteuer\b|\bfinanzamt\b|\bust\b|\bvat\b/],
-    ['Energie', /\bstrom\b|\bgas\b|\benergie\b|\bversorger\b/],
-    ['Wasser', /\bwasser\b|\babwasser\b/],
-    ['Telekommunikation', /\btelekom\b|\bvodafone\b|\bo2\b|\binternet\b|\bdsl\b|\bmobilfunk\b/],
-    ['Handwerker', /\breparatur\b|\bwartung\b|\bmontage\b|\belektriker\b|\bheizung\b|\bsanit/i],
-    ['Nebenkosten', /\bnebenkosten\b|\bbetriebskosten\b|\bhausgeld\b/],
-    ['Zahlung', /\bfällig\b|\bfaellig\b|\bzahlbar\b|\büberweisung\b|\bueberweisung\b/],
-    ['IBAN', /\biban\b/],
-    ['Rechnungsnummer', /\brechnungsnummer\b|\binvoice number\b|\bbelegnummer\b/]
-  ];
-
-  for (const [label, rx] of keywordMap) {
-    if (rx.test(hay)) found.push(label);
-  }
-
-  for (const line of (lines || []).slice(0, 20)) {
-    if (/objekt|liegenschaft/i.test(line)) found.push('Objektbezug');
-    if (/fällig|faellig|zahlbar/i.test(line)) found.push('Frist');
-  }
-
-  return uniqLower(found);
-}
-function extractBestAmountFromText(text) {
-  const t = String(text || '');
-
-  const preferredPatterns = [
-    /(?:Summe\s*Brutto(?:\s*EUR)?|Gesamtbetrag(?:\s*brutto)?|Rechnungsbetrag|Endbetrag)[^0-9]{0,30}([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})|[0-9]+,[0-9]{2})/i,
-    /(?:Total\s*Amount|Grand\s*Total)[^0-9]{0,30}([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})|[0-9]+,[0-9]{2})/i
-  ];
-
-  for (const rx of preferredPatterns) {
-    const m = t.match(rx);
-    if (m && m[1]) return m[1].trim() + ' €';
-  }
-
-  const fallbackPatterns = [
-    /(?:Gesamtbetrag|Summe|Total)[^0-9]{0,30}([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})|[0-9]+,[0-9]{2})/i
-  ];
-
-  for (const rx of fallbackPatterns) {
-    const m = t.match(rx);
-    if (m && m[1]) return m[1].trim() + ' €';
-  }
-
-  return '';
-}
-function extractFieldByLabel(text, labels) {
-  const t = String(text || '');
-  for (const label of (labels || [])) {
-    const rx = new RegExp(`\\b${label}\\s*[:]?\\s*([^\\n]{1,120})`, 'i');
-    const m = t.match(rx);
-    if (m && m[1]) return m[1].trim();
-  }
-  return '';
-}
-
-function extractInvoiceDateFromText(text) {
-  const m = String(text || '').match(
-    /(datum|rechnungsdatum)\s*[:\-]?\s*(\d{2}\.\d{2}\.\d{4})/i
-  );
-  return m ? m[2] : '';
-}
 // ═════════════════════════════════════════════════════════════
 // DATE CANDIDATE ENGINE
 // ═════════════════════════════════════════════════════════════
@@ -2126,96 +2162,112 @@ function scoreSummaryLine(line) {
 }
 function buildSummaryFromPdfText(text, lines, fallbackTitle) {
   const t = String(text || '');
-  const cleanLines = (lines || [])
-    .map(x => String(x || '').trim())
-    .filter(Boolean);
+  const cleanLines = (lines || []).map(x => String(x || '').trim()).filter(Boolean);
 
-  // ═══════════════════════════════════════════════
-  // 1. RAW EXTRACTION (keine Entscheidung mehr!)
-  // ═══════════════════════════════════════════════
+  // ── 1. Run candidate engines ──
+  const invoiceCands = extractInvoiceNoCandidates(t, cleanLines);
+  const amountCands  = extractAmountCandidates(t);
+  const companyCands = extractCompanyCandidates(t, cleanLines);
+  const dateCands    = extractDateCandidates(t, cleanLines);
 
-const raw = {
-  invoiceCandidates: extractInvoiceNoCandidates(t, cleanLines),
-  amountCandidates: extractAmountCandidates(t),
-  companyCandidates: extractCompanyCandidates(t, cleanLines),
-  dateCandidates: extractDateCandidates(t, cleanLines)
-};
+  // ── 2. Resolve fields ──
+  const invoice = resolveField(invoiceCands);
+  const amount  = resolveField(amountCands);
+  const company = resolveField(companyCands);
+  const date    = resolveField(dateCands);
 
-  // ═══════════════════════════════════════════════
-  // 2. RESOLUTION (beste Wahl + confidence)
-  // ═══════════════════════════════════════════════
-const invoice = resolveBestCandidate(raw.invoiceCandidates);
-const amount = resolveBestCandidate(raw.amountCandidates);
-const company = resolveBestCandidate(raw.companyCandidates);
-const date = resolveBestCandidate(raw.dateCandidates);
+  // ── 3. Document kind ──
+  const docKind = detectDocumentKindFromText(t);
 
-  // ═══════════════════════════════════════════════
-  // 3. STRUCTURED SUMMARY (wie vorher, aber sauber)
-  // ═══════════════════════════════════════════════
+  // ── 4. Build structured prefix ──
+  const parts = [];
 
-  const structuredParts = [];
+  if (company.value) parts.push(company.value);
 
- if (invoice.confidence === 'high') {
-  structuredParts.push(`Rechnung ${invoice.value}`);
-}
-  if (company.value) structuredParts.push(company.value);
-  if (amount.value) structuredParts.push(amount.value);
+  if (docKind && docKind !== 'Dokument') parts.push(docKind);
 
-  const structuredSummary = structuredParts.join(' · ');
-
-  // ═══════════════════════════════════════════════
-  // 4. TEXT SUMMARY (bestehende Logik behalten)
-  // ═══════════════════════════════════════════════
-
-  const candidateLines = cleanLines
-    .filter(l => !isBadSummaryLine(l))
-    .map(l => ({ line: l, score: scoreSummaryLine(l) }))
-    .filter(x => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  const textParts = [];
-  for (const item of candidateLines) {
-    const line = item.line;
-
-    if (/\b(bank|iban|bic|konto|überweisung|ueberweisung)\b/i.test(line)) continue;
-    if (/^\d{2,}-\d{2,}/.test(line)) continue;
-    if (/^\d+\s+\d+,\d{2}/.test(line)) continue;
-
-    if (textParts.some(existing =>
-      existing.includes(line) || line.includes(existing)
-    )) continue;
-
-    textParts.push(line);
-    if (textParts.length >= 2) break;
+  if (invoice.value && invoice.confidence === 'high') {
+    parts.push(`Nr.\u00A0${invoice.value}`);   // non-breaking space
   }
 
-  let textSummary = textParts.join(' · ');
-  textSummary = textSummary.replace(/\s{2,}/g, ' ').trim();
+  if (amount.value) parts.push(amount.value);
 
-  if (textSummary.length > 220) {
-    textSummary = textSummary.slice(0, 217).trim() + '…';
+  if (date.value) parts.push(`vom\u00A0${date.value}`);
+
+  const structuredPrefix = parts.join(' \u00B7 ');  // interpunct
+
+  // ── 5. Find a descriptive service/content line ──
+  const SERVICE_RX = /\b(?:wartung|reparatur|miet(?:rechnung)?|leistung(?:en)?|lieferung|installation|sanierung|montage|inspektion|betrieb|service|reinigung|beratung|prüfung|kontrolle|überwachung|abrechnung|betriebskosten|nebenkosten|heizkosten|heizkostenabrechnung|strom|gas|wasser|telefon|internet|software|lizenz|pflege|entsorgung|hausverwaltung|objektverwaltung|instandhaltung)\b/i;
+  const SUBJECT_RX = /^(?:betreff|betr\.|re:|subject)\s*[:\-]?\s*/i;
+
+  const skipSet = new Set(
+    [company.value, invoice.value, amount.value, date.value]
+      .filter(Boolean)
+      .map(v => v.toLowerCase().trim())
+  );
+
+  let descLine = '';
+  let bestDescScore = -1;
+
+  for (const line of cleanLines) {
+    if (isBadSummaryLine(line)) continue;
+    if (line.length < 8 || line.length > 200) continue;
+
+    // Skip lines that merely repeat already-extracted structured data
+    if (skipSet.size && [...skipSet].some(sv => line.toLowerCase().includes(sv.slice(0, 12)))) continue;
+
+    // Skip clearly non-descriptive lines
+    if (/\b(?:bank|iban|bic|konto|überweisung|ueberweisung|zahlbar|fällig|faellig|tel\.?|fax|www\.|steuer-?nr|steuernummer)\b/i.test(line)) continue;
+
+    // Skip address lines
+    if (/\b\d{5}\s+[A-ZÄÖÜa-zäöüß]|straße|strasse|postfach\b/i.test(line)) continue;
+
+    let lscore = 0;
+    if (SERVICE_RX.test(line)) lscore += 4;
+    if (SUBJECT_RX.test(line)) lscore += 5;
+    if (/[a-zäöüß]{4,}/.test(line)) lscore += 1;
+    if (line.split(/\s+/).length >= 3) lscore += 1;
+    if (line.length >= 20 && line.length <= 140) lscore += 1;
+
+    if (lscore >= 3 && lscore > bestDescScore) {
+      bestDescScore = lscore;
+      descLine = line.replace(SUBJECT_RX, '').trim();
+    }
   }
 
-  // ═══════════════════════════════════════════════
-  // 5. FINAL OUTPUT + DEBUG
-  // ═══════════════════════════════════════════════
+  // ── 6. Compose final summary ──
+  const finalParts = [];
+  if (structuredPrefix) finalParts.push(structuredPrefix);
 
-  const finalSummary =
-    structuredSummary && textSummary
-      ? `${structuredSummary} · ${textSummary}`
-      : structuredSummary || textSummary || fallbackTitle || 'Keine inhaltliche Zusammenfassung verfügbar.';
+  if (descLine) {
+    // Avoid duplicating what's already in the structured prefix
+    const descLower = descLine.toLowerCase();
+    const prefixLower = structuredPrefix.toLowerCase();
+    if (!prefixLower.includes(descLower.slice(0, 18))) {
+      finalParts.push(descLine);
+    }
+  }
 
-  // 🔥 WICHTIG: DEBUG ENGINE (für nächsten Schritt)
-console.log('[FDL SUMMARY ENGINE]', {
-  invoice,
-  amount,
-  company,
-  date,
-  raw
-});
+  let summary = finalParts.join(' \u00B7 ').replace(/\s{2,}/g, ' ').trim();
 
-  return finalSummary;
+  if (summary.length > 240) {
+    summary = summary.slice(0, 237).trim() + '…';
+  }
+
+  if (!summary) {
+    const fb = String(fallbackTitle || '').replace(/\.pdf$/i, '').trim();
+    summary = fb || 'Keine inhaltliche Zusammenfassung verfügbar.';
+  }
+
+  // Debug
+  console.log('[FDL SUMMARY ENGINE v2]', {
+    invoice, amount, company, date, docKind,
+    structuredPrefix, descLine, summary
+  });
+
+  return summary;
 }
+
 function resolveBestCandidate(list) {
   if (!list || !list.length) {
     return { value: '', confidence: 'low' };
@@ -2244,26 +2296,51 @@ function resolveBestCandidate(list) {
 }
 function resolveField(candidates) {
   if (!candidates || !candidates.length) {
+    return { value: '', confidence: 'none' };
+  }
+
+  // Remove empties and sort descending by score
+  const sorted = [...candidates]
+    .filter(c => c && String(c.value || '').trim().length > 0)
+    .sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  if (!sorted.length) return { value: '', confidence: 'none' };
+
+  const best   = sorted[0];
+  const second = sorted[1];
+  const bestScore = best.score || 0;
+
+  // ── Hard floor: below this threshold we never return a value ──
+  if (bestScore < 0.52) {
+    return { value: '', confidence: 'none' };
+  }
+
+  // ── Ambiguity guard: two close candidates with different values = uncertain ──
+  if (second) {
+    const sameValue = String(best.value).trim().toLowerCase() ===
+                      String(second.value).trim().toLowerCase();
+    const gap = bestScore - (second.score || 0);
+    if (!sameValue && gap < 0.20) {
+      return { value: '', confidence: 'low' };
+    }
+  }
+
+  // ── Confidence tier ──
+  let confidence;
+  if (bestScore >= 0.90)      confidence = 'high';
+  else if (bestScore >= 0.72) confidence = 'medium';
+  else                        confidence = 'low';
+
+  // "Lieber leer als falsch": suppress low-confidence results
+  if (confidence === 'low') {
     return { value: '', confidence: 'low' };
   }
 
-  const sorted = [...candidates].sort((a, b) => (b.score || 0) - (a.score || 0));
-
-  const best = sorted[0];
-  const second = sorted[1];
-
-  let confidence = 'low';
-
-  if ((best.score || 0) >= 0.9) confidence = 'high';
-  else if ((best.score || 0) >= 0.7) confidence = 'medium';
-
-  if (second && ((best.score || 0) - (second.score || 0)) < 0.15) {
-    confidence = 'low';
-  }
-
   return {
-    value: confidence === 'low' ? '' : best.value,
-    confidence
+    value:      String(best.value).trim(),
+    confidence,
+    reason:     best.reason || '',
+    score:      bestScore
   };
 }
 function dedupeCandidates(list) {
