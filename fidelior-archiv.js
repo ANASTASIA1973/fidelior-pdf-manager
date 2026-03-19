@@ -1152,11 +1152,11 @@ async function buildDocumentInsights(file) {
         rec.dashboard?.title ||
         archiveFallback.title,
 
-  summary:
-  pdf?.summary ||
-  rec.dashboard?.summary ||
-  rec.serviceDesc ||
-  archiveFallback.summary,
+      summary:
+        pdf?.summary ||
+        rec.dashboard?.summary ||
+        rec.serviceDesc ||
+        archiveFallback.summary,
 
       keywords: uniqLower([
         ...(rec.keywords || []),
@@ -1182,10 +1182,48 @@ async function buildDocumentInsights(file) {
         archiveFallback.invoiceNo ||
         '',
 
+      invoiceDate:
+        pdf?.invoiceDate ||
+        rec.invoiceDate ||
+        '',
+
+      customerNo:
+        pdf?.customerNo ||
+        '',
+
+      orderNo:
+        pdf?.orderNo ||
+        '',
+
+      propertyNo:
+        pdf?.propertyNo ||
+        '',
+
+      servicePeriod:
+        pdf?.servicePeriod ||
+        '',
+
+      grossAmount:
+        pdf?.grossAmount ||
+        rec.amountRaw ||
+        '',
+
+      netAmount:
+        pdf?.netAmount ||
+        '',
+
+      taxAmount:
+        pdf?.taxAmount ||
+        '',
+
       iban:
         rec.iban ||
         pdf?.iban ||
         archiveFallback.iban ||
+        '',
+
+      bic:
+        pdf?.bic ||
         '',
 
       ustId:
@@ -1193,6 +1231,22 @@ async function buildDocumentInsights(file) {
         pdf?.ustId ||
         archiveFallback.ustId ||
         '',
+
+      company:
+        pdf?.company ||
+        rec.sender ||
+        '',
+
+      recipient:
+        pdf?.recipient ||
+        '',
+
+      subjectLine:
+        pdf?.subjectLine ||
+        '',
+
+      services:
+        pdf?.services || [],
 
       importantFacts: buildImportantFactsFromPdf(pdf || {}, {
         importantFacts: uniqLower([
@@ -1236,15 +1290,66 @@ async function buildDocumentInsights(file) {
         archiveFallback.invoiceNo ||
         '',
 
+      invoiceDate:
+        pdf.invoiceDate ||
+        '',
+
+      customerNo:
+        pdf.customerNo ||
+        '',
+
+      orderNo:
+        pdf.orderNo ||
+        '',
+
+      propertyNo:
+        pdf.propertyNo ||
+        '',
+
+      servicePeriod:
+        pdf.servicePeriod ||
+        '',
+
+      grossAmount:
+        pdf.grossAmount ||
+        '',
+
+      netAmount:
+        pdf.netAmount ||
+        '',
+
+      taxAmount:
+        pdf.taxAmount ||
+        '',
+
       iban:
         pdf.iban ||
         archiveFallback.iban ||
+        '',
+
+      bic:
+        pdf.bic ||
         '',
 
       ustId:
         pdf.ustId ||
         archiveFallback.ustId ||
         '',
+
+      company:
+        pdf.company ||
+        '',
+
+      recipient:
+        pdf.recipient ||
+        '',
+
+      subjectLine:
+        pdf.subjectLine ||
+        '',
+
+      services:
+        pdf.services || [],
 
       importantFacts: buildImportantFactsFromPdf(pdf, archiveFallback),
       source: 'pdf'
@@ -1419,21 +1524,173 @@ function extractBestAmountFromText(text) {
 
   return '';
 }
+function extractFieldByLabel(text, labels) {
+  const t = String(text || '');
+  for (const label of (labels || [])) {
+    const rx = new RegExp(`\\b${label}\\s*[:]?\\s*([^\\n]{1,120})`, 'i');
+    const m = t.match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+  return '';
+}
+
+function extractInvoiceDateFromText(text) {
+  const t = String(text || '');
+  const patterns = [
+    /\bRechnungsdatum\s*[:]?[\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i,
+    /\bBelegdatum\s*[:]?[\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i,
+    /\bInvoice Date\s*[:]?[\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i
+  ];
+  for (const rx of patterns) {
+    const m = t.match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+  return '';
+}
+
+function extractCustomerNoFromText(text) {
+  return extractFieldByLabel(text, [
+    'Kundennr\\.?', 'Kundennummer', 'Customer No\\.?', 'Customer Number'
+  ]);
+}
+
+function extractOrderNoFromText(text) {
+  return extractFieldByLabel(text, [
+    'Auftragsnr\\.?', 'Auftragsnummer', 'Bestellnummer', 'Order No\\.?'
+  ]);
+}
+
+function extractPropertyNoFromText(text) {
+  return extractFieldByLabel(text, [
+    'Liegenschaftsnummer', 'Objektnummer', 'Property No\\.?'
+  ]);
+}
+
+function extractServicePeriodFromText(text) {
+  const t = String(text || '');
+  const patterns = [
+    /\bAbrechnungszeitraum\s*[:]?[\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4}\s*[-–]\s*[0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i,
+    /\bLeistungszeitraum\s*[:]?[\s]*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4}\s*[-–]\s*[0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i,
+    /\bberechnet vom\s*([0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4}\s*[-–]\s*[0-3]?\d[.\-/][0-1]?\d[.\-/](?:20)?\d{2,4})/i
+  ];
+  for (const rx of patterns) {
+    const m = t.match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+  return '';
+}
+
+function extractMoneyByLabel(text, labels) {
+  const t = String(text || '');
+  for (const label of (labels || [])) {
+    const rx = new RegExp(`\\b${label}\\b[^0-9]{0,30}([0-9]{1,3}(?:[.\\s][0-9]{3})*(?:,[0-9]{2})|[0-9]+,[0-9]{2})`, 'i');
+    const m = t.match(rx);
+    if (m && m[1]) return m[1].trim() + ' €';
+  }
+  return '';
+}
+
+function extractNetAmountFromText(text) {
+  return extractMoneyByLabel(text, ['Nettobetrag', 'Summe Netto', 'Netto']);
+}
+
+function extractTaxAmountFromText(text) {
+  return extractMoneyByLabel(text, ['MwSt\\.?-?Betrag', 'Umsatzsteuer', 'Tax']);
+}
+
+function extractGrossAmountFromText(text) {
+  return (
+    extractMoneyByLabel(text, ['Rechnungsbetrag', 'Summe Brutto(?: EUR)?', 'Gesamtbetrag(?: brutto)?', 'Endbetrag', 'Total Amount', 'Grand Total']) ||
+    extractBestAmountFromText(text)
+  );
+}
+
+function extractBicFromText(text) {
+  const m = String(text || '').match(/\bBIC\s*[:]?[\s]*([A-Z0-9]{8,11})\b/i);
+  return m && m[1] ? m[1].trim() : '';
+}
+
+function extractCompanyFromText(text, lines) {
+  const t = String(text || '');
+  const patterns = [
+    /\b([A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,80}\b(?:GmbH|AG|KG|UG|OHG|e\.K\.|GbR))\b/,
+    /\b(ista\s+SE)\b/i,
+    /\b(Lampenwelt(?:\s+GmbH)?)\b/i,
+    /\b(Decor\s+System(?:\s+O&K\s+GmbH)?)\b/i
+  ];
+
+  for (const rx of patterns) {
+    const m = t.match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+
+  const line = (lines || []).find(l =>
+    /\b(gmbh|ag|kg|ug|ohg|gbr)\b/i.test(l) || /ista se|lampenwelt|decor system/i.test(l)
+  );
+  return line || '';
+}
+
+function extractRecipientFromText(text) {
+  const t = String(text || '');
+  const patterns = [
+    /\bEmpfänger\s*[:]?[\s]*([^\n]{3,120})/i,
+    /\bKäufer\s*[:]?[\s]*([^\n]{3,120})/i
+  ];
+  for (const rx of patterns) {
+    const m = t.match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+  return '';
+}
+
+function extractSubjectLineFromText(text, lines) {
+  const t = String(text || '');
+  const direct = t.match(/\b(Mietrechnung\/Wartungsrechnung|Rechnung|Gutschrift|Mahnung|Angebot|Abrechnung)\b/i);
+  if (direct && direct[1]) return direct[1].trim();
+
+  const line = (lines || []).find(l =>
+    /mietrechnung|wartungsrechnung|rechnung|gutschrift|mahnung|angebot|abrechnung/i.test(l)
+  );
+  return line || '';
+}
+
+function extractServiceLines(lines) {
+  const out = [];
+  for (const line of (lines || [])) {
+    const s = String(line || '').trim();
+    if (!s) continue;
+    if (s.length < 10) continue;
+    if (/^(netto|brutto|mwst|rechnungsbetrag|summe|gesamtbetrag|zahlbar|bankverbindung|iban|bic)\b/i.test(s)) continue;
+    if (/miete|wartung|wandleuchte|lieferung|versandkosten|stationäres gateway|heizkostenverteiler/i.test(s)) {
+      out.push(s);
+    }
+    if (out.length >= 5) break;
+  }
+  return uniqLower(out);
+}
 function isBadSummaryLine(line) {
   const s = String(line || '').trim();
   if (!s) return true;
   if (s.length < 6) return true;
+
   if (/^seite\s*\d+/i.test(s)) return true;
   if (/^(rechnung|invoice)\s*$/i.test(s)) return true;
-  if (/^(rechnungsnr|auftragsnr|kundennr|warenausgangsnr|belegdatum)\.?:?\s*$/i.test(s)) return true;
+  if (/^(rechnungsnr|auftragsnr|kundennr|warenausgangsnr|belegdatum|rechnungsdatum)\.?:?\s*$/i.test(s)) return true;
+
   if (/^[A-Z0-9\/\-.]{3,20}$/.test(s)) return true;
-  if (/^[\d\s.,€-]+$/.test(s)) return true;
+  if (/^[\d\s.,€%-]+$/.test(s)) return true;
+
+  if (/^(telefon|fax|web|homepage|ust-id|iban|bic|tel\.?|e-mail|kontakt)\b/i.test(s)) return true;
+  if (/\b(bankverbindung|kontonummer|handelsregister|vorstand|aufsichtsrat|sitz der gesellschaft)\b/i.test(s)) return true;
+  if (/\b(iban|bic|ust-id|ust id|steuer-nr|steuernummer)\b/i.test(s)) return true;
+
   return false;
 }
 
 function scoreSummaryLine(line) {
   const s = String(line || '').trim();
   if (!s) return -999;
+  if (isBadSummaryLine(s)) return -999;
 
   let score = 0;
 
@@ -1443,11 +1700,17 @@ function scoreSummaryLine(line) {
 
   if (/[a-zäöüß]{3,}/i.test(s)) score += 2;
   if (/\b(gmbh|ag|kg|ug|ohg|gbr)\b/i.test(s)) score += 3;
-  if (/\b(rechnung|invoice|lieferung|bestellung|wandleuchte|leuchte|konto|überweisung|ueberweisung|erstattung)\b/i.test(s)) score += 3;
+
+  if (/\b(rechnung|invoice|mietrechnung|wartungsrechnung|abrechnung|lieferung|bestellung|leistung)\b/i.test(s)) score += 4;
+  if (/\b(abrechnungszeitraum|leistungszeitraum)\b/i.test(s)) score += 4;
+  if (/\b(wandleuchte|leuchte|heizkostenverteiler|gateway|versandkosten|miete|wartung)\b/i.test(s)) score += 4;
   if (/\b(€|eur)\b/i.test(s)) score += 2;
   if (/\d+,\d{2}/.test(s)) score += 2;
 
-  if (/^(telefon|fax|web|homepage|ust-id|iban|bic|tel\.?|e-mail)\b/i.test(s)) score -= 4;
+  if (/\b(bank|iban|bic|konto|überweisung|ueberweisung)\b/i.test(s)) score -= 6;
+  if (/\b(zahlbar|zahlung|frist|fällig|faellig)\b/i.test(s)) score -= 3;
+  if (/\bschlussrechnung\b/i.test(s)) score -= 2;
+
   if (/^b75\s*[–-]/i.test(s)) score -= 2;
 
   return score;
@@ -1498,26 +1761,30 @@ function buildSummaryFromPdfText(text, lines, fallbackTitle) {
     .filter(x => x.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  const textParts = [];
-  for (const item of candidateLines) {
-    const line = item.line;
+const textParts = [];
+for (const item of candidateLines) {
+  const line = item.line;
 
-    if (textParts.some(existing =>
-      existing.includes(line) || line.includes(existing)
-    )) {
-      continue;
-    }
+  if (/\b(bank|iban|bic|konto|überweisung|ueberweisung)\b/i.test(line)) continue;
+  if (/^\d{2,}-\d{2,}/.test(line)) continue;
+  if (/^\d+\s+\d+,\d{2}/.test(line)) continue;
 
-    textParts.push(line);
-    if (textParts.length >= 3) break;
+  if (textParts.some(existing =>
+    existing.includes(line) || line.includes(existing)
+  )) {
+    continue;
   }
+
+  textParts.push(line);
+  if (textParts.length >= 2) break;
+}
 
   let textSummary = textParts.join(' · ');
   textSummary = textSummary.replace(/\s{2,}/g, ' ').trim();
 
-  if (textSummary.length > 260) {
-    textSummary = textSummary.slice(0, 257).trim() + '…';
-  }
+ if (textSummary.length > 220) {
+  textSummary = textSummary.slice(0, 217).trim() + '…';
+}
 
   if (structuredSummary && textSummary) {
     const lowText = textSummary.toLowerCase();
@@ -1608,19 +1875,31 @@ const pageText = pageLines.join('\n');
       return null;
     }
 
-    const out = {
-      text,
-      lines,
-      documentKind: detectDocumentKindFromText(text),
-      emails: extractEmailsFromText(text),
-      dueDate: extractDueDateFromText(text),
-      invoiceNo: extractInvoiceNoFromText(text, lines),
-      iban: (extractIbansFromText(text)[0] || ''),
-      ustId: extractUstIdFromText(text),
-      keywords: extractKeywordsFromText(text, lines),
-      summary: buildSummaryFromPdfText(text, lines, file?.name || '')
-    };
-
+   const out = {
+  text,
+  lines,
+  documentKind: detectDocumentKindFromText(text),
+  invoiceNo: extractInvoiceNoFromText(text, lines),
+  invoiceDate: extractInvoiceDateFromText(text),
+  dueDate: extractDueDateFromText(text),
+  customerNo: extractCustomerNoFromText(text),
+  orderNo: extractOrderNoFromText(text),
+  propertyNo: extractPropertyNoFromText(text),
+  servicePeriod: extractServicePeriodFromText(text),
+  grossAmount: extractGrossAmountFromText(text),
+  netAmount: extractNetAmountFromText(text),
+  taxAmount: extractTaxAmountFromText(text),
+  iban: (extractIbansFromText(text)[0] || ''),
+  bic: extractBicFromText(text),
+  ustId: extractUstIdFromText(text),
+  company: extractCompanyFromText(text, lines),
+  recipient: extractRecipientFromText(text),
+  subjectLine: extractSubjectLineFromText(text, lines),
+  services: extractServiceLines(lines),
+  emails: extractEmailsFromText(text),
+  keywords: extractKeywordsFromText(text, lines),
+  summary: buildSummaryFromPdfText(text, lines, file?.name || '')
+};
     __av3PdfInsightCache.set(cacheKey, out);
     return out;
   } catch (e) {
@@ -1731,7 +2010,42 @@ const factsHtml = (insights?.importantFacts || []).length
       </div>
     `).join('')
   : '<div class="av3-no-tasks">Keine zusätzlichen Inhalte erkannt.</div>';
-  el.innerHTML = `
+
+const structuredDocRows = [
+  insights?.subjectLine ? `<div class="av3-meta-row"><span class="av3-meta-label">Betreff</span><span class="av3-meta-val">${esc(insights.subjectLine)}</span></div>` : '',
+  insights?.invoiceNo ? `<div class="av3-meta-row"><span class="av3-meta-label">Rechnungsnr.</span><span class="av3-meta-val">${esc(insights.invoiceNo)}</span></div>` : '',
+  insights?.invoiceDate ? `<div class="av3-meta-row"><span class="av3-meta-label">Rechnungsdatum</span><span class="av3-meta-val">${esc(insights.invoiceDate)}</span></div>` : '',
+  insights?.orderNo ? `<div class="av3-meta-row"><span class="av3-meta-label">Auftragsnr.</span><span class="av3-meta-val">${esc(insights.orderNo)}</span></div>` : '',
+  insights?.customerNo ? `<div class="av3-meta-row"><span class="av3-meta-label">Kundennr.</span><span class="av3-meta-val">${esc(insights.customerNo)}</span></div>` : '',
+  insights?.propertyNo ? `<div class="av3-meta-row"><span class="av3-meta-label">Objektnr.</span><span class="av3-meta-val">${esc(insights.propertyNo)}</span></div>` : '',
+  insights?.servicePeriod ? `<div class="av3-meta-row"><span class="av3-meta-label">Zeitraum</span><span class="av3-meta-val">${esc(insights.servicePeriod)}</span></div>` : '',
+  insights?.dueDate ? `<div class="av3-meta-row"><span class="av3-meta-label">Fällig</span><span class="av3-meta-val">${esc(insights.dueDate)}</span></div>` : ''
+].filter(Boolean).join('');
+
+const structuredAmountRows = [
+  insights?.grossAmount ? `<div class="av3-meta-row"><span class="av3-meta-label">Brutto</span><span class="av3-meta-val">${esc(insights.grossAmount)}</span></div>` : '',
+  insights?.netAmount ? `<div class="av3-meta-row"><span class="av3-meta-label">Netto</span><span class="av3-meta-val">${esc(insights.netAmount)}</span></div>` : '',
+  insights?.taxAmount ? `<div class="av3-meta-row"><span class="av3-meta-label">MwSt.</span><span class="av3-meta-val">${esc(insights.taxAmount)}</span></div>` : ''
+].filter(Boolean).join('');
+
+const structuredPartyRows = [
+  insights?.company ? `<div class="av3-meta-row"><span class="av3-meta-label">Firma</span><span class="av3-meta-val">${esc(insights.company)}</span></div>` : '',
+  insights?.recipient ? `<div class="av3-meta-row"><span class="av3-meta-label">Empfänger</span><span class="av3-meta-val">${esc(insights.recipient)}</span></div>` : '',
+  insights?.iban ? `<div class="av3-meta-row"><span class="av3-meta-label">IBAN</span><span class="av3-meta-val mono">${esc(insights.iban)}</span></div>` : '',
+  insights?.bic ? `<div class="av3-meta-row"><span class="av3-meta-label">BIC</span><span class="av3-meta-val mono">${esc(insights.bic)}</span></div>` : '',
+  insights?.ustId ? `<div class="av3-meta-row"><span class="av3-meta-label">USt-Id</span><span class="av3-meta-val mono">${esc(insights.ustId)}</span></div>` : ''
+].filter(Boolean).join('');
+
+const servicesHtml = (insights?.services || []).length
+  ? insights.services.slice(0, 5).map(s => `
+      <div class="av3-task-row">
+        <span style="color:#9CA3AF">•</span>
+        <span>${esc(s)}</span>
+      </div>
+    `).join('')
+  : '<div class="av3-no-tasks">Keine Positionen erkannt.</div>';
+
+el.innerHTML = `
   <div class="av3-panel-rail">
     ${railButtons(open.length)}
   </div>
@@ -1754,6 +2068,37 @@ const factsHtml = (insights?.importantFacts || []).length
         <div class="av3-doc-section-title">Zusammenfassung</div>
         <div class="av3-doc-summary" style="margin:0">
           ${summary ? esc(summary) : 'Keine inhaltliche Zusammenfassung verfügbar.'}
+        </div>
+      </div>
+
+      ${structuredDocRows ? `
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Strukturierte Felder</div>
+        <div class="av3-meta">
+          ${structuredDocRows}
+        </div>
+      </div>` : ''}
+
+      ${structuredAmountRows ? `
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Beträge</div>
+        <div class="av3-meta">
+          ${structuredAmountRows}
+        </div>
+      </div>` : ''}
+
+      ${structuredPartyRows ? `
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Parteien & Zahlung</div>
+        <div class="av3-meta">
+          ${structuredPartyRows}
+        </div>
+      </div>` : ''}
+
+      <div class="av3-doc-section">
+        <div class="av3-doc-section-title">Leistungszeilen / Positionen</div>
+        <div class="av3-meta" style="display:block">
+          ${servicesHtml}
         </div>
       </div>
 
@@ -1785,10 +2130,6 @@ const factsHtml = (insights?.importantFacts || []).length
           ${sender ? `<div class="av3-meta-row"><span class="av3-meta-label">Absender</span><span class="av3-meta-val">${esc(sender)}</span></div>` : ''}
           ${objectCode ? `<div class="av3-meta-row"><span class="av3-meta-label">Objekt</span><span class="av3-meta-val">${esc(objectCode)}${objectName ? ` · ${esc(objectName)}` : ''}</span></div>` : ''}
           ${file.subfolder ? `<div class="av3-meta-row"><span class="av3-meta-label">Unterordner</span><span class="av3-meta-val">${esc(file.subfolder)}</span></div>` : ''}
-          ${insights?.dueDate ? `<div class="av3-meta-row"><span class="av3-meta-label">Frist</span><span class="av3-meta-val">${esc(insights.dueDate)}</span></div>` : ''}
-          ${insights?.invoiceNo ? `<div class="av3-meta-row"><span class="av3-meta-label">Referenz</span><span class="av3-meta-val">${esc(insights.invoiceNo)}</span></div>` : ''}
-          ${insights?.iban ? `<div class="av3-meta-row"><span class="av3-meta-label">IBAN</span><span class="av3-meta-val mono">${esc(insights.iban)}</span></div>` : ''}
-          ${insights?.ustId ? `<div class="av3-meta-row"><span class="av3-meta-label">USt-Id</span><span class="av3-meta-val mono">${esc(insights.ustId)}</span></div>` : ''}
           ${filePath ? `<div class="av3-meta-row"><span class="av3-meta-label">Pfad</span><span class="av3-meta-val mono">${esc(filePath)}</span></div>` : ''}
         </div>
       </div>
@@ -1810,7 +2151,7 @@ const factsHtml = (insights?.importantFacts || []).length
           </div>
           <div class="av3-meta-row">
             <span class="av3-meta-label">Quelle</span>
-            <span class="av3-meta-val">${esc(insights?.source === 'document-index' ? 'Dokumentenindex' : 'Archiv')}</span>
+            <span class="av3-meta-val">${esc(insights?.source || 'Archiv')}</span>
           </div>
         </div>
       </div>
@@ -1833,7 +2174,7 @@ const factsHtml = (insights?.importantFacts || []).length
     </div>
   </div>`;
 
-  renderPDF(file);
+renderPDF(file);
 }
 
 function buildArchivTitle(ctx) {
