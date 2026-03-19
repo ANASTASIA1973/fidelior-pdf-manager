@@ -1603,6 +1603,46 @@ function extractInvoiceNoCandidates(text, lines) {
 // ═════════════════════════════════════════════════════════════
 // AMOUNT CANDIDATE ENGINE
 // ═════════════════════════════════════════════════════════════
+function extractAmountCandidates(text) {
+  const t = String(text || '');
+  const candidates = [];
+
+  const strongAmountLabelRx = /\b(?:rechnungsbetrag|gesamtbetrag|summe\s*brutto|endbetrag|zu\s*zahlen|zahlbetrag|total\s*amount|grand\s*total)\b/i;
+  const netLabelRx = /\b(?:netto|nettobetrag|summe\s*netto)\b/i;
+  const taxLabelRx = /\b(?:mwst|ust|umsatzsteuer|tax|vat)\b/i;
+
+  const matches = t.match(/\d{1,3}(?:\.\d{3})*,\d{2}\s?(?:€|eur)?/gi) || [];
+
+  for (const raw of matches) {
+    const val = String(raw || '').trim();
+    if (!val) continue;
+
+    const idx = t.indexOf(val);
+    const ctx = idx >= 0 ? t.slice(Math.max(0, idx - 80), idx + val.length + 80) : '';
+
+    let score = 0.45;
+    let reason = 'generic';
+
+    if (strongAmountLabelRx.test(ctx)) {
+      score = 0.96;
+      reason = 'gross-total-context';
+    } else if (netLabelRx.test(ctx)) {
+      score = 0.68;
+      reason = 'net-context';
+    } else if (taxLabelRx.test(ctx)) {
+      score = 0.58;
+      reason = 'tax-context';
+    }
+
+    candidates.push({
+      value: val.replace(/\s*(eur|€)\s*$/i, '').trim() + ' €',
+      score,
+      reason
+    });
+  }
+
+  return dedupeCandidates(candidates);
+}
 
 function extractDateCandidates(text, lines) {
   const t = String(text || '');
@@ -1889,95 +1929,7 @@ function extractCompanyCandidates(text, lines) {
 // DATE CANDIDATE ENGINE
 // ═════════════════════════════════════════════════════════════
 
-function extractDateCandidates(text, lines) {
-  const t = String(text || '');
-  const cleanLines = (lines || [])
-    .map(l => String(l || '').trim())
-    .filter(Boolean);
 
-  const candidates = [];
-
-  const labelPatterns = [
-    {
-      rx: /\b(?:rechnungsdatum|invoice date|belegdatum|datum)\b\s*[:\-]?\s*(\d{2}\.\d{2}\.\d{4})/i,
-      score: 0.95,
-      reason: 'date-label'
-    },
-    {
-      rx: /\b(?:leistungsdatum)\b\s*[:\-]?\s*(\d{2}\.\d{2}\.\d{4})/i,
-      score: 0.75,
-      reason: 'service-date'
-    },
-    {
-      rx: /\b(?:fällig am|faellig am|zahlbar bis|due date)\b\s*[:\-]?\s*(\d{2}\.\d{2}\.\d{4})/i,
-      score: 0.55,
-      reason: 'due-date'
-    }
-  ];
-
-  for (const p of labelPatterns) {
-    const m = t.match(p.rx);
-    if (m && m[1] && !isBadDateCandidate(m[1])) {
-      candidates.push({
-        value: m[1].trim(),
-        score: p.score,
-        reason: p.reason
-      });
-    }
-  }
-
-  const genericDates = t.match(/\b\d{2}\.\d{2}\.\d{4}\b/g) || [];
-  for (const val of genericDates) {
-    if (isBadDateCandidate(val)) continue;
-
-    const context = getContext(t, val);
-
-    let score = 0.45;
-    let reason = 'generic-date';
-
-    if (/rechnungsdatum|belegdatum|invoice date|datum/i.test(context)) {
-      score = 0.9;
-      reason = 'invoice-date-context';
-    } else if (/leistungsdatum|leistungszeitraum/i.test(context)) {
-      score = 0.7;
-      reason = 'service-context';
-    } else if (/fällig|faellig|zahlbar|due/i.test(context)) {
-      score = 0.5;
-      reason = 'due-context';
-    }
-
-    candidates.push({
-      value: val,
-      score,
-      reason
-    });
-  }
-
-  for (let i = 0; i < Math.min(cleanLines.length, 15); i++) {
-    const line = cleanLines[i];
-    const m = line.match(/\b\d{2}\.\d{2}\.\d{4}\b/);
-    if (!m) continue;
-
-    const val = m[0];
-    if (isBadDateCandidate(val)) continue;
-
-    let score = 0.5;
-    let reason = 'header-date';
-
-    if (/rechnungsdatum|belegdatum|datum/i.test(line)) {
-      score = 0.88;
-      reason = 'header-label';
-    }
-
-    candidates.push({
-      value: val,
-      score,
-      reason
-    });
-  }
-
-  return dedupeCandidates(candidates);
-}
 
 function isBadDateCandidate(val) {
   if (!val) return true;
@@ -1994,6 +1946,21 @@ function isBadDateCandidate(val) {
   if (year < 2000 || year > 2100) return true;
 
   return false;
+}
+function extractInvoiceDateFromText(text) {
+  const t = String(text || '');
+
+  const patterns = [
+    /\b(?:rechnungsdatum|belegdatum|invoice\s*date|datum\s*der\s*rechnung)\b\s*[:\-]?\s*(\d{2}\.\d{2}\.\d{4})/i,
+    /(?:^|\s)datum\s*[:\-]?\s*(\d{2}\.\d{2}\.\d{4})/i
+  ];
+
+  for (const rx of patterns) {
+    const m = t.match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+
+  return '';
 }
 function extractCustomerNoFromText(text) {
   return extractFieldByLabel(text, [
