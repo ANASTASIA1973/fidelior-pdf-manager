@@ -1396,7 +1396,30 @@ function extractKeywordsFromText(text, lines) {
 
   return uniqLower(found);
 }
+function extractBestAmountFromText(text) {
+  const t = String(text || '');
 
+  const preferredPatterns = [
+    /(?:Summe\s*Brutto(?:\s*EUR)?|Gesamtbetrag(?:\s*brutto)?|Rechnungsbetrag|Endbetrag)[^0-9]{0,30}([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})|[0-9]+,[0-9]{2})/i,
+    /(?:Total\s*Amount|Grand\s*Total)[^0-9]{0,30}([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})|[0-9]+,[0-9]{2})/i
+  ];
+
+  for (const rx of preferredPatterns) {
+    const m = t.match(rx);
+    if (m && m[1]) return m[1].trim() + ' €';
+  }
+
+  const fallbackPatterns = [
+    /(?:Gesamtbetrag|Summe|Total)[^0-9]{0,30}([0-9]{1,3}(?:[.\s][0-9]{3})*(?:,[0-9]{2})|[0-9]+,[0-9]{2})/i
+  ];
+
+  for (const rx of fallbackPatterns) {
+    const m = t.match(rx);
+    if (m && m[1]) return m[1].trim() + ' €';
+  }
+
+  return '';
+}
 function buildSummaryFromPdfText(text, lines, fallbackTitle) {
   const t = String(text || '');
 
