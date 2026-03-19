@@ -2226,34 +2226,72 @@ const pageText = pageLines.join('\n');
       __av3PdfInsightCache.set(cacheKey, null);
       return null;
     }
+const ai = window.FideliorAI?.analyzeDocument
+  ? window.FideliorAI.analyzeDocument(text, lines)
+  : null;
 
-   const out = {
+const invoiceField = ai?.fields?.invoiceNumber || null;
+const amountField  = ai?.fields?.amount || null;
+const senderField  = ai?.fields?.sender || null;
+const dateField    = ai?.fields?.invoiceDate || null;
+
+const out = {
   text,
   lines,
-  documentKind: detectDocumentKindFromText(text),
-  invoiceNo: extractInvoiceNoFromText(text, lines),
-  invoiceDate: extractInvoiceDateFromText(text),
-    invoiceCandidates: extractInvoiceNoCandidates(text, lines),
-  amountCandidates: extractAmountCandidates(text),
-  companyCandidates: extractCompanyCandidates(text, lines),
-  dateCandidates: extractDateCandidates(text, lines),
+
+  // zentrale Engine zuerst
+  ai,
+
+  documentKind:
+    ai?.type ||
+    detectDocumentKindFromText(text),
+
+  invoiceNo:
+    invoiceField?.value ||
+    extractInvoiceNoFromText(text, lines),
+
+  invoiceDate:
+    dateField?.value ||
+    extractInvoiceDateFromText(text),
+
   dueDate: extractDueDateFromText(text),
   customerNo: extractCustomerNoFromText(text),
   orderNo: extractOrderNoFromText(text),
   propertyNo: extractPropertyNoFromText(text),
   servicePeriod: extractServicePeriodFromText(text),
-  grossAmount: extractGrossAmountFromText(text),
+
+  grossAmount:
+    amountField?.value ||
+    extractGrossAmountFromText(text),
+
   netAmount: extractNetAmountFromText(text),
   taxAmount: extractTaxAmountFromText(text),
+
   iban: (extractIbansFromText(text)[0] || ''),
   bic: extractBicFromText(text),
   ustId: extractUstIdFromText(text),
-  company: extractCompanyFromText(text, lines),
+
+  company:
+    senderField?.value ||
+    extractCompanyFromText(text, lines),
+
   recipient: extractRecipientFromText(text),
   subjectLine: extractSubjectLineFromText(text, lines),
   services: extractServiceLines(lines),
   emails: extractEmailsFromText(text),
   keywords: extractKeywordsFromText(text, lines),
+
+  // Candidate-/Confidence-Daten aus zentraler Engine
+  invoiceCandidates: ai?.candidates?.invoiceNumber || [],
+  amountCandidates: ai?.candidates?.amount || [],
+  companyCandidates: ai?.candidates?.sender || [],
+  dateCandidates: ai?.candidates?.invoiceDate || [],
+
+  invoiceConfidence: invoiceField?.confidence || 'low',
+  amountConfidence: amountField?.confidence || 'low',
+  companyConfidence: senderField?.confidence || 'low',
+  dateConfidence: dateField?.confidence || 'low',
+
   summary: buildSummaryFromPdfText(text, lines, file?.name || '')
 };
     __av3PdfInsightCache.set(cacheKey, out);
