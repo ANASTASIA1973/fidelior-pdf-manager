@@ -1229,7 +1229,16 @@ async function renderPanel(file) {
   const objectCode = core?.objectCode || file.objectCode || '';
   const objectName = core?.objectName || file.objectName || '';
   const modifiedLabel = fmtDate(file.modified);
-  const fileSizeLabel = fmtSize(file.size);
+let fileSizeLabel = fmtSize(file.size);
+
+if ((!file.size || !fileSizeLabel) && file?.handle && typeof file.handle.getFile === 'function') {
+  try {
+    const realFile = await file.handle.getFile();
+    fileSizeLabel = fmtSize(realFile.size) || '—';
+  } catch {
+    fileSizeLabel = fileSizeLabel || '—';
+  }
+}
   const filePath = (file.pathSegs || []).join(' › ');
 
   const smallFileName = file.name || '';
@@ -1254,12 +1263,12 @@ const summary = insights?.summary || buildArchivSummary({
   objectName
 });
 
-  const catPills = [
-    objectCode ? `<span class="av3-cat-pill">${objectCode}</span>` : '',
-    docType ? `<span class="av3-cat-pill green">${docType}</span>` : '',
-    file.year ? `<span class="av3-cat-pill blue">${file.year}</span>` : '',
-    file.subfolder ? `<span class="av3-cat-pill amber">${file.subfolder}</span>` : '',
-  ].filter(Boolean).join('');
+const catPills = [
+  objectCode ? `<span class="av3-cat-pill">${esc(objectCode)}</span>` : '',
+  docType ? `<span class="av3-cat-pill green">${esc(docType)}</span>` : '',
+  file.year ? `<span class="av3-cat-pill blue">${esc(file.year)}</span>` : '',
+  file.subfolder ? `<span class="av3-cat-pill amber">${esc(file.subfolder)}</span>` : '',
+].filter(Boolean).join('');
 
   const taskHTML = tasks.length
     ? tasks.slice(0, 5).map(t => {
@@ -1452,7 +1461,10 @@ function railButtons(taskCount) {
 async function renderPDF(file) {
   const wrap = document.getElementById('fdl-av3-prev');
   if (!wrap) return;
-
+if (!file?.handle || typeof file.handle.getFile !== 'function') {
+  wrap.innerHTML = `<div class="av3-prev-label">Vorschau</div><div class="av3-empty" style="flex:1"><div class="av3-empty-icon">${SVG.warn}</div><div class="av3-empty-sub">Keine Datei-Verbindung vorhanden</div></div>`;
+  return;
+}
   if (S.blobUrl) {
     try { URL.revokeObjectURL(S.blobUrl); } catch {}
     S.blobUrl = null;
