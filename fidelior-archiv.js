@@ -1152,11 +1152,11 @@ async function buildDocumentInsights(file) {
         rec.dashboard?.title ||
         archiveFallback.title,
 
-      summary:
-        rec.serviceDesc ||
-        rec.dashboard?.summary ||
-        pdf?.summary ||
-        archiveFallback.summary,
+  summary:
+  pdf?.summary ||
+  rec.dashboard?.summary ||
+  rec.serviceDesc ||
+  archiveFallback.summary,
 
       keywords: uniqLower([
         ...(rec.keywords || []),
@@ -1319,12 +1319,12 @@ function extractUstIdFromText(text) {
 function extractInvoiceNoFromText(text, lines) {
   const t = String(text || '');
 
-  // Spezifischer für deutsche + internationale Rechnungen
   const patterns = [
-    /Rechnung\s*(?:No\.?|Nr\.?)\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
-    /Invoice\s*(?:No\.?|Number)\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
-    /Belegnummer\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
-    /Referenz\s*[:#]?\s*([A-Z0-9\/\-]+)/i
+    /\bRechnungsnr\.?\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
+    /\bRechnung\s*(?:No\.?|Nr\.?)\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
+    /\bInvoice\s*(?:No\.?|Number)\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
+    /\bBelegnummer\s*[:#]?\s*([A-Z0-9\/\-]+)/i,
+    /\bReferenz\s*[:#]?\s*([A-Z0-9\/\-]+)/i
   ];
 
   for (const rx of patterns) {
@@ -1332,11 +1332,10 @@ function extractInvoiceNoFromText(text, lines) {
     if (m && m[1]) return m[1].trim();
   }
 
-  // Fallback: starke Zeile mit "Rechnung"
-  for (const line of (lines || []).slice(0, 20)) {
-    if (/rechnung/i.test(line) && /[A-Z0-9\/\-]{5,}/.test(line)) {
+  for (const line of (lines || []).slice(0, 30)) {
+    if (/rechnungsnr|rechnung|invoice|referenz|beleg/i.test(line) && /[A-Z0-9\/\-]{5,}/.test(line)) {
       const mm = line.match(/([A-Z0-9\/\-]{5,})/);
-      if (mm && mm[1]) return mm[1];
+      if (mm && mm[1]) return mm[1].trim();
     }
   }
 
@@ -1420,34 +1419,120 @@ function extractBestAmountFromText(text) {
 
   return '';
 }
-function buildSummaryFromPdfText(text, lines, fallbackTitle) {
-  const t = String(text || '');
-
-  // 1. Rechnungsnummer priorisieren
-  const invMatch = t.match(/Rechnung\s*(?:No\.?|Nr\.?)\s*[:#]?\s*([A-Z0-9\/\-]+)/i);
-
-  // 2. Betrag suchen (Gesamtbetrag)
-  const amountMatch = t.match(/(Gesamtbetrag|Summe|Total)[^0-9]{0,20}([\d.,]+\s?€?)/i);
-
-  // 3. Firma (erste starke Zeile)
-  const companyLine = (lines || []).find(l =>
-    l.length > 10 &&
-    /gmbh|ag|kg|ltd|system|gbr/i.test(l)
-  );
-
-  let parts = [];
-
-  if (invMatch) parts.push(`Rechnung ${invMatch[1]}`);
-  if (companyLine) parts.push(companyLine.trim());
-  if (amountMatch) parts.push(amountMatch[2]);
-
-  if (!parts.length) {
-    return fallbackTitle || 'Keine inhaltliche Zusammenfassung verfügbar.';
-  }
-
-  return parts.join(' · ');
+function isBadSummaryLine(line) {
+  const s = String(line || '').trim();
+  if (!s) return true;
+  if (s.length < 6) return true;
+  if (/^seite\s*\d+/i.test(s)) return true;
+  if (/^(rechnung|invoice)\s*$/i.test(s)) return true;
+  if (/^(rechnungsnr|auftragsnr|kundennr|warenausgangsnr|belegdatum)\.?:?\s*$/i.test(s)) return true;
+  if (/^[A-Z0-9\/\-.]{3,20}$/.test(s)) return true;
+  if (/^[\d\s.,€-]+$/.test(s)) return true;
+  return false;
 }
 
+function scoreSummaryLine(line) {
+  const s = String(line || '').trim();
+  if (!s) return -999;
+
+  let score = 0;
+
+  if (s.length >= 18) score += 2;
+  if (s.length >= 30) score += 2;
+  if (s.length <= 140) score += 1;
+
+  if (/[a-zäöüß]{3,}/i.test(s)) score += 2;
+  if (/\b(gmbh|ag|kg|ug|ohg|gbr)\b/i.test(s)) score += 3;
+  if (/\b(rechnung|invoice|lieferung|bestellung|wandleuchte|leuchte|konto|überweisung|ueberweisung|erstattung)\b/i.test(s)) score += 3;
+  if (/\b(€|eur)\b/i.test(s)) score += 2;
+  if (/\d+,\d{2}/.test(s)) score += 2;
+
+  if (/^(telefon|fax|web|homepage|ust-id|iban|bic|tel\.?|e-mail)\b/i.test(s)) score -= 4;
+  if (/^b75\s*[–-]/i.test(s)) score -= 2;
+
+  return score;
+}
+function buildSummaryFromPdfText(text, lines, fallbackTitle) {
+  const t = String(text || '');
+  const cleanLines = (lines || [])
+    .map(x => String(x || '').trim())
+    .filter(Boolean);
+
+  const invoiceNo = extractInvoiceNoFromText(t, cleanLines);
+  const bestAmount = extractBestAmountFromText(t);
+
+  let company = '';
+
+  const companyPatterns = [
+    /\b([A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,80}\b(?:GmbH|AG|KG|UG|OHG|e\.K\.|GbR))\b/,
+    /\b(Lampenwelt(?:\s+GmbH)?)\b/i,
+    /\b(Decor\s+System(?:\s+O&K\s+GmbH)?)\b/i
+  ];
+
+  for (const rx of companyPatterns) {
+    const m = t.match(rx);
+    if (m && m[1]) {
+      company = m[1].trim();
+      break;
+    }
+  }
+
+  if (!company) {
+    const companyLine = cleanLines.find(l =>
+      !isBadSummaryLine(l) &&
+      (/\b(gmbh|ag|kg|ug|ohg|gbr)\b/i.test(l) || /lampenwelt|decor system/i.test(l))
+    );
+    if (companyLine) company = companyLine;
+  }
+
+  const structuredParts = [];
+  if (invoiceNo) structuredParts.push(`Rechnung ${invoiceNo}`);
+  if (company) structuredParts.push(company);
+  if (bestAmount) structuredParts.push(bestAmount);
+
+  const structuredSummary = structuredParts.join(' · ');
+
+  const candidateLines = cleanLines
+    .filter(l => !isBadSummaryLine(l))
+    .map(l => ({ line: l, score: scoreSummaryLine(l) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  const textParts = [];
+  for (const item of candidateLines) {
+    const line = item.line;
+
+    if (textParts.some(existing =>
+      existing.includes(line) || line.includes(existing)
+    )) {
+      continue;
+    }
+
+    textParts.push(line);
+    if (textParts.length >= 3) break;
+  }
+
+  let textSummary = textParts.join(' · ');
+  textSummary = textSummary.replace(/\s{2,}/g, ' ').trim();
+
+  if (textSummary.length > 260) {
+    textSummary = textSummary.slice(0, 257).trim() + '…';
+  }
+
+  if (structuredSummary && textSummary) {
+    const lowText = textSummary.toLowerCase();
+    const lowStruct = structuredSummary.toLowerCase();
+
+    if (lowText.includes(lowStruct)) return textSummary;
+
+    return `${structuredSummary} · ${textSummary}`;
+  }
+
+  if (structuredSummary) return structuredSummary;
+  if (textSummary) return textSummary;
+
+  return fallbackTitle || 'Keine inhaltliche Zusammenfassung verfügbar.';
+}
 function buildImportantFactsFromPdf(parsed, archiveFallback) {
   const facts = [];
 
@@ -1489,10 +1574,29 @@ async function extractPdfTextInsights(file) {
     for (let i = 1; i <= pages; i++) {
       const page = await doc.getPage(i);
       const tc = await page.getTextContent();
-      const pageText = (tc.items || [])
-        .map(it => String(it.str || '').trim())
-        .filter(Boolean)
-        .join('\n');
+    const items = (tc.items || []).filter(it => String(it.str || '').trim());
+let pageLines = [];
+let currentLine = [];
+let lastY = null;
+
+for (const it of items) {
+  const str = String(it.str || '').trim();
+  const y = Array.isArray(it.transform) ? Math.round(it.transform[5]) : null;
+
+  if (lastY !== null && y !== null && Math.abs(y - lastY) > 3) {
+    if (currentLine.length) pageLines.push(currentLine.join(' ').replace(/\s{2,}/g, ' ').trim());
+    currentLine = [];
+  }
+
+  currentLine.push(str);
+  lastY = y;
+}
+
+if (currentLine.length) {
+  pageLines.push(currentLine.join(' ').replace(/\s{2,}/g, ' ').trim());
+}
+
+const pageText = pageLines.join('\n');
       if (pageText) textChunks.push(pageText);
     }
 
@@ -1787,10 +1891,7 @@ function railButtons(taskCount) {
 async function renderPDF(file) {
   const wrap = document.getElementById('fdl-av3-prev');
   if (!wrap) return;
-  if (!file?.handle || typeof file.handle.getFile !== 'function') {
-  wrap.innerHTML = `<div class="av3-prev-label">Vorschau</div><div class="av3-empty" style="flex:1"><div class="av3-empty-icon">${SVG.warn}</div><div class="av3-empty-sub">Keine Datei-Verbindung vorhanden</div></div>`;
-  return;
-}
+
 if (!file?.handle || typeof file.handle.getFile !== 'function') {
   wrap.innerHTML = `<div class="av3-prev-label">Vorschau</div><div class="av3-empty" style="flex:1"><div class="av3-empty-icon">${SVG.warn}</div><div class="av3-empty-sub">Keine Datei-Verbindung vorhanden</div></div>`;
   return;
