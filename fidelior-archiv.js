@@ -1148,16 +1148,16 @@ async function buildDocumentInsights(file) {
 
   if (rec) {
     out = {
-      title:
-        rec.title ||
-        rec.dashboard?.title ||
-        archiveFallback.title,
+   title:
+  rec.title ||
+  rec.dashboard?.title ||
+  archiveFallback.title,
 
-      summary:
-        pdf?.summary ||
-        rec.dashboard?.summary ||
-        rec.serviceDesc ||
-        archiveFallback.summary,
+   summary:
+  pdf?.summary ||
+  rec.dashboard?.summary ||
+  archiveFallback.summary ||
+  rec.serviceDesc,
 
       keywords: uniqLower([
         ...(rec.keywords || []),
@@ -1170,11 +1170,12 @@ async function buildDocumentInsights(file) {
         ...(rec.email ? [rec.email] : []),
         ...(pdf?.emails || [])
       ]),
-      documentKind:
-        pdf?.documentKind ||
-        detectDocumentKindFromText(`${rec.title || ''} ${rec.serviceDesc || ''}`) ||
-        archiveFallback.documentKind ||
-        '',
+   documentKind:
+  pdf?.ai?.type ||
+  pdf?.documentKind ||
+  detectDocumentKindFromText(`${rec.title || ''} ${rec.serviceDesc || ''}`) ||
+  archiveFallback.documentKind ||
+  '',
       dueDate:
         rec.dueDate ||
         pdf?.dueDate ||
@@ -1288,23 +1289,26 @@ async function buildDocumentInsights(file) {
         ...(pdf.emails || []),
         ...(archiveFallback.emails || [])
       ]),
-      documentKind:
-        pdf.documentKind ||
-        archiveFallback.documentKind ||
-        '',
+   documentKind:
+  pdf?.ai?.type ||
+  pdf.documentKind ||
+  archiveFallback.documentKind ||
+  '',
       dueDate:
         pdf.dueDate ||
         archiveFallback.dueDate ||
         '',
 
-      invoiceNo:
-        pdf.invoiceNo ||
-        archiveFallback.invoiceNo ||
-        '',
+  invoiceNo: resolveField([
+  ...(pdf?.invoiceCandidates || []),
+  ...(pdf?.invoiceNo ? [{ value: pdf.invoiceNo, score: 0.8, source: 'pdf' }] : []),
+  ...(archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.3, source: 'archive' }] : [])
+]).value,
 
-      invoiceDate:
-        pdf.invoiceDate ||
-        '',
+   invoiceDate: resolveField([
+  ...(pdf?.dateCandidates || []),
+  ...(pdf?.invoiceDate ? [{ value: pdf.invoiceDate, score: 0.8, source: 'pdf' }] : [])
+]).value,
 
       customerNo:
         pdf.customerNo ||
@@ -1322,9 +1326,10 @@ async function buildDocumentInsights(file) {
         pdf.servicePeriod ||
         '',
 
-      grossAmount:
-        pdf.grossAmount ||
-        '',
+  grossAmount: resolveField([
+  ...(pdf?.amountCandidates || []),
+  ...(pdf?.grossAmount ? [{ value: pdf.grossAmount, score: 0.8, source: 'pdf' }] : [])
+]).value,
 
       netAmount:
         pdf.netAmount ||
@@ -1348,9 +1353,10 @@ async function buildDocumentInsights(file) {
         archiveFallback.ustId ||
         '',
 
-      company:
-        pdf.company ||
-        '',
+ company: resolveField([
+  ...(pdf?.companyCandidates || []),
+  ...(pdf?.company ? [{ value: pdf.company, score: 0.8, source: 'pdf' }] : [])
+]).value,
 
       recipient:
         pdf.recipient ||
@@ -2143,6 +2149,22 @@ function resolveField(candidates) {
     value: confidence === 'low' ? '' : best.value,
     confidence
   };
+}
+function dedupeCandidates(list) {
+  const map = new Map();
+
+  for (const c of (list || [])) {
+    const value = String(c?.value || '').trim();
+    if (!value) continue;
+
+    const key = value.toLowerCase();
+
+    if (!map.has(key) || (map.get(key).score || 0) < (c.score || 0)) {
+      map.set(key, { ...c, value });
+    }
+  }
+
+  return Array.from(map.values());
 }
 function buildImportantFactsFromPdf(parsed, archiveFallback) {
   const facts = [];
