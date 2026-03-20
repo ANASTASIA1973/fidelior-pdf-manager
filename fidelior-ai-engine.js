@@ -471,7 +471,7 @@
 
     const candidates = [];
 
-    const priorityPatterns = [
+const priorityPatterns = [
       /noch\s+offen/i,
       /offener\s+betrag/i,
       /offene\s+forderung/i,
@@ -495,14 +495,16 @@
       /gesamt\s*eur/i,
       /betrag\s+inkl\.?\s*(mwst|mehrwertsteuer|ust)\b/i,
       /\bbruttosumme\b/i,
-      /\bgesamtpreis\b/i
+      /\bgesamtpreis\b/i,
+      /\bbetrag\s+eur\s+inkl\.?\s*mwst\b/i,
+      /\brechnungsendbetrag\b/i
     ];
 
-    const strongTotalLabels =
-      /\b(zu\s+zahlen|gesamtbetrag|rechnungsbetrag|endbetrag|amount\s+due|invoice\s+total|bruttorechnungsbetrag|bruttobetrag)\b/i;
+   const strongTotalLabels =
+      /\b(zu\s+zahlen|gesamtbetrag|rechnungsbetrag|endbetrag|rechnungsendbetrag|amount\s+due|invoice\s+total|bruttorechnungsbetrag|bruttobetrag|betrag\s+inkl\.?\s*(?:mwst|mehrwertsteuer|ust)|betrag\s+eur\s+inkl\.?\s*mwst)\b/i;
 
-    const ignorePattern =
-      /zwischensumme|subtotal|netto\b|rabatt|discount|ust|mwst|steuer|versand|skonto|abschlag/i;
+const ignorePattern =
+      /zwischensumme|subtotal|netto\b|rabatt|discount|versand|skonto|abschlag/i;
 
     const taxOnlyPattern =
       /\b(mwst|ust|vat|tax|steuer)\b/i;
@@ -513,16 +515,20 @@
     lines.forEach((rawLine, index) => {
       const text = normalizeWs(rawLine);
       if (!text) return;
+            const hasInklMwst =
+        /\binkl\.?\s*(mwst|mehrwertsteuer|ust)\b/i.test(text) ||
+        /\bbetrag\s+eur\s+inkl\.?\s*mwst\b/i.test(text);
+
+      const hasFinalTotalLabel =
+        /\b(rechnungsendbetrag|endbetrag|rechnungsbetrag|gesamtbetrag|zahlbetrag|zu\s+zahlen|betrag\s+inkl\.?\s*(?:mwst|mehrwertsteuer|ust)|betrag\s+eur\s+inkl\.?\s*mwst)\b/i.test(text);
 
       const matches = [...text.matchAll(moneyRx)].map(m => m[1]).filter(Boolean);
       if (!matches.length) return;
 
-      const hasInklMwst = /\binkl\.?\s*(mwst|mehrwertsteuer|steuer|ust)\b/i.test(text);
-      const hasPriorityLabel = priorityPatterns.some(rx => rx.test(text));
-      const hasStrongTotal = strongTotalLabels.test(text);
-      const hasIgnore = ignorePattern.test(text) && !hasInklMwst;
-      const isTaxOnly = taxOnlyPattern.test(text) && !hasStrongTotal && !hasInklMwst;
-
+ const hasPriorityLabel = priorityPatterns.some(rx => rx.test(text));
+const hasStrongTotal = strongTotalLabels.test(text);
+const hasIgnore = ignorePattern.test(text) && !hasInklMwst && !hasFinalTotalLabel;
+const isTaxOnly = taxOnlyPattern.test(text) && !hasInklMwst && !hasFinalTotalLabel;
       matches.forEach((raw, pos) => {
         const value = parseEuro(raw);
         if (!Number.isFinite(value) || value <= 0) return;
