@@ -1182,12 +1182,18 @@ async function buildDocumentInsights(file) {
         archiveFallback.title
       ),
 
-      summary: firstValue(
-        pdf?.summary,
-        rec.dashboard?.summary,
-        archiveFallback.summary,
-        rec.serviceDesc
-      ),
+      summary: (() => {
+        const _m = inferDisplayModel({
+          ai:    pdf?.ai || null,
+          rawText: pdf?.text || '',
+          lines:   pdf?.lines || [],
+          fallbackTitle: file?.name || '',
+          amountHint:  firstValue(pdf?.grossAmount, rec.amountRaw),
+          dateHint:    firstValue(pdf?.invoiceDate, rec.invoiceDate),
+          issuerHint:  firstValue(pdf?.company, rec.sender)
+        });
+        return buildConservativeSummary(_m);
+      })(),
 
       keywords: uniqLower([
         ...(rec.keywords  || []),
@@ -1202,9 +1208,8 @@ async function buildDocumentInsights(file) {
       ]),
 
       documentKind: firstValue(
-        pdf?.ai?.type,
-        pdf?.documentKind,
-        detectDocumentKindFromText(`${rec.title || ''} ${rec.serviceDesc || ''}`),
+        pdf ? normalizeDisplayType(pdf.text || '', pdf?.ai?.semanticType || pdf?.ai?.type || '') : '',
+        normalizeDisplayType('', rec.title || ''),
         archiveFallback.documentKind
       ),
 
@@ -1214,7 +1219,11 @@ async function buildDocumentInsights(file) {
       invoiceNo:   firstValue(pdf?.invoiceNo,   rec.invoiceNo,  archiveFallback.invoiceNo),
       invoiceDate: firstValue(pdf?.invoiceDate, rec.invoiceDate),
       grossAmount: firstValue(pdf?.grossAmount, rec.amountRaw),
-      company:     sanitizeCompany(firstValue(pdf?.company, rec.sender)),
+      company: normalizeIssuer(
+        sanitizeCompany(firstValue(pdf?.company, rec.sender)),
+        pdf?.text || '',
+        pdf?.lines || []
+      ),
 
       customerNo:    firstValue(pdf?.customerNo),
       orderNo:       firstValue(pdf?.orderNo),
@@ -1263,7 +1272,18 @@ async function buildDocumentInsights(file) {
     out = {
       title: archiveFallback.title,
 
-      summary: firstValue(pdf.summary, archiveFallback.summary),
+      summary: (() => {
+        const _m = inferDisplayModel({
+          ai:    pdf.ai || null,
+          rawText: pdf.text || '',
+          lines:   pdf.lines || [],
+          fallbackTitle: file?.name || '',
+          amountHint:  pdf.grossAmount || '',
+          dateHint:    pdf.invoiceDate || '',
+          issuerHint:  pdf.company    || ''
+        });
+        return buildConservativeSummary(_m);
+      })(),
 
       keywords: uniqLower([
         ...(pdf.keywords || []),
@@ -1275,19 +1295,21 @@ async function buildDocumentInsights(file) {
         ...(archiveFallback.emails || [])
       ]),
 
-      documentKind: firstValue(
-        pdf?.ai?.type,
-        pdf.documentKind,
-        archiveFallback.documentKind
+      documentKind: normalizeDisplayType(
+        pdf.text || '',
+        pdf?.ai?.semanticType || pdf?.ai?.type || ''
       ),
 
       dueDate: firstValue(pdf.dueDate, archiveFallback.dueDate),
 
-      // FIX: direct AI-finalized values — no score-scale mismatch via resolveField
       invoiceNo:   firstValue(pdf.invoiceNo,   archiveFallback.invoiceNo),
       invoiceDate: firstValue(pdf.invoiceDate),
       grossAmount: firstValue(pdf.grossAmount),
-      company:     sanitizeCompany(firstValue(pdf.company)),
+      company:     normalizeIssuer(
+        sanitizeCompany(firstValue(pdf.company)),
+        pdf.text || '',
+        pdf.lines || []
+      ),
 
       customerNo:    firstValue(pdf.customerNo),
       orderNo:       firstValue(pdf.orderNo),
@@ -2300,13 +2322,15 @@ function normalizeDisplayType(rawText, hintType) {
   // Bescheid signals are unambiguous — never degrade to Rechnung
   if (/\b(grundbesitzabgabenbescheid|abgabenbescheid|steuerbescheid|gebührenbescheid|gebuehrenbescheid|festsetzungsbescheid|feststellungsbescheid|bescheid)\b/.test(t)) return 'Bescheid';
 
+  // Stornorechnung — detect before Rechnung to avoid wrong classification
+  if (/\b(stornorechnung|storno-?rechnung)\b/.test(t)) return 'Stornorechnung';
+
   // Unambiguous negative/payment signals
   if (/\bzahlungserinnerung\b/.test(t)) return 'Zahlungserinnerung';
   if (/\bmahnung\b/.test(t)) return 'Mahnung';
 
   // Gutschrift: only when it appears as a standalone heading or label, not buried in body text
   if (/(?:^|[\n\r])\s*gutschrift\b/m.test(t) || /\bgutschrift\s*(?:nr\.?|nummer|#)\b/i.test(t)) return 'Gutschrift';
-  if (/\bstornorechnung\b/.test(t)) return 'Storno';
 
   if (/\bangebot\b|\boffer\b|\bofferte\b/.test(t)) return 'Angebot';
 
@@ -2323,7 +2347,7 @@ function normalizeDisplayType(rawText, hintType) {
     rechnung: 'Rechnung', gutschrift: 'Gutschrift', mahnung: 'Mahnung',
     zahlungserinnerung: 'Zahlungserinnerung', angebot: 'Angebot',
     vertrag: 'Vertrag', abrechnung: 'Abrechnung', versicherung: 'Versicherung',
-    bescheid: 'Bescheid', storno: 'Storno'
+    bescheid: 'Bescheid', storno: 'Stornorechnung', stornorechnung: 'Stornorechnung'
   };
   if (h && hintMap[h]) return hintMap[h];
 
@@ -2332,11 +2356,18 @@ function normalizeDisplayType(rawText, hintType) {
 
 function _displayTypeLabel(type) {
   const map = {
-    'Rechnung': 'Rechnung', 'Gutschrift': 'Gutschrift', 'Mahnung': 'Mahnung',
-    'Zahlungserinnerung': 'Zahlungserinnerung', 'Angebot': 'Angebot',
-    'Vertrag': 'Vertrag', 'Abrechnung': 'Abrechnung',
-    'Versicherung': 'Versicherungsdokument', 'Bescheid': 'Bescheid',
-    'Storno': 'Stornorechnung', 'Dokument': 'Dokument'
+    'Rechnung':           'Rechnung',
+    'Gutschrift':         'Gutschrift',
+    'Mahnung':            'Mahnung',
+    'Zahlungserinnerung': 'Zahlungserinnerung',
+    'Angebot':            'Angebot',
+    'Vertrag':            'Vertrag',
+    'Abrechnung':         'Abrechnung',
+    'Versicherung':       'Versicherungsdokument',
+    'Bescheid':           'Bescheid',
+    'Stornorechnung':     'Stornorechnung',
+    'Storno':             'Stornorechnung',
+    'Dokument':           'Dokument'
   };
   return map[type] || type || 'Dokument';
 }
@@ -2981,7 +3012,7 @@ const structuredAmountRows = [
 ].filter(Boolean).join('');
 
 const structuredPartyRows = [
-  insights?.company ? `<div class="av3-meta-row"><span class="av3-meta-label">Firma</span><span class="av3-meta-val">${esc(insights.company)}</span></div>` : '',
+  _panelModel.issuer ? `<div class="av3-meta-row"><span class="av3-meta-label">Firma</span><span class="av3-meta-val">${esc(_panelModel.issuer)}</span></div>` : '',
   insights?.recipient ? `<div class="av3-meta-row"><span class="av3-meta-label">Empfänger</span><span class="av3-meta-val">${esc(insights.recipient)}</span></div>` : '',
   insights?.iban ? `<div class="av3-meta-row"><span class="av3-meta-label">IBAN</span><span class="av3-meta-val mono">${esc(insights.iban)}</span></div>` : '',
   insights?.bic ? `<div class="av3-meta-row"><span class="av3-meta-label">BIC</span><span class="av3-meta-val mono">${esc(insights.bic)}</span></div>` : '',
