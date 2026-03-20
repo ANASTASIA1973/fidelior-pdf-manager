@@ -1836,9 +1836,10 @@ function detectDocumentKindFromText(text) {
 
   if (/\bgutschrift\b/.test(t)) return 'Gutschrift';
   if (/\bstornorechnung\b|\bstorno\b/.test(t)) return 'Storno';
+  if (/\bzahlungserinnerung\b/.test(t)) return 'Zahlungserinnerung';
   if (/\bmahnung\b/.test(t)) return 'Mahnung';
   if (/\bangebot\b|\boffer\b|\bofferte\b/.test(t)) return 'Angebot';
-  if (/\bversicherung\b|\bpolice\b|\bschaden\b/.test(t)) return 'Versicherung';
+  if (/\bversicherung\b|\bpolice\b/.test(t)) return 'Versicherung';
   if (/\bvertrag\b|\bmietvertrag\b|\bdienstleistungsvertrag\b/.test(t)) return 'Vertrag';
   if (/\babrechnung\b/.test(t)) return 'Abrechnung';
   if (/\brechnung\b|\binvoice\b/.test(t)) return 'Rechnung';
@@ -2276,16 +2277,19 @@ function scoreSummaryLine(line) {
 
 function _naturalDocTypeLabel(type) {
   const map = {
-    rechnung:     'Rechnung',
-    gutschrift:   'Gutschrift',
-    mahnung:      'Mahnung',
-    angebot:      'Angebot',
-    vertrag:      'Vertrag',
-    abrechnung:   'Abrechnung',
-    versicherung: 'Versicherungsdokument',
-    dokument:     'Dokument'
+    rechnung:           'Rechnung',
+    gutschrift:         'Gutschrift',
+    mahnung:            'Mahnung',
+    zahlungserinnerung: 'Zahlungserinnerung',
+    angebot:            'Angebot',
+    vertrag:            'Vertrag',
+    abrechnung:         'Abrechnung',
+    versicherung:       'Versicherungsdokument',
+    storno:             'Stornorechnung',
+    dokument:           'Dokument'
   };
-  return map[String(type || '').toLowerCase()] || 'Dokument';
+  const key = String(type || '').toLowerCase();
+  return map[key] || (key ? (key.charAt(0).toUpperCase() + key.slice(1)) : 'Dokument');
 }
 
 function _lcFirst(s) {
@@ -2294,21 +2298,47 @@ function _lcFirst(s) {
   return str.charAt(0).toLowerCase() + str.slice(1);
 }
 
+function _fmtAmountStr(v) {
+  if (!v && v !== 0) return '';
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v) || v <= 0) return '';
+    return v.toFixed(2).replace('.', ',') + '\u00A0\u20AC';
+  }
+  const s = String(v).trim();
+  if (!s) return '';
+  if (/,\d{2}/.test(s) || /€/.test(s)) return s;
+  const n = parseFloat(s.replace(/\./g, '').replace(',', '.'));
+  if (Number.isFinite(n) && n > 0) return n.toFixed(2).replace('.', ',') + '\u00A0\u20AC';
+  return s;
+}
+
+function _extractDueDateFromLines(lines) {
+  const joined = (lines || []).join('\n');
+  const rxList = [
+    /\b(?:fällig am|faellig am|zahlbar bis|due date|due on|zahlungsfrist bis)\s*[:\-]?\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+    /\b(?:Zahlungsziel|Fälligkeit|Faelligkeit)\s*[:\-]?\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
+    /\b(?:bitte\s+(?:überweisen|zahlen)\s+bis)\s*[:\-]?\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i
+  ];
+  for (const rx of rxList) {
+    const m = joined.match(rx);
+    if (m && m[1]) return m[1].trim();
+  }
+  return '';
+}
+
 function _extractServiceHint(lines, excludes) {
-  // Hard-block: table header tokens — these must never appear in a summary
   const TABLE_HEADER_RX = /\b(menge|einheit|einzelpreis|pos\b|position|anz\b|art\.?-?nr|artikelnr|stk\.?|stück\.?|netto\s*eur|gesamt\s*eur|betrag\s*eur|preis\s*eur|netto\s*€|gesamt\s*€|qty|unit\s*price)\b/i;
   const BAD_LINE_RX     = /\b(iban|bic|swift|telefon|fax|www\.|e-?mail|ust-?id|steuer-?nr|handelsregister|bank|konto|überweisung|ueberweisung|fällig|faellig|zahlbar|sepa|mandats)\b/i;
   const ADDRESS_RX      = /\b\d{5}\s+[A-ZÄÖÜa-zäöüß]|\b(straße|strasse|postfach|str\.\s*\d)\b/i;
   const ONLY_CAPS_SHORT = /^[A-ZÄÖÜ0-9\s\-\/\.]{1,12}$/;
 
-  // Build exclusion set from already-resolved field values
   const excl = new Set(
-    [excludes.sender, excludes.date, excludes.amountStr, excludes.ref]
+    [excludes.sender, excludes.date, excludes.amountStr, excludes.ref, excludes.dueDate]
       .filter(Boolean)
       .map(v => v.toLowerCase().replace(/\s+/g, ' ').slice(0, 18))
   );
 
-  const SERVICE_RX = /\b(wartung|reparatur|lieferung|installation|sanierung|montage|inspektion|service|reinigung|beratung|prüfung|überwachung|abrechnung|betriebskosten|nebenkosten|heizkosten|strom|gas|wasser|telefon|internet|software|lizenz|pflege|entsorgung|hausverwaltung|instandhaltung|spülkasten|fracht|versand|material|ersatz|pumpe|ventil|zähler|heizung|sanitär|miete|pacht|nutzung|verwaltung|reparaturen|umbau|ausbau|einbau|demontage|revision)\b/i;
+  const SERVICE_RX = /\b(wartung|reparatur|lieferung|installation|sanierung|montage|inspektion|service|reinigung|beratung|prüfung|überwachung|abrechnung|betriebskosten|nebenkosten|heizkosten|strom|gas|wasser|internet|software|lizenz|pflege|entsorgung|hausverwaltung|instandhaltung|spülkasten|fracht|versand|material|ersatz|pumpe|ventil|zähler|heizung|sanitär|miete|pacht|nutzung|verwaltung|reparaturen|umbau|ausbau|einbau|demontage|revision|verbrauch|strom|abschlag)\b/i;
 
   const scored = [];
 
@@ -2321,17 +2351,10 @@ function _extractServiceHint(lines, excludes) {
     if (isBadSummaryLine(line)) continue;
     if (ONLY_CAPS_SHORT.test(line)) continue;
 
-    // Skip if line is essentially one of our resolved field values
     const ll = line.toLowerCase();
     if ([...excl].some(e => e.length >= 6 && ll.includes(e))) continue;
-
-    // Must have real lowercase words
     if (!/[a-zäöüß]{4,}/.test(line)) continue;
-
-    // Skip pure number / amount lines
     if (/^[\d\s.,€%\-\/]+$/.test(line)) continue;
-
-    // Skip lines that start with a digit and look like item rows
     if (/^\d+[\.,\s]/.test(line) && /\d{1,3},\d{2}/.test(line)) continue;
 
     let score = 0;
@@ -2340,8 +2363,6 @@ function _extractServiceHint(lines, excludes) {
     if (line.split(/\s+/).length >= 2 && line.split(/\s+/).length <= 10) score += 2;
     if (line.length >= 12 && line.length <= 65) score += 2;
     if (/[a-zäöüß]{4,}/.test(line)) score += 1;
-
-    // Penalise lines that are likely positions/references
     if (/^[A-Z]{2,}\d/.test(line)) score -= 3;
 
     if (score >= 5) scored.push({ text: line.replace(/^betreff\s*[:\-]?\s*/i, '').trim(), score });
@@ -2350,7 +2371,6 @@ function _extractServiceHint(lines, excludes) {
   scored.sort((a, b) => b.score - a.score);
   if (!scored.length) return '';
 
-  // Take best 1–2 items, joined with " und "
   const top = scored.slice(0, 2).map(c => c.text);
   const raw = top.length === 2 && top[0].length + top[1].length <= 70
     ? top.join(' und ')
@@ -2359,17 +2379,32 @@ function _extractServiceHint(lines, excludes) {
   return raw.length > 72 ? raw.slice(0, 69).trim() + '…' : raw;
 }
 
-function _composeSentence({ typeLabel, sender, date, amountStr, serviceHint, fallbackTitle }) {
+function _composeSentence({ typeLabel, typeKey, sender, date, amountStr, serviceHint, dueDate, fallbackTitle }) {
+  const tk = String(typeKey || typeLabel || '').toLowerCase();
   let sentence = typeLabel;
 
   if (sender) sentence += ` von ${sender}`;
-  if (date)   sentence += ` vom ${date}`;
-  if (amountStr) sentence += ` über ${amountStr}`;
-  if (serviceHint) sentence += ` für ${_lcFirst(serviceHint)}`;
+
+  if (tk === 'mahnung' || tk === 'zahlungserinnerung') {
+    if (amountStr) sentence += ` über ${amountStr}`;
+    if (dueDate)   sentence += ` mit Zahlungsfrist bis ${dueDate}`;
+    else if (date) sentence += ` vom ${date}`;
+  } else if (tk === 'versicherung' || tk === 'versicherungsdokument') {
+    if (serviceHint) sentence += ` für ${_lcFirst(serviceHint)}`;
+    if (amountStr)   sentence += ` mit Jahresbeitrag von ${amountStr}`;
+    if (date)        sentence += ` (gültig bis ${date})`;
+  } else if (tk === 'gutschrift' || tk === 'storno' || tk === 'stornorechnung') {
+    if (date)      sentence += ` vom ${date}`;
+    if (amountStr) sentence += ` über ${amountStr}`;
+  } else {
+    // Rechnung, Angebot, Vertrag, Abrechnung, Dokument
+    if (date)        sentence += ` vom ${date}`;
+    if (amountStr)   sentence += ` über ${amountStr}`;
+    if (serviceHint) sentence += ` für ${_lcFirst(serviceHint)}`;
+  }
 
   if (!sentence.endsWith('.')) sentence += '.';
 
-  // If nothing meaningful was added, fall back to file name
   if (sentence === `${typeLabel}.`) {
     const fb = String(fallbackTitle || '').replace(/\.pdf$/i, '').trim();
     return fb || sentence;
@@ -2381,27 +2416,26 @@ function _composeSentence({ typeLabel, sender, date, amountStr, serviceHint, fal
 function _buildSummaryFromAiFields(ai, lines, fallbackTitle) {
   if (!ai) return String(fallbackTitle || '').replace(/\.pdf$/i, '').trim();
 
-  const sender    = String(ai.fields?.sender?.value    || '').trim();
-  const ref       = String(ai.fields?.reference?.value || '').trim();
-  const amount    = ai.fields?.amount?.value;
-  const date      = String(ai.fields?.date?.value      || '').trim();
-  const type      = String(ai.type || '').toLowerCase();
+  const sender   = String(ai.fields?.sender?.value    || '').trim();
+  const ref      = String(ai.fields?.reference?.value || '').trim();
+  const amount   = ai.fields?.amount?.value;
+  const date     = String(ai.fields?.date?.value      || '').trim();
+  // Use semanticType for richer type resolution (mahnung, zahlungserinnerung, versicherung…)
+  const typeRaw  = String(ai.semanticType || ai.type || '').toLowerCase();
 
-  const typeLabel  = _naturalDocTypeLabel(type);
-  const amountStr  = (Number.isFinite(amount) && amount > 0)
-    ? amount.toFixed(2).replace('.', ',') + '\u00A0\u20AC'
-    : '';
+  const typeLabel = _naturalDocTypeLabel(typeRaw);
+  const amountStr = _fmtAmountStr(amount);
+  const dueDate   = _extractDueDateFromLines(lines);
 
-  const serviceHint = _extractServiceHint(lines || [], { sender, ref, amountStr, date });
+  const serviceHint = _extractServiceHint(lines || [], { sender, ref, amountStr, date, dueDate });
 
-  return _composeSentence({ typeLabel, sender, date, amountStr, serviceHint, fallbackTitle });
+  return _composeSentence({ typeLabel, typeKey: typeRaw, sender, date, amountStr, serviceHint, dueDate, fallbackTitle });
 }
 
 function buildSummaryFromPdfText(text, lines, fallbackTitle) {
   const t = String(text || '');
   const cleanLines = (lines || []).map(x => String(x || '').trim()).filter(Boolean);
 
-  // ── 1. Resolve fields from candidate engines ──
   const invoiceCands = extractInvoiceNoCandidates(t, cleanLines);
   const amountCands  = extractAmountCandidates(t);
   const companyCands = extractCompanyCandidates(t, cleanLines);
@@ -2412,41 +2446,31 @@ function buildSummaryFromPdfText(text, lines, fallbackTitle) {
   const company = resolveField(companyCands);
   const date    = resolveField(dateCands);
 
-  // ── 2. Document kind ──
   const docKind   = detectDocumentKindFromText(t);
   const typeLabel = _naturalDocTypeLabel(docKind.toLowerCase());
+  const amountStr = _fmtAmountStr(amount.value);
+  const dueDate   = _extractDueDateFromLines(cleanLines);
 
-  // ── 3. Format amount display string ──
-  const amountStr = (() => {
-    const v = amount.value;
-    if (!v) return '';
-    // already formatted as "1.234,56 €" — pass through
-    if (typeof v === 'string' && /,\d{2}/.test(v)) return v;
-    // numeric
-    const n = parseFloat(String(v).replace(/\./g, '').replace(',', '.'));
-    if (Number.isFinite(n) && n > 0) return n.toFixed(2).replace('.', ',') + '\u00A0\u20AC';
-    return '';
-  })();
-
-  // ── 4. Extract service hint from document lines ──
   const serviceHint = _extractServiceHint(cleanLines, {
-    sender: company.value,
-    ref:    invoice.value,
+    sender:    company.value,
+    ref:       invoice.value,
     amountStr,
-    date:   date.value
+    date:      date.value,
+    dueDate
   });
 
-  // ── 5. Compose natural sentence ──
   const summary = _composeSentence({
     typeLabel,
-    sender:       company.value,
-    date:         date.value,
+    typeKey:     docKind.toLowerCase(),
+    sender:      company.value,
+    date:        date.value,
     amountStr,
     serviceHint,
+    dueDate,
     fallbackTitle
   });
 
-  console.log('[FDL SUMMARY ENGINE v3]', { company, invoice, amount, date, docKind, serviceHint, summary });
+  console.log('[FDL SUMMARY ENGINE v3]', { company, invoice, amount, date, docKind, serviceHint, dueDate, summary });
 
   return summary;
 }
@@ -2650,6 +2674,7 @@ const out = {
   ai,
 
   documentKind:
+    ai?.semanticType ||
     ai?.type ||
     detectDocumentKindFromText(text),
 
@@ -2727,8 +2752,10 @@ async function renderPanel(file) {
   const open = tasks.filter(t => t.status !== 'done');
   const insights = await buildDocumentInsights(file);
 
+  // DISPLAY type: prefer semantic insight over storage folder type
   const docType =
     insights?.documentKind ||
+    insights?.ai?.semanticType ||
     (core?.type === 'Rechnung' ? 'Rechnung' : core?.type) ||
     fmtFolderType(file.folderType);
 
@@ -2997,48 +3024,37 @@ renderPDF(file);
 }
 
 function buildArchivTitle(ctx) {
-  const { docType, sender, amount, invoiceNo } = ctx;
+  const { docType, sender, amount } = ctx;
 
-  const parts = [];
+  const typeLabel = _naturalDocTypeLabel(String(docType || '').toLowerCase());
+  const amountStr = _fmtAmountStr(amount);
 
-  if (docType) parts.push(docType);
-  if (invoiceNo) parts.push(invoiceNo);
-  if (sender) parts.push(sender);
-  if (amount) parts.push(amount);
+  const parts = [typeLabel];
+  if (sender)    parts.push(sender);
+  if (amountStr) parts.push(amountStr);
 
-  return parts.join(' – ');
+  return parts.join(' \u2013 ');
 }
 
 function buildArchivSummary(ctx) {
   const {
-    docType, sender, amount, docDate, objectCode, objectName, file
+    docType, sender, amount, docDate, file
   } = ctx || {};
 
   const typeLabel = _naturalDocTypeLabel(String(docType || '').toLowerCase());
+  const typeKey   = String(docType || '').toLowerCase();
+  const amountStr = _fmtAmountStr(amount);
 
-  // Format amount string if it's a raw number or German format
-  const amountStr = (() => {
-    if (!amount) return '';
-    const s = String(amount).trim();
-    if (/,\d{2}/.test(s) || /€/.test(s)) return s;
-    const n = parseFloat(s.replace(/\./g, '').replace(',', '.'));
-    if (Number.isFinite(n) && n > 0) return n.toFixed(2).replace('.', ',') + '\u00A0\u20AC';
-    return s || '';
-  })();
-
-  let sentence = typeLabel;
-  if (sender) sentence += ` von ${sender}`;
-  if (docDate) sentence += ` vom ${docDate}`;
-  if (amountStr) sentence += ` über ${amountStr}`;
-  if (!sentence.endsWith('.')) sentence += '.';
-
-  // If nothing meaningful was added beyond the type, fall back to file name
-  if (sentence === `${typeLabel}.`) {
-    const fb = file?.name ? file.name.replace(/\.pdf$/i, '').trim() : '';
-    return fb || sentence;
-  }
-
-  return sentence;
+  return _composeSentence({
+    typeLabel,
+    typeKey,
+    sender:      sender || '',
+    date:        docDate || '',
+    amountStr,
+    serviceHint: '',
+    dueDate:     '',
+    fallbackTitle: file?.name || ''
+  });
 }
 function railButtons(taskCount) {
   return `
