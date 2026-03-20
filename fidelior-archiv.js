@@ -1117,7 +1117,7 @@ function fallbackInsightsFromArchive(file) {
    return {
     title,
     summary,
-    documentKind: detectDocumentKindFromText(`${docType} ${file?.name || ''}`),
+    documentKind: normalizeDisplayType(docType, ''),
     keywords: uniqClean([docType, objectCode, subfolder]),
     emails: [],
     dueDate: '',
@@ -1832,19 +1832,7 @@ function extractDueDateFromText(text) {
 }
 
 function detectDocumentKindFromText(text) {
-  const t = String(text || '').toLowerCase();
-
-  if (/\bgutschrift\b/.test(t)) return 'Gutschrift';
-  if (/\bstornorechnung\b|\bstorno\b/.test(t)) return 'Storno';
-  if (/\bzahlungserinnerung\b/.test(t)) return 'Zahlungserinnerung';
-  if (/\bmahnung\b/.test(t)) return 'Mahnung';
-  if (/\bangebot\b|\boffer\b|\bofferte\b/.test(t)) return 'Angebot';
-  if (/\bversicherung\b|\bpolice\b/.test(t)) return 'Versicherung';
-  if (/\bvertrag\b|\bmietvertrag\b|\bdienstleistungsvertrag\b/.test(t)) return 'Vertrag';
-  if (/\babrechnung\b/.test(t)) return 'Abrechnung';
-  if (/\brechnung\b|\binvoice\b/.test(t)) return 'Rechnung';
-
-  return 'Dokument';
+  return normalizeDisplayType(String(text || ''), '');
 }
 
 function extractKeywordsFromText(text, lines) {
@@ -2272,31 +2260,16 @@ function scoreSummaryLine(line) {
   return score;
 }
 /* ══════════════════════════════════════════════════════════════════════════
-   SUMMARY ENGINE — natürliche Satzbildung
+   DISPLAY MODEL PIPELINE  v5
+   ══════════════════════════════════════════════════════════════════════════
+   Architecture:
+     STEP 1  normalizeDisplayType   – conservative type from text signals
+     STEP 2  isForbiddenIssuerCandidate / normalizeIssuer  – role separation
+     STEP 3  inferDisplayModel      – builds validated internal model
+     STEP 4  buildConservativeTitle / buildConservativeSummary  – render only
    ══════════════════════════════════════════════════════════════════════════ */
 
-function _naturalDocTypeLabel(type) {
-  const map = {
-    rechnung:           'Rechnung',
-    gutschrift:         'Gutschrift',
-    mahnung:            'Mahnung',
-    zahlungserinnerung: 'Zahlungserinnerung',
-    angebot:            'Angebot',
-    vertrag:            'Vertrag',
-    abrechnung:         'Abrechnung',
-    versicherung:       'Versicherungsdokument',
-    storno:             'Stornorechnung',
-    dokument:           'Dokument'
-  };
-  const key = String(type || '').toLowerCase();
-  return map[key] || (key ? (key.charAt(0).toUpperCase() + key.slice(1)) : 'Dokument');
-}
-
-function _lcFirst(s) {
-  const str = String(s || '').trim();
-  if (!str) return str;
-  return str.charAt(0).toLowerCase() + str.slice(1);
-}
+/* ── helpers ── */
 
 function _fmtAmountStr(v) {
   if (!v && v !== 0) return '';
@@ -2311,6 +2284,122 @@ function _fmtAmountStr(v) {
   if (Number.isFinite(n) && n > 0) return n.toFixed(2).replace('.', ',') + '\u00A0\u20AC';
   return s;
 }
+
+function _lcFirst(s) {
+  const str = String(s || '').trim();
+  if (!str) return str;
+  return str.charAt(0).toLowerCase() + str.slice(1);
+}
+
+/* ── STEP 1: conservative type detection ── */
+
+function normalizeDisplayType(rawText, hintType) {
+  const t = String(rawText || '').toLowerCase();
+  const h = String(hintType || '').toLowerCase();
+
+  // Bescheid signals are unambiguous — never degrade to Rechnung
+  if (/\b(grundbesitzabgabenbescheid|abgabenbescheid|steuerbescheid|gebührenbescheid|gebuehrenbescheid|festsetzungsbescheid|feststellungsbescheid|bescheid)\b/.test(t)) return 'Bescheid';
+
+  // Unambiguous negative/payment signals
+  if (/\bzahlungserinnerung\b/.test(t)) return 'Zahlungserinnerung';
+  if (/\bmahnung\b/.test(t)) return 'Mahnung';
+
+  // Gutschrift: only when it appears as a standalone heading or label, not buried in body text
+  if (/(?:^|[\n\r])\s*gutschrift\b/m.test(t) || /\bgutschrift\s*(?:nr\.?|nummer|#)\b/i.test(t)) return 'Gutschrift';
+  if (/\bstornorechnung\b/.test(t)) return 'Storno';
+
+  if (/\bangebot\b|\boffer\b|\bofferte\b/.test(t)) return 'Angebot';
+
+  // Versicherung: only if clearly dominant (not just a single casual mention in a utility bill)
+  if (/\b(versicherungsschein|versicherungspolice|police\s*nr|police\s*nummer|versicherungsbeitrag|jahresbeitrag)\b/.test(t)) return 'Versicherung';
+  if (/\bversicherung\b/.test(t) && !/\brechnung\b|\binvoice\b/.test(t)) return 'Versicherung';
+
+  if (/\bvertrag\b|\bmietvertrag\b|\bdienstleistungsvertrag\b/.test(t)) return 'Vertrag';
+  if (/\babrechnung\b/.test(t)) return 'Abrechnung';
+  if (/\brechnung\b|\binvoice\b/.test(t)) return 'Rechnung';
+
+  // Fallback: try AI hint if it maps to something known
+  const hintMap = {
+    rechnung: 'Rechnung', gutschrift: 'Gutschrift', mahnung: 'Mahnung',
+    zahlungserinnerung: 'Zahlungserinnerung', angebot: 'Angebot',
+    vertrag: 'Vertrag', abrechnung: 'Abrechnung', versicherung: 'Versicherung',
+    bescheid: 'Bescheid', storno: 'Storno'
+  };
+  if (h && hintMap[h]) return hintMap[h];
+
+  return 'Dokument';
+}
+
+function _displayTypeLabel(type) {
+  const map = {
+    'Rechnung': 'Rechnung', 'Gutschrift': 'Gutschrift', 'Mahnung': 'Mahnung',
+    'Zahlungserinnerung': 'Zahlungserinnerung', 'Angebot': 'Angebot',
+    'Vertrag': 'Vertrag', 'Abrechnung': 'Abrechnung',
+    'Versicherung': 'Versicherungsdokument', 'Bescheid': 'Bescheid',
+    'Storno': 'Stornorechnung', 'Dokument': 'Dokument'
+  };
+  return map[type] || type || 'Dokument';
+}
+
+/* ── STEP 2: issuer role separation ── */
+
+function isForbiddenIssuerCandidate(name, rawText, lines) {
+  if (!name) return true;
+  const s = String(name).trim();
+  if (s.length < 2) return true;
+
+  // Hard block: postal/logistics services
+  if (/\b(deutsche\s*post|dhl\b|hermes\b|dpd\b|ups\b|fedex\b|gls\b)\b/i.test(s)) return true;
+
+  // Hard block: typical bank/payment context names
+  const sl = s.toLowerCase();
+  if (/\b(volksbank|sparkasse|commerzbank|deutsche\s*bank|postbank|comdirect|ing\b|dkb\b|targobank|hypovereinsbank)\b/i.test(s)) {
+    // Only block if the name appears exclusively in a bank/payment line, not as letterhead
+    const linesArr = Array.isArray(lines) ? lines : [];
+    const inBankCtx = linesArr.some(l => {
+      const ll = String(l || '').toLowerCase();
+      return ll.includes(sl.slice(0, 10)) && /\b(iban|bic|kontonr|konto|blz|lastschrift|einzug|bankverbindung)\b/.test(ll);
+    });
+    if (inBankCtx) return true;
+  }
+
+  // Hard block: if name is only found in address-window zone (lines 2–8) and NOT in letterhead (lines 0–1)
+  const linesArr = Array.isArray(lines) ? lines : [];
+  if (linesArr.length >= 5) {
+    const shortSl = sl.slice(0, 12);
+    const inHeader  = linesArr.slice(0, 2).some(l => String(l || '').toLowerCase().includes(shortSl));
+    const inAddrWin = linesArr.slice(2, 9).some(l => String(l || '').toLowerCase().includes(shortSl));
+    if (inAddrWin && !inHeader) return true;
+  }
+
+  return false;
+}
+
+function isLikelyRecipientContext(lines, name) {
+  if (!name) return false;
+  const sl = String(name).toLowerCase().slice(0, 14);
+  const RECIP_CTX = /\b(rechnung\s*an|lieferadresse|rechnungsadresse|empf.nger|an\s*:|zu\s*h.nden|kunde\s*:|kundennummer|auftraggeber|leistungsempf.nger)\b/i;
+  const linesArr = Array.isArray(lines) ? lines : [];
+
+  for (let i = 0; i < linesArr.length; i++) {
+    if (!RECIP_CTX.test(String(linesArr[i] || ''))) continue;
+    for (let j = i + 1; j <= Math.min(i + 5, linesArr.length - 1); j++) {
+      if (String(linesArr[j] || '').toLowerCase().includes(sl)) return true;
+    }
+  }
+  return false;
+}
+
+function normalizeIssuer(candidateName, rawText, lines) {
+  if (!candidateName) return '';
+  const s = String(candidateName).trim();
+  if (!s || s.length < 2) return '';
+  if (isForbiddenIssuerCandidate(s, rawText, lines)) return '';
+  if (isLikelyRecipientContext(lines, s)) return '';
+  return s;
+}
+
+/* ── helpers for display model ── */
 
 function _extractDueDateFromLines(lines) {
   const joined = (lines || []).join('\n');
@@ -2328,20 +2417,19 @@ function _extractDueDateFromLines(lines) {
 
 function _extractServiceHint(lines, excludes) {
   const TABLE_HEADER_RX = /\b(menge|einheit|einzelpreis|pos\b|position|anz\b|art\.?-?nr|artikelnr|stk\.?|stück\.?|netto\s*eur|gesamt\s*eur|betrag\s*eur|preis\s*eur|netto\s*€|gesamt\s*€|qty|unit\s*price)\b/i;
-  const BAD_LINE_RX     = /\b(iban|bic|swift|telefon|fax|www\.|e-?mail|ust-?id|steuer-?nr|handelsregister|bank|konto|überweisung|ueberweisung|fällig|faellig|zahlbar|sepa|mandats)\b/i;
+  const BAD_LINE_RX     = /\b(iban|bic|swift|telefon|fax|www\.|e-?mail|ust-?id|steuer-?nr|handelsregister|bank|konto|überweisung|ueberweisung|fällig|faellig|zahlbar|sepa|mandats|einzug|lastschrift)\b/i;
   const ADDRESS_RX      = /\b\d{5}\s+[A-ZÄÖÜa-zäöüß]|\b(straße|strasse|postfach|str\.\s*\d)\b/i;
   const ONLY_CAPS_SHORT = /^[A-ZÄÖÜ0-9\s\-\/\.]{1,12}$/;
 
   const excl = new Set(
-    [excludes.sender, excludes.date, excludes.amountStr, excludes.ref, excludes.dueDate]
+    [excludes.issuer, excludes.date, excludes.amountStr, excludes.ref, excludes.dueDate]
       .filter(Boolean)
       .map(v => v.toLowerCase().replace(/\s+/g, ' ').slice(0, 18))
   );
 
-  const SERVICE_RX = /\b(wartung|reparatur|lieferung|installation|sanierung|montage|inspektion|service|reinigung|beratung|prüfung|überwachung|abrechnung|betriebskosten|nebenkosten|heizkosten|strom|gas|wasser|internet|software|lizenz|pflege|entsorgung|hausverwaltung|instandhaltung|spülkasten|fracht|versand|material|ersatz|pumpe|ventil|zähler|heizung|sanitär|miete|pacht|nutzung|verwaltung|reparaturen|umbau|ausbau|einbau|demontage|revision|verbrauch|strom|abschlag)\b/i;
+  const SERVICE_RX = /\b(wartung|reparatur|lieferung|installation|sanierung|montage|inspektion|service|reinigung|beratung|prüfung|überwachung|betriebskosten|nebenkosten|heizkosten|strom|gas|wasser|internet|software|lizenz|pflege|entsorgung|hausverwaltung|instandhaltung|spülkasten|fracht|versand|material|ersatz|pumpe|ventil|zähler|heizung|sanitär|miete|pacht|nutzung|verwaltung|reparaturen|umbau|ausbau|einbau|demontage|revision|verbrauch|abschlag|yachthafen|hafen|marina|moor)\b/i;
 
   const scored = [];
-
   for (const raw of (lines || [])) {
     const line = String(raw || '').trim();
     if (!line || line.length < 8 || line.length > 110) continue;
@@ -2364,115 +2452,158 @@ function _extractServiceHint(lines, excludes) {
     if (line.length >= 12 && line.length <= 65) score += 2;
     if (/[a-zäöüß]{4,}/.test(line)) score += 1;
     if (/^[A-Z]{2,}\d/.test(line)) score -= 3;
-
     if (score >= 5) scored.push({ text: line.replace(/^betreff\s*[:\-]?\s*/i, '').trim(), score });
   }
 
   scored.sort((a, b) => b.score - a.score);
   if (!scored.length) return '';
-
   const top = scored.slice(0, 2).map(c => c.text);
-  const raw = top.length === 2 && top[0].length + top[1].length <= 70
-    ? top.join(' und ')
-    : top[0];
-
+  const raw = top.length === 2 && top[0].length + top[1].length <= 70 ? top.join(' und ') : top[0];
   return raw.length > 72 ? raw.slice(0, 69).trim() + '…' : raw;
 }
 
-function _composeSentence({ typeLabel, typeKey, sender, date, amountStr, serviceHint, dueDate, fallbackTitle }) {
-  const tk = String(typeKey || typeLabel || '').toLowerCase();
-  let sentence = typeLabel;
+/* ── STEP 3: infer the display model ── */
 
-  if (sender) sentence += ` von ${sender}`;
+function inferDisplayModel({ ai, rawText, lines, fallbackTitle, amountHint, dateHint, issuerHint }) {
+  const t = String(rawText || '');
+  const linesArr = Array.isArray(lines) ? lines : [];
 
-  if (tk === 'mahnung' || tk === 'zahlungserinnerung') {
-    if (amountStr) sentence += ` über ${amountStr}`;
-    if (dueDate)   sentence += ` mit Zahlungsfrist bis ${dueDate}`;
-    else if (date) sentence += ` vom ${date}`;
-  } else if (tk === 'versicherung' || tk === 'versicherungsdokument') {
-    if (serviceHint) sentence += ` für ${_lcFirst(serviceHint)}`;
-    if (amountStr)   sentence += ` mit Jahresbeitrag von ${amountStr}`;
-    if (date)        sentence += ` (gültig bis ${date})`;
-  } else if (tk === 'gutschrift' || tk === 'storno' || tk === 'stornorechnung') {
-    if (date)      sentence += ` vom ${date}`;
-    if (amountStr) sentence += ` über ${amountStr}`;
+  // --- DISPLAY TYPE ---
+  const aiTypeHint = String(ai?.semanticType || ai?.type || '').toLowerCase();
+  const displayType = normalizeDisplayType(t, aiTypeHint);
+
+  // --- AMOUNT ---
+  const aiAmount = ai?.fields?.amount?.value;
+  const rawAmount = amountHint || '';
+  let amount = '';
+  if (Number.isFinite(aiAmount) && aiAmount > 0) {
+    amount = _fmtAmountStr(aiAmount);
+  } else if (rawAmount) {
+    amount = _fmtAmountStr(rawAmount);
+  }
+
+  // --- DATE ---
+  const aiDate = String(ai?.fields?.date?.value || '').trim();
+  const date   = aiDate || String(dateHint || '').trim();
+
+  // --- REFERENCE ---
+  const reference = String(ai?.fields?.reference?.value || '').trim();
+
+  // --- DUE DATE ---
+  const dueDate = _extractDueDateFromLines(linesArr);
+
+  // --- ISSUER ---
+  const aiSender  = String(ai?.fields?.sender?.value || '').trim();
+  const rawIssuer = issuerHint || '';
+  // Try AI sender first; if blocked, try raw hint; if also blocked, leave empty
+  const issuerCandidate = aiSender || rawIssuer;
+  const issuer = normalizeIssuer(issuerCandidate, t, linesArr);
+  const issuerConfidence = issuer
+    ? (ai?.fields?.sender?.confidence === 'high' ? 'high' : 'medium')
+    : 'low';
+
+  // --- SERVICE HINT --- (only for types that benefit from it)
+  const typeKey = displayType.toLowerCase();
+  let serviceHint = '';
+  if (['rechnung', 'abrechnung', 'versicherung', 'vertrag', 'bescheid', 'dokument'].includes(typeKey)) {
+    serviceHint = _extractServiceHint(linesArr, {
+      issuer, ref: reference, amountStr: amount, date, dueDate
+    });
+  }
+
+  return {
+    displayType,
+    typeLabel: _displayTypeLabel(displayType),
+    typeKey,
+    issuer,
+    issuerConfidence,
+    amount,
+    date,
+    reference,
+    dueDate,
+    serviceHint,
+    fallbackTitle: String(fallbackTitle || '').replace(/\.pdf$/i, '').trim()
+  };
+}
+
+/* ── STEP 4a: conservative title ── */
+
+function buildConservativeTitle(model) {
+  const { typeLabel, issuer, amount } = model;
+  const parts = [typeLabel];
+  if (issuer)  parts.push(issuer);
+  if (amount)  parts.push(amount);
+  return parts.join(' \u2013 ');  // en-dash
+}
+
+/* ── STEP 4b: conservative summary ── */
+
+function buildConservativeSummary(model) {
+  const { typeLabel, typeKey, issuer, amount, date, dueDate, serviceHint, fallbackTitle } = model;
+  let s = typeLabel;
+
+  // Issuer: only add "von X" when we have reasonable confidence
+  if (issuer) s += ` von ${issuer}`;
+
+  if (typeKey === 'mahnung' || typeKey === 'zahlungserinnerung') {
+    if (amount)  s += ` über ${amount}`;
+    if (dueDate) s += ` mit Zahlungsfrist bis ${dueDate}`;
+    else if (date) s += ` vom ${date}`;
+  } else if (typeKey === 'versicherung' || typeKey === 'versicherungsdokument') {
+    if (serviceHint) s += ` für ${_lcFirst(serviceHint)}`;
+    if (amount)      s += ` mit Jahresbeitrag von ${amount}`;
+    // Skip date for insurance — not meaningful as invoice date
+  } else if (typeKey === 'gutschrift' || typeKey === 'storno' || typeKey === 'stornorechnung') {
+    if (date)   s += ` vom ${date}`;
+    if (amount) s += ` über ${amount}`;
+  } else if (typeKey === 'bescheid') {
+    if (date)         s += ` vom ${date}`;
+    if (amount)       s += ` über ${amount}`;
+    if (serviceHint)  s += ` für ${_lcFirst(serviceHint)}`;
   } else {
     // Rechnung, Angebot, Vertrag, Abrechnung, Dokument
-    if (date)        sentence += ` vom ${date}`;
-    if (amountStr)   sentence += ` über ${amountStr}`;
-    if (serviceHint) sentence += ` für ${_lcFirst(serviceHint)}`;
+    if (date)        s += ` vom ${date}`;
+    if (amount)      s += ` über ${amount}`;
+    if (serviceHint) s += ` für ${_lcFirst(serviceHint)}`;
   }
 
-  if (!sentence.endsWith('.')) sentence += '.';
+  if (!s.endsWith('.')) s += '.';
 
-  if (sentence === `${typeLabel}.`) {
-    const fb = String(fallbackTitle || '').replace(/\.pdf$/i, '').trim();
-    return fb || sentence;
-  }
-
-  return sentence;
+  // If nothing meaningful was added at all, use fallback file name
+  if (s === `${typeLabel}.` && fallbackTitle) return fallbackTitle;
+  return s;
 }
 
-function _buildSummaryFromAiFields(ai, lines, fallbackTitle) {
-  if (!ai) return String(fallbackTitle || '').replace(/\.pdf$/i, '').trim();
-
-  const sender   = String(ai.fields?.sender?.value    || '').trim();
-  const ref      = String(ai.fields?.reference?.value || '').trim();
-  const amount   = ai.fields?.amount?.value;
-  const date     = String(ai.fields?.date?.value      || '').trim();
-  // Use semanticType for richer type resolution (mahnung, zahlungserinnerung, versicherung…)
-  const typeRaw  = String(ai.semanticType || ai.type || '').toLowerCase();
-
-  const typeLabel = _naturalDocTypeLabel(typeRaw);
-  const amountStr = _fmtAmountStr(amount);
-  const dueDate   = _extractDueDateFromLines(lines);
-
-  const serviceHint = _extractServiceHint(lines || [], { sender, ref, amountStr, date, dueDate });
-
-  return _composeSentence({ typeLabel, typeKey: typeRaw, sender, date, amountStr, serviceHint, dueDate, fallbackTitle });
+/* ── Legacy shim: _naturalDocTypeLabel still used by a few fallback paths ── */
+function _naturalDocTypeLabel(type) {
+  return _displayTypeLabel(normalizeDisplayType('', String(type || '')));
 }
 
+/* ── buildSummaryFromPdfText (no-AI path) ── */
 function buildSummaryFromPdfText(text, lines, fallbackTitle) {
   const t = String(text || '');
   const cleanLines = (lines || []).map(x => String(x || '').trim()).filter(Boolean);
 
-  const invoiceCands = extractInvoiceNoCandidates(t, cleanLines);
   const amountCands  = extractAmountCandidates(t);
   const companyCands = extractCompanyCandidates(t, cleanLines);
   const dateCands    = extractDateCandidates(t, cleanLines);
 
-  const invoice = resolveField(invoiceCands);
   const amount  = resolveField(amountCands);
   const company = resolveField(companyCands);
   const date    = resolveField(dateCands);
 
-  const docKind   = detectDocumentKindFromText(t);
-  const typeLabel = _naturalDocTypeLabel(docKind.toLowerCase());
-  const amountStr = _fmtAmountStr(amount.value);
-  const dueDate   = _extractDueDateFromLines(cleanLines);
-
-  const serviceHint = _extractServiceHint(cleanLines, {
-    sender:    company.value,
-    ref:       invoice.value,
-    amountStr,
-    date:      date.value,
-    dueDate
+  const model = inferDisplayModel({
+    ai: null,
+    rawText: t,
+    lines: cleanLines,
+    fallbackTitle,
+    amountHint:  amount.value,
+    dateHint:    date.value,
+    issuerHint:  company.value
   });
 
-  const summary = _composeSentence({
-    typeLabel,
-    typeKey:     docKind.toLowerCase(),
-    sender:      company.value,
-    date:        date.value,
-    amountStr,
-    serviceHint,
-    dueDate,
-    fallbackTitle
-  });
-
-  console.log('[FDL SUMMARY ENGINE v3]', { company, invoice, amount, date, docKind, serviceHint, dueDate, summary });
-
-  return summary;
+  console.log('[FDL DISPLAY MODEL v5 no-ai]', model);
+  return buildConservativeSummary(model);
 }
 
 function resolveBestCandidate(list) {
@@ -2673,10 +2804,7 @@ const out = {
   // zentrale Engine zuerst
   ai,
 
-  documentKind:
-    ai?.semanticType ||
-    ai?.type ||
-    detectDocumentKindFromText(text),
+  documentKind: normalizeDisplayType(text, ai?.semanticType || ai?.type || ''),
 
   // FIX: when AI ran, trust it fully — no fallback to old extractors
   invoiceNo:   ai ? (invoiceField?.value  || '') : extractInvoiceNoFromText(text, lines),
@@ -2716,10 +2844,20 @@ const out = {
   companyConfidence: senderField?.confidence  || 'low',
   dateConfidence:    dateField?.confidence    || 'low',
 
-  // FIX: build summary from validated AI fields, not from raw-text re-extraction
-  summary: ai
-    ? _buildSummaryFromAiFields(ai, lines, file?.name || '')
-    : buildSummaryFromPdfText(text, lines, file?.name || '')
+  // Build summary via display model pipeline
+  summary: (() => {
+    const model = inferDisplayModel({
+      ai,
+      rawText: text,
+      lines,
+      fallbackTitle: file?.name || '',
+      amountHint:  ai ? _fmtAiAmount(amountField?.value) : '',
+      dateHint:    ai ? (dateField?.value || '') : '',
+      issuerHint:  ai ? (senderField?.value || '') : ''
+    });
+    console.log('[FDL DISPLAY MODEL v5]', model);
+    return buildConservativeSummary(model);
+  })()
 };
     __av3PdfInsightCache.set(cacheKey, out);
     return out;
@@ -2752,30 +2890,21 @@ async function renderPanel(file) {
   const open = tasks.filter(t => t.status !== 'done');
   const insights = await buildDocumentInsights(file);
 
-  // DISPLAY type: prefer semantic insight over storage folder type
-  const docType =
-    insights?.documentKind ||
-    insights?.ai?.semanticType ||
-    (core?.type === 'Rechnung' ? 'Rechnung' : core?.type) ||
-    fmtFolderType(file.folderType);
+  // Build display model from insights for correct type, issuer, title and summary
+  const _panelModel = inferDisplayModel({
+    ai:          insights?.ai || null,
+    rawText:     insights?.text || '',
+    lines:       insights?.lines || [],
+    fallbackTitle: file.name || '',
+    amountHint:  insights?.grossAmount || core?.amount || m.betrag || '',
+    dateHint:    insights?.invoiceDate  || core?.date  || m.datum  || '',
+    issuerHint:  insights?.company     || core?.sender || m.absender || ''
+  });
 
-  const amount =
-    insights?.grossAmount ||
-    core?.amount ||
-    m.betrag ||
-    '';
-
-  const docDate =
-    insights?.invoiceDate ||
-    core?.date ||
-    m.datum ||
-    '';
-
-  const sender =
-    insights?.company ||
-    core?.sender ||
-    m.absender ||
-    '';
+  const docType   = _panelModel.typeLabel;
+  const amount    = _panelModel.amount  || insights?.grossAmount || core?.amount || m.betrag || '';
+  const docDate   = _panelModel.date    || insights?.invoiceDate  || core?.date  || m.datum  || '';
+  const sender    = _panelModel.issuer  || '';
   const objectCode = core?.objectCode || file.objectCode || '';
   const objectName = core?.objectName || file.objectName || '';
   const modifiedLabel = fmtDate(file.modified);
@@ -2792,26 +2921,8 @@ if ((!file.size || !fileSizeLabel) && file?.handle && typeof file.handle.getFile
   const filePath = (file.pathSegs || []).join(' › ');
 
   const smallFileName = file.name || '';
-const largeTitle = insights?.title || buildArchivTitle({
-  file,
-  core,
-  docType,
-  amount,
-  sender,
-  objectCode,
-  objectName
-});
-
-const summary = insights?.summary || buildArchivSummary({
-  file,
-  core,
-  docType,
-  amount,
-  docDate,
-  sender,
-  objectCode,
-  objectName
-});
+const largeTitle = insights?.title || buildConservativeTitle(_panelModel);
+const summary    = insights?.summary || buildConservativeSummary(_panelModel);
 
 const catPills = [
   objectCode ? `<span class="av3-cat-pill">${esc(objectCode)}</span>` : '',
@@ -3024,37 +3135,26 @@ renderPDF(file);
 }
 
 function buildArchivTitle(ctx) {
-  const { docType, sender, amount } = ctx;
-
-  const typeLabel = _naturalDocTypeLabel(String(docType || '').toLowerCase());
-  const amountStr = _fmtAmountStr(amount);
-
-  const parts = [typeLabel];
-  if (sender)    parts.push(sender);
-  if (amountStr) parts.push(amountStr);
-
-  return parts.join(' \u2013 ');
+  const { docType, sender, amount, file } = ctx || {};
+  const model = inferDisplayModel({
+    ai: null, rawText: '', lines: [],
+    fallbackTitle: file?.name || '',
+    amountHint: amount || '', dateHint: '', issuerHint: sender || ''
+  });
+  // Override displayType with what was passed in (already resolved upstream)
+  const typeLabel = _displayTypeLabel(normalizeDisplayType('', String(docType || '')));
+  return buildConservativeTitle({ ...model, typeLabel, issuer: model.issuer || sender || '' });
 }
 
 function buildArchivSummary(ctx) {
-  const {
-    docType, sender, amount, docDate, file
-  } = ctx || {};
-
-  const typeLabel = _naturalDocTypeLabel(String(docType || '').toLowerCase());
-  const typeKey   = String(docType || '').toLowerCase();
-  const amountStr = _fmtAmountStr(amount);
-
-  return _composeSentence({
-    typeLabel,
-    typeKey,
-    sender:      sender || '',
-    date:        docDate || '',
-    amountStr,
-    serviceHint: '',
-    dueDate:     '',
-    fallbackTitle: file?.name || ''
+  const { docType, sender, amount, docDate, file } = ctx || {};
+  const model = inferDisplayModel({
+    ai: null, rawText: '', lines: [],
+    fallbackTitle: file?.name || '',
+    amountHint: amount || '', dateHint: docDate || '', issuerHint: sender || ''
   });
+  const typeLabel = _displayTypeLabel(normalizeDisplayType('', String(docType || '')));
+  return buildConservativeSummary({ ...model, typeLabel, typeKey: typeLabel.toLowerCase(), issuer: model.issuer || sender || '' });
 }
 function railButtons(taskCount) {
   return `
