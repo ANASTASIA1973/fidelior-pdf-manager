@@ -492,7 +492,10 @@
       /endbetrag/i,
       /bruttorechnungsbetrag/i,
       /bruttobetrag/i,
-      /gesamt\s*eur/i
+      /gesamt\s*eur/i,
+      /betrag\s+inkl\.?\s*(mwst|mehrwertsteuer|ust)\b/i,
+      /\bbruttosumme\b/i,
+      /\bgesamtpreis\b/i
     ];
 
     const strongTotalLabels =
@@ -514,10 +517,11 @@
       const matches = [...text.matchAll(moneyRx)].map(m => m[1]).filter(Boolean);
       if (!matches.length) return;
 
+      const hasInklMwst = /\binkl\.?\s*(mwst|mehrwertsteuer|steuer|ust)\b/i.test(text);
       const hasPriorityLabel = priorityPatterns.some(rx => rx.test(text));
       const hasStrongTotal = strongTotalLabels.test(text);
-      const hasIgnore = ignorePattern.test(text);
-      const isTaxOnly = taxOnlyPattern.test(text) && !hasStrongTotal;
+      const hasIgnore = ignorePattern.test(text) && !hasInklMwst;
+      const isTaxOnly = taxOnlyPattern.test(text) && !hasStrongTotal && !hasInklMwst;
 
       matches.forEach((raw, pos) => {
         const value = parseEuro(raw);

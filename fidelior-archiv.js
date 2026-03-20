@@ -1175,36 +1175,6 @@ async function buildDocumentInsights(file) {
   // PATH A: Indexed document record available
   // ══════════════════════════════════════════
   if (rec) {
-    // Amount: prefer PDF candidates (context-aware) over record's flat amount string
-    const amountResolved = resolve(
-      pdf?.amountCandidates,
-      pdf?.grossAmount ? [{ value: pdf.grossAmount, score: 0.78, reason: 'pdf-gross' }] : [],
-      rec.amountRaw    ? [{ value: rec.amountRaw,   score: 0.58, reason: 'rec-raw'   }] : []
-    );
-
-    // Invoice no: rec (trusted index) > PDF candidates > PDF fallback
-    const invoiceResolved = resolve(
-      rec.invoiceNo   ? [{ value: rec.invoiceNo, score: 0.96, reason: 'rec-index'  }] : [],
-      pdf?.invoiceCandidates,
-      pdf?.invoiceNo  ? [{ value: pdf.invoiceNo, score: 0.68, reason: 'pdf-fallbk' }] : [],
-      archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.28, reason: 'archive' }] : []
-    );
-
-    // Invoice date: PDF candidates (context-aware) > PDF date > rec date
-    const dateResolved = resolve(
-      pdf?.dateCandidates,
-      pdf?.invoiceDate  ? [{ value: pdf.invoiceDate,  score: 0.78, reason: 'pdf-date'  }] : [],
-      rec.invoiceDate   ? [{ value: rec.invoiceDate,  score: 0.58, reason: 'rec-date'  }] : []
-    );
-
-    // Company: PDF label-based candidates (score ≥ 0.99) beat everything;
-    // rec.sender used as fallback only
-    const companyResolved = resolve(
-      pdf?.companyCandidates,
-      pdf?.company ? [{ value: pdf.company, score: 0.72, reason: 'pdf-company' }] : [],
-      rec.sender   ? [{ value: rec.sender,   score: 0.55, reason: 'rec-sender'  }] : []
-    );
-
     out = {
       title: firstValue(
         rec.title,
@@ -1240,15 +1210,17 @@ async function buildDocumentInsights(file) {
 
       dueDate: firstValue(rec.dueDate, pdf?.dueDate, archiveFallback.dueDate),
 
-      invoiceNo:   invoiceResolved.value,
-      invoiceDate: dateResolved.value,
+      // FIX: use AI-finalized pdf values directly — no score-scale mismatch via resolveField
+      invoiceNo:   firstValue(pdf?.invoiceNo,   rec.invoiceNo,  archiveFallback.invoiceNo),
+      invoiceDate: firstValue(pdf?.invoiceDate, rec.invoiceDate),
+      grossAmount: firstValue(pdf?.grossAmount, rec.amountRaw),
+      company:     sanitizeCompany(firstValue(pdf?.company, rec.sender)),
 
       customerNo:    firstValue(pdf?.customerNo),
       orderNo:       firstValue(pdf?.orderNo),
       propertyNo:    firstValue(pdf?.propertyNo),
       servicePeriod: firstValue(pdf?.servicePeriod),
 
-      grossAmount: amountResolved.value,
       netAmount:   firstValue(pdf?.netAmount),
       taxAmount:   firstValue(pdf?.taxAmount),
 
@@ -1256,10 +1228,9 @@ async function buildDocumentInsights(file) {
       bic:   firstValue(pdf?.bic),
       ustId: firstValue(rec.ustId, pdf?.ustId, archiveFallback.ustId),
 
-      company:    sanitizeCompany(companyResolved.value),
-      recipient:  firstValue(pdf?.recipient),
+      recipient:   firstValue(pdf?.recipient),
       subjectLine: firstValue(pdf?.subjectLine),
-      services:   pdf?.services || [],
+      services:    pdf?.services || [],
 
       importantFacts: buildImportantFactsFromPdf(pdf || {}, {
         importantFacts: uniqLower([
@@ -1272,16 +1243,15 @@ async function buildDocumentInsights(file) {
         ])
       }),
 
-      // Candidate arrays for external consumers / debug
-      invoiceCandidates: pdf?.invoiceCandidates || [],
-      amountCandidates:  pdf?.amountCandidates  || [],
-      companyCandidates: pdf?.companyCandidates  || [],
-      dateCandidates:    pdf?.dateCandidates     || [],
+      invoiceCandidates: [],
+      amountCandidates:  [],
+      companyCandidates: [],
+      dateCandidates:    [],
 
-      invoiceConfidence: invoiceResolved.confidence || 'low',
-      amountConfidence:  amountResolved.confidence  || 'low',
-      companyConfidence: companyResolved.confidence || 'low',
-      dateConfidence:    dateResolved.confidence    || 'low',
+      invoiceConfidence: pdf?.invoiceConfidence || 'low',
+      amountConfidence:  pdf?.amountConfidence  || 'low',
+      companyConfidence: pdf?.companyConfidence || 'low',
+      dateConfidence:    pdf?.dateConfidence    || 'low',
 
       source: pdf ? 'document-index+pdf' : 'document-index'
     };
@@ -1290,24 +1260,6 @@ async function buildDocumentInsights(file) {
   // PATH B: PDF only (no indexed record)
   // ══════════════════════════════════════════
   } else if (pdf) {
-    const amountResolved  = resolve(
-      pdf.amountCandidates,
-      pdf.grossAmount ? [{ value: pdf.grossAmount, score: 0.78, reason: 'pdf-gross' }] : []
-    );
-    const invoiceResolved = resolve(
-      pdf.invoiceCandidates,
-      pdf.invoiceNo ? [{ value: pdf.invoiceNo, score: 0.72, reason: 'pdf-fallbk' }] : [],
-      archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.28, reason: 'archive' }] : []
-    );
-    const dateResolved    = resolve(
-      pdf.dateCandidates,
-      pdf.invoiceDate ? [{ value: pdf.invoiceDate, score: 0.78, reason: 'pdf-date' }] : []
-    );
-    const companyResolved = resolve(
-      pdf.companyCandidates,
-      pdf.company ? [{ value: pdf.company, score: 0.72, reason: 'pdf-company' }] : []
-    );
-
     out = {
       title: archiveFallback.title,
 
@@ -1331,15 +1283,17 @@ async function buildDocumentInsights(file) {
 
       dueDate: firstValue(pdf.dueDate, archiveFallback.dueDate),
 
-      invoiceNo:   invoiceResolved.value,
-      invoiceDate: dateResolved.value,
+      // FIX: direct AI-finalized values — no score-scale mismatch via resolveField
+      invoiceNo:   firstValue(pdf.invoiceNo,   archiveFallback.invoiceNo),
+      invoiceDate: firstValue(pdf.invoiceDate),
+      grossAmount: firstValue(pdf.grossAmount),
+      company:     sanitizeCompany(firstValue(pdf.company)),
 
       customerNo:    firstValue(pdf.customerNo),
       orderNo:       firstValue(pdf.orderNo),
       propertyNo:    firstValue(pdf.propertyNo),
       servicePeriod: firstValue(pdf.servicePeriod),
 
-      grossAmount: amountResolved.value,
       netAmount:   firstValue(pdf.netAmount),
       taxAmount:   firstValue(pdf.taxAmount),
 
@@ -1347,22 +1301,21 @@ async function buildDocumentInsights(file) {
       bic:   firstValue(pdf.bic),
       ustId: firstValue(pdf.ustId, archiveFallback.ustId),
 
-      company:     sanitizeCompany(companyResolved.value),
       recipient:   firstValue(pdf.recipient),
       subjectLine: firstValue(pdf.subjectLine),
       services:    pdf.services || [],
 
       importantFacts: buildImportantFactsFromPdf(pdf, archiveFallback),
 
-      invoiceCandidates: pdf.invoiceCandidates || [],
-      amountCandidates:  pdf.amountCandidates  || [],
-      companyCandidates: pdf.companyCandidates  || [],
-      dateCandidates:    pdf.dateCandidates     || [],
+      invoiceCandidates: [],
+      amountCandidates:  [],
+      companyCandidates: [],
+      dateCandidates:    [],
 
-      invoiceConfidence: invoiceResolved.confidence || 'low',
-      amountConfidence:  amountResolved.confidence  || 'low',
-      companyConfidence: companyResolved.confidence || 'low',
-      dateConfidence:    dateResolved.confidence    || 'low',
+      invoiceConfidence: pdf?.invoiceConfidence || 'low',
+      amountConfidence:  pdf?.amountConfidence  || 'low',
+      companyConfidence: pdf?.companyConfidence || 'low',
+      dateConfidence:    pdf?.dateConfidence    || 'low',
 
       source: 'pdf'
     };
@@ -2317,6 +2270,37 @@ function scoreSummaryLine(line) {
 
   return score;
 }
+function _buildSummaryFromAiFields(ai, fallbackTitle) {
+  if (!ai) return String(fallbackTitle || '').replace(/\.pdf$/i, '').trim();
+
+  const sender = String(ai.fields?.sender?.value   || '').trim();
+  const ref    = String(ai.fields?.reference?.value || '').trim();
+  const amount = ai.fields?.amount?.value;
+  const date   = String(ai.fields?.date?.value     || '').trim();
+  const type   = String(ai.type || '').toLowerCase();
+
+  const parts = [];
+  if (sender) parts.push(sender);
+
+  if      (type === 'rechnung')   parts.push('Rechnung');
+  else if (type === 'gutschrift') parts.push('Gutschrift');
+  else if (type === 'mahnung')    parts.push('Mahnung');
+  else if (type === 'angebot')    parts.push('Angebot');
+
+  if (ref) parts.push('Nr.\u00A0' + ref);
+
+  if (Number.isFinite(amount) && amount > 0) {
+    parts.push(amount.toFixed(2).replace('.', ',') + '\u00A0\u20AC');
+  }
+
+  if (date) parts.push('vom\u00A0' + date);
+
+  if (!parts.length) {
+    return String(fallbackTitle || '').replace(/\.pdf$/i, '').trim() || '';
+  }
+  return parts.join(' \u00B7 ');
+}
+
 function buildSummaryFromPdfText(text, lines, fallbackTitle) {
   const t = String(text || '');
   const cleanLines = (lines || []).map(x => String(x || '').trim()).filter(Boolean);
@@ -2604,10 +2588,17 @@ const ai = window.FideliorAI?.analyzeDocument
   ? window.FideliorAI.analyzeDocument(text, lines)
   : null;
 
-const invoiceField = ai?.fields?.invoiceNumber || null;
-const amountField  = ai?.fields?.amount || null;
-const senderField  = ai?.fields?.sender || null;
-const dateField    = ai?.fields?.invoiceDate || null;
+// FIX: use correct field names matching AI engine output (fields.reference / fields.date)
+const invoiceField = ai?.fields?.reference || null;
+const amountField  = ai?.fields?.amount    || null;
+const senderField  = ai?.fields?.sender    || null;
+const dateField    = ai?.fields?.date      || null;
+
+// FIX: format AI numeric amount to display string; never fall back to old extractors when AI ran
+function _fmtAiAmount(v) {
+  if (!Number.isFinite(v) || v <= 0) return '';
+  return v.toFixed(2).replace('.', ',') + '\u00A0\u20AC';
+}
 
 const out = {
   text,
@@ -2620,53 +2611,48 @@ const out = {
     ai?.type ||
     detectDocumentKindFromText(text),
 
-  invoiceNo:
-    invoiceField?.value ||
-    extractInvoiceNoFromText(text, lines),
+  // FIX: when AI ran, trust it fully — no fallback to old extractors
+  invoiceNo:   ai ? (invoiceField?.value  || '') : extractInvoiceNoFromText(text, lines),
+  invoiceDate: ai ? (dateField?.value     || '') : extractInvoiceDateFromText(text),
+  grossAmount: ai ? _fmtAiAmount(amountField?.value) : extractGrossAmountFromText(text),
+  company:     ai ? (senderField?.value   || '') : extractCompanyFromText(text, lines),
 
-  invoiceDate:
-    dateField?.value ||
-    extractInvoiceDateFromText(text),
-
-  dueDate: extractDueDateFromText(text),
-  customerNo: extractCustomerNoFromText(text),
-  orderNo: extractOrderNoFromText(text),
-  propertyNo: extractPropertyNoFromText(text),
+  dueDate:       extractDueDateFromText(text),
+  customerNo:    extractCustomerNoFromText(text),
+  orderNo:       extractOrderNoFromText(text),
+  propertyNo:    extractPropertyNoFromText(text),
   servicePeriod: extractServicePeriodFromText(text),
-
-  grossAmount:
-    amountField?.value ||
-    extractGrossAmountFromText(text),
 
   netAmount: extractNetAmountFromText(text),
   taxAmount: extractTaxAmountFromText(text),
 
-  iban: (extractIbansFromText(text)[0] || ''),
-  bic: extractBicFromText(text),
+  iban:  (extractIbansFromText(text)[0] || ''),
+  bic:   extractBicFromText(text),
   ustId: extractUstIdFromText(text),
 
-  company:
-    senderField?.value ||
-    extractCompanyFromText(text, lines),
-
-  recipient: extractRecipientFromText(text),
+  recipient:   extractRecipientFromText(text),
   subjectLine: extractSubjectLineFromText(text, lines),
-  services: extractServiceLines(lines),
-  emails: extractEmailsFromText(text),
-  keywords: extractKeywordsFromText(text, lines),
+  services:    extractServiceLines(lines),
+  emails:      extractEmailsFromText(text),
+  keywords:    extractKeywordsFromText(text, lines),
 
-  // Candidate-/Confidence-Daten aus zentraler Engine
-  invoiceCandidates: ai?.candidates?.invoiceNumber || [],
-  amountCandidates: ai?.candidates?.amount || [],
-  companyCandidates: ai?.candidates?.sender || [],
-  dateCandidates: ai?.candidates?.invoiceDate || [],
+  // FIX: do NOT pass raw AI integer-scored candidates to float-threshold resolveField —
+  // that mismatch causes score=2 to be treated as "high confidence" (2 > 0.9).
+  // buildDocumentInsights uses the finalized field values above directly.
+  invoiceCandidates: [],
+  amountCandidates:  [],
+  companyCandidates: [],
+  dateCandidates:    [],
 
   invoiceConfidence: invoiceField?.confidence || 'low',
-  amountConfidence: amountField?.confidence || 'low',
-  companyConfidence: senderField?.confidence || 'low',
-  dateConfidence: dateField?.confidence || 'low',
+  amountConfidence:  amountField?.confidence  || 'low',
+  companyConfidence: senderField?.confidence  || 'low',
+  dateConfidence:    dateField?.confidence    || 'low',
 
-  summary: buildSummaryFromPdfText(text, lines, file?.name || '')
+  // FIX: build summary from validated AI fields, not from raw-text re-extraction
+  summary: ai
+    ? _buildSummaryFromAiFields(ai, file?.name || '')
+    : buildSummaryFromPdfText(text, lines, file?.name || '')
 };
     __av3PdfInsightCache.set(cacheKey, out);
     return out;
