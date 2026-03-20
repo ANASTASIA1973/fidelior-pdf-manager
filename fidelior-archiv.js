@@ -1144,141 +1144,174 @@ async function buildDocumentInsights(file) {
   const rec = await loadIndexedDocumentRecord(file);
   const pdf = await extractPdfTextInsights(file);
 
+  // ── Sanitize helpers ──
+  // Prevent raw label words from leaking into the company field
+  function sanitizeCompany(val) {
+    if (!val) return '';
+    const v = String(val).trim();
+    if (/^(?:firma|lieferant|absender|rechnungsaussteller|kreditor|auftragnehmer|vendor|supplier|from)$/i.test(v)) return '';
+    if (v.length < 3) return '';
+    return v;
+  }
+
+  // Combine and resolve a field from multiple candidate sources
+  function resolve(...candidateSets) {
+    const merged = [].concat(...candidateSets.filter(Array.isArray));
+    return resolveField(merged);
+  }
+
+  // For fields where we want any non-empty value (no strict confidence gate)
+  function firstValue(...vals) {
+    for (const v of vals) {
+      const s = String(v || '').trim();
+      if (s) return s;
+    }
+    return '';
+  }
+
   let out;
 
+  // ══════════════════════════════════════════
+  // PATH A: Indexed document record available
+  // ══════════════════════════════════════════
   if (rec) {
-    out = {
-   title:
-  rec.title ||
-  rec.dashboard?.title ||
-  archiveFallback.title,
+    // Amount: prefer PDF candidates (context-aware) over record's flat amount string
+    const amountResolved = resolve(
+      pdf?.amountCandidates,
+      pdf?.grossAmount ? [{ value: pdf.grossAmount, score: 0.78, reason: 'pdf-gross' }] : [],
+      rec.amountRaw    ? [{ value: rec.amountRaw,   score: 0.58, reason: 'rec-raw'   }] : []
+    );
 
-   summary:
-  pdf?.summary ||
-  rec.dashboard?.summary ||
-  archiveFallback.summary ||
-  rec.serviceDesc,
+    // Invoice no: rec (trusted index) > PDF candidates > PDF fallback
+    const invoiceResolved = resolve(
+      rec.invoiceNo   ? [{ value: rec.invoiceNo, score: 0.96, reason: 'rec-index'  }] : [],
+      pdf?.invoiceCandidates,
+      pdf?.invoiceNo  ? [{ value: pdf.invoiceNo, score: 0.68, reason: 'pdf-fallbk' }] : [],
+      archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.28, reason: 'archive' }] : []
+    );
+
+    // Invoice date: PDF candidates (context-aware) > PDF date > rec date
+    const dateResolved = resolve(
+      pdf?.dateCandidates,
+      pdf?.invoiceDate  ? [{ value: pdf.invoiceDate,  score: 0.78, reason: 'pdf-date'  }] : [],
+      rec.invoiceDate   ? [{ value: rec.invoiceDate,  score: 0.58, reason: 'rec-date'  }] : []
+    );
+
+    // Company: PDF label-based candidates (score ≥ 0.99) beat everything;
+    // rec.sender used as fallback only
+    const companyResolved = resolve(
+      pdf?.companyCandidates,
+      pdf?.company ? [{ value: pdf.company, score: 0.72, reason: 'pdf-company' }] : [],
+      rec.sender   ? [{ value: rec.sender,   score: 0.55, reason: 'rec-sender'  }] : []
+    );
+
+    out = {
+      title: firstValue(
+        rec.title,
+        rec.dashboard?.title,
+        archiveFallback.title
+      ),
+
+      summary: firstValue(
+        pdf?.summary,
+        rec.dashboard?.summary,
+        archiveFallback.summary,
+        rec.serviceDesc
+      ),
 
       keywords: uniqLower([
-        ...(rec.keywords || []),
+        ...(rec.keywords  || []),
         ...(pdf?.keywords || []),
         ...(archiveFallback.keywords || [])
       ]),
 
       emails: uniqLower([
         ...(Array.isArray(rec.emailsFound) ? rec.emailsFound : []),
-        ...(rec.email ? [rec.email] : []),
-        ...(pdf?.emails || [])
+        ...(rec.email      ? [rec.email]      : []),
+        ...(pdf?.emails    || [])
       ]),
-   documentKind:
-  pdf?.ai?.type ||
-  pdf?.documentKind ||
-  detectDocumentKindFromText(`${rec.title || ''} ${rec.serviceDesc || ''}`) ||
-  archiveFallback.documentKind ||
-  '',
-      dueDate:
-        rec.dueDate ||
-        pdf?.dueDate ||
-        archiveFallback.dueDate ||
-        '',
 
-   invoiceNo: resolveField([
-  ...(rec.invoiceNo ? [{ value: rec.invoiceNo, score: 0.95, source: 'rec' }] : []),
-  ...(pdf?.invoiceCandidates || []),
-  ...(pdf?.invoiceNo ? [{ value: pdf.invoiceNo, score: 0.7, source: 'pdf_fallback' }] : []),
-  ...(archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.3, source: 'archive' }] : [])
-]).value,
+      documentKind: firstValue(
+        pdf?.ai?.type,
+        pdf?.documentKind,
+        detectDocumentKindFromText(`${rec.title || ''} ${rec.serviceDesc || ''}`),
+        archiveFallback.documentKind
+      ),
 
-   invoiceDate: resolveField([
-  ...(pdf?.dateCandidates || []),
-  ...(pdf?.invoiceDate ? [{ value: pdf.invoiceDate, score: 0.8, source: 'pdf' }] : []),
-  ...(rec.invoiceDate ? [{ value: rec.invoiceDate, score: 0.6, source: 'rec' }] : [])
-]).value,
+      dueDate: firstValue(rec.dueDate, pdf?.dueDate, archiveFallback.dueDate),
 
-      customerNo:
-        pdf?.customerNo ||
-        '',
+      invoiceNo:   invoiceResolved.value,
+      invoiceDate: dateResolved.value,
 
-      orderNo:
-        pdf?.orderNo ||
-        '',
+      customerNo:    firstValue(pdf?.customerNo),
+      orderNo:       firstValue(pdf?.orderNo),
+      propertyNo:    firstValue(pdf?.propertyNo),
+      servicePeriod: firstValue(pdf?.servicePeriod),
 
-      propertyNo:
-        pdf?.propertyNo ||
-        '',
+      grossAmount: amountResolved.value,
+      netAmount:   firstValue(pdf?.netAmount),
+      taxAmount:   firstValue(pdf?.taxAmount),
 
-      servicePeriod:
-        pdf?.servicePeriod ||
-        '',
+      iban:  firstValue(rec.iban, pdf?.iban, archiveFallback.iban),
+      bic:   firstValue(pdf?.bic),
+      ustId: firstValue(rec.ustId, pdf?.ustId, archiveFallback.ustId),
 
-  grossAmount: resolveField([
-  ...(pdf?.amountCandidates || []),
-  ...(pdf?.grossAmount ? [{ value: pdf.grossAmount, score: 0.8, source: 'pdf' }] : []),
-  ...(rec.amountRaw ? [{ value: rec.amountRaw, score: 0.6, source: 'rec' }] : [])
-]).value,
-
-      netAmount:
-        pdf?.netAmount ||
-        '',
-
-      taxAmount:
-        pdf?.taxAmount ||
-        '',
-
-      iban:
-        rec.iban ||
-        pdf?.iban ||
-        archiveFallback.iban ||
-        '',
-
-      bic:
-        pdf?.bic ||
-        '',
-
-      ustId:
-        rec.ustId ||
-        pdf?.ustId ||
-        archiveFallback.ustId ||
-        '',
-
-   company: resolveField([
-  ...(pdf?.companyCandidates || []),
-  ...(pdf?.company ? [{ value: pdf.company, score: 0.8, source: 'pdf' }] : []),
-  ...(rec.sender ? [{ value: rec.sender, score: 0.6, source: 'rec' }] : [])
-]).value,
-
-      recipient:
-        pdf?.recipient ||
-        '',
-
-      subjectLine:
-        pdf?.subjectLine ||
-        '',
-
-      services:
-        pdf?.services || [],
+      company:    sanitizeCompany(companyResolved.value),
+      recipient:  firstValue(pdf?.recipient),
+      subjectLine: firstValue(pdf?.subjectLine),
+      services:   pdf?.services || [],
 
       importantFacts: buildImportantFactsFromPdf(pdf || {}, {
         importantFacts: uniqLower([
-          rec.sender ? `Absender: ${rec.sender}` : '',
-          rec.amountRaw ? `Betrag: ${rec.amountRaw}` : '',
+          rec.sender      ? `Absender: ${rec.sender}` : '',
+          rec.amountRaw   ? `Betrag: ${rec.amountRaw}` : '',
           rec.invoiceDate ? `Belegdatum: ${fmtDate(rec.invoiceDate)}` : '',
-          rec.invoiceNo ? `Referenz: ${rec.invoiceNo}` : '',
-          rec.objectCode ? `Objekt: ${rec.objectCode}` : '',
+          rec.invoiceNo   ? `Referenz: ${rec.invoiceNo}` : '',
+          rec.objectCode  ? `Objekt: ${rec.objectCode}` : '',
           ...(archiveFallback.importantFacts || [])
         ])
       }),
 
+      // Candidate arrays for external consumers / debug
+      invoiceCandidates: pdf?.invoiceCandidates || [],
+      amountCandidates:  pdf?.amountCandidates  || [],
+      companyCandidates: pdf?.companyCandidates  || [],
+      dateCandidates:    pdf?.dateCandidates     || [],
+
+      invoiceConfidence: invoiceResolved.confidence || 'low',
+      amountConfidence:  amountResolved.confidence  || 'low',
+      companyConfidence: companyResolved.confidence || 'low',
+      dateConfidence:    dateResolved.confidence    || 'low',
+
       source: pdf ? 'document-index+pdf' : 'document-index'
     };
-  } else if (pdf) {
-    out = {
-      title:
-        archiveFallback.title,
 
-      summary:
-        pdf.summary ||
-        archiveFallback.summary,
+  // ══════════════════════════════════════════
+  // PATH B: PDF only (no indexed record)
+  // ══════════════════════════════════════════
+  } else if (pdf) {
+    const amountResolved  = resolve(
+      pdf.amountCandidates,
+      pdf.grossAmount ? [{ value: pdf.grossAmount, score: 0.78, reason: 'pdf-gross' }] : []
+    );
+    const invoiceResolved = resolve(
+      pdf.invoiceCandidates,
+      pdf.invoiceNo ? [{ value: pdf.invoiceNo, score: 0.72, reason: 'pdf-fallbk' }] : [],
+      archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.28, reason: 'archive' }] : []
+    );
+    const dateResolved    = resolve(
+      pdf.dateCandidates,
+      pdf.invoiceDate ? [{ value: pdf.invoiceDate, score: 0.78, reason: 'pdf-date' }] : []
+    );
+    const companyResolved = resolve(
+      pdf.companyCandidates,
+      pdf.company ? [{ value: pdf.company, score: 0.72, reason: 'pdf-company' }] : []
+    );
+
+    out = {
+      title: archiveFallback.title,
+
+      summary: firstValue(pdf.summary, archiveFallback.summary),
 
       keywords: uniqLower([
         ...(pdf.keywords || []),
@@ -1289,89 +1322,54 @@ async function buildDocumentInsights(file) {
         ...(pdf.emails || []),
         ...(archiveFallback.emails || [])
       ]),
-   documentKind:
-  pdf?.ai?.type ||
-  pdf.documentKind ||
-  archiveFallback.documentKind ||
-  '',
-      dueDate:
-        pdf.dueDate ||
-        archiveFallback.dueDate ||
-        '',
 
-  invoiceNo: resolveField([
-  ...(pdf?.invoiceCandidates || []),
-  ...(pdf?.invoiceNo ? [{ value: pdf.invoiceNo, score: 0.8, source: 'pdf' }] : []),
-  ...(archiveFallback.invoiceNo ? [{ value: archiveFallback.invoiceNo, score: 0.3, source: 'archive' }] : [])
-]).value,
+      documentKind: firstValue(
+        pdf?.ai?.type,
+        pdf.documentKind,
+        archiveFallback.documentKind
+      ),
 
-   invoiceDate: resolveField([
-  ...(pdf?.dateCandidates || []),
-  ...(pdf?.invoiceDate ? [{ value: pdf.invoiceDate, score: 0.8, source: 'pdf' }] : [])
-]).value,
+      dueDate: firstValue(pdf.dueDate, archiveFallback.dueDate),
 
-      customerNo:
-        pdf.customerNo ||
-        '',
+      invoiceNo:   invoiceResolved.value,
+      invoiceDate: dateResolved.value,
 
-      orderNo:
-        pdf.orderNo ||
-        '',
+      customerNo:    firstValue(pdf.customerNo),
+      orderNo:       firstValue(pdf.orderNo),
+      propertyNo:    firstValue(pdf.propertyNo),
+      servicePeriod: firstValue(pdf.servicePeriod),
 
-      propertyNo:
-        pdf.propertyNo ||
-        '',
+      grossAmount: amountResolved.value,
+      netAmount:   firstValue(pdf.netAmount),
+      taxAmount:   firstValue(pdf.taxAmount),
 
-      servicePeriod:
-        pdf.servicePeriod ||
-        '',
+      iban:  firstValue(pdf.iban, archiveFallback.iban),
+      bic:   firstValue(pdf.bic),
+      ustId: firstValue(pdf.ustId, archiveFallback.ustId),
 
-  grossAmount: resolveField([
-  ...(pdf?.amountCandidates || []),
-  ...(pdf?.grossAmount ? [{ value: pdf.grossAmount, score: 0.8, source: 'pdf' }] : [])
-]).value,
-
-      netAmount:
-        pdf.netAmount ||
-        '',
-
-      taxAmount:
-        pdf.taxAmount ||
-        '',
-
-      iban:
-        pdf.iban ||
-        archiveFallback.iban ||
-        '',
-
-      bic:
-        pdf.bic ||
-        '',
-
-      ustId:
-        pdf.ustId ||
-        archiveFallback.ustId ||
-        '',
-
- company: resolveField([
-  ...(pdf?.companyCandidates || []),
-  ...(pdf?.company ? [{ value: pdf.company, score: 0.8, source: 'pdf' }] : [])
-]).value,
-
-      recipient:
-        pdf.recipient ||
-        '',
-
-      subjectLine:
-        pdf.subjectLine ||
-        '',
-
-      services:
-        pdf.services || [],
+      company:     sanitizeCompany(companyResolved.value),
+      recipient:   firstValue(pdf.recipient),
+      subjectLine: firstValue(pdf.subjectLine),
+      services:    pdf.services || [],
 
       importantFacts: buildImportantFactsFromPdf(pdf, archiveFallback),
+
+      invoiceCandidates: pdf.invoiceCandidates || [],
+      amountCandidates:  pdf.amountCandidates  || [],
+      companyCandidates: pdf.companyCandidates  || [],
+      dateCandidates:    pdf.dateCandidates     || [],
+
+      invoiceConfidence: invoiceResolved.confidence || 'low',
+      amountConfidence:  amountResolved.confidence  || 'low',
+      companyConfidence: companyResolved.confidence || 'low',
+      dateConfidence:    dateResolved.confidence    || 'low',
+
       source: 'pdf'
     };
+
+  // ══════════════════════════════════════════
+  // PATH C: No PDF, no index → archive fallback
+  // ══════════════════════════════════════════
   } else {
     out = archiveFallback;
   }
@@ -1379,6 +1377,7 @@ async function buildDocumentInsights(file) {
   __av3InsightCache.set(cacheKey, out);
   return out;
 }
+
 function esc(v) {
   return String(v == null ? '' : v)
     .replace(/&/g, '&amp;')
