@@ -2270,141 +2270,183 @@ function scoreSummaryLine(line) {
 
   return score;
 }
-function _buildSummaryFromAiFields(ai, fallbackTitle) {
+/* ══════════════════════════════════════════════════════════════════════════
+   SUMMARY ENGINE — natürliche Satzbildung
+   ══════════════════════════════════════════════════════════════════════════ */
+
+function _naturalDocTypeLabel(type) {
+  const map = {
+    rechnung:     'Rechnung',
+    gutschrift:   'Gutschrift',
+    mahnung:      'Mahnung',
+    angebot:      'Angebot',
+    vertrag:      'Vertrag',
+    abrechnung:   'Abrechnung',
+    versicherung: 'Versicherungsdokument',
+    dokument:     'Dokument'
+  };
+  return map[String(type || '').toLowerCase()] || 'Dokument';
+}
+
+function _lcFirst(s) {
+  const str = String(s || '').trim();
+  if (!str) return str;
+  return str.charAt(0).toLowerCase() + str.slice(1);
+}
+
+function _extractServiceHint(lines, excludes) {
+  // Hard-block: table header tokens — these must never appear in a summary
+  const TABLE_HEADER_RX = /\b(menge|einheit|einzelpreis|pos\b|position|anz\b|art\.?-?nr|artikelnr|stk\.?|stück\.?|netto\s*eur|gesamt\s*eur|betrag\s*eur|preis\s*eur|netto\s*€|gesamt\s*€|qty|unit\s*price)\b/i;
+  const BAD_LINE_RX     = /\b(iban|bic|swift|telefon|fax|www\.|e-?mail|ust-?id|steuer-?nr|handelsregister|bank|konto|überweisung|ueberweisung|fällig|faellig|zahlbar|sepa|mandats)\b/i;
+  const ADDRESS_RX      = /\b\d{5}\s+[A-ZÄÖÜa-zäöüß]|\b(straße|strasse|postfach|str\.\s*\d)\b/i;
+  const ONLY_CAPS_SHORT = /^[A-ZÄÖÜ0-9\s\-\/\.]{1,12}$/;
+
+  // Build exclusion set from already-resolved field values
+  const excl = new Set(
+    [excludes.sender, excludes.date, excludes.amountStr, excludes.ref]
+      .filter(Boolean)
+      .map(v => v.toLowerCase().replace(/\s+/g, ' ').slice(0, 18))
+  );
+
+  const SERVICE_RX = /\b(wartung|reparatur|lieferung|installation|sanierung|montage|inspektion|service|reinigung|beratung|prüfung|überwachung|abrechnung|betriebskosten|nebenkosten|heizkosten|strom|gas|wasser|telefon|internet|software|lizenz|pflege|entsorgung|hausverwaltung|instandhaltung|spülkasten|fracht|versand|material|ersatz|pumpe|ventil|zähler|heizung|sanitär|miete|pacht|nutzung|verwaltung|reparaturen|umbau|ausbau|einbau|demontage|revision)\b/i;
+
+  const scored = [];
+
+  for (const raw of (lines || [])) {
+    const line = String(raw || '').trim();
+    if (!line || line.length < 8 || line.length > 110) continue;
+    if (TABLE_HEADER_RX.test(line)) continue;
+    if (BAD_LINE_RX.test(line)) continue;
+    if (ADDRESS_RX.test(line)) continue;
+    if (isBadSummaryLine(line)) continue;
+    if (ONLY_CAPS_SHORT.test(line)) continue;
+
+    // Skip if line is essentially one of our resolved field values
+    const ll = line.toLowerCase();
+    if ([...excl].some(e => e.length >= 6 && ll.includes(e))) continue;
+
+    // Must have real lowercase words
+    if (!/[a-zäöüß]{4,}/.test(line)) continue;
+
+    // Skip pure number / amount lines
+    if (/^[\d\s.,€%\-\/]+$/.test(line)) continue;
+
+    // Skip lines that start with a digit and look like item rows
+    if (/^\d+[\.,\s]/.test(line) && /\d{1,3},\d{2}/.test(line)) continue;
+
+    let score = 0;
+    if (SERVICE_RX.test(line)) score += 8;
+    if (/betreff|betr\.|re:/i.test(line)) score += 6;
+    if (line.split(/\s+/).length >= 2 && line.split(/\s+/).length <= 10) score += 2;
+    if (line.length >= 12 && line.length <= 65) score += 2;
+    if (/[a-zäöüß]{4,}/.test(line)) score += 1;
+
+    // Penalise lines that are likely positions/references
+    if (/^[A-Z]{2,}\d/.test(line)) score -= 3;
+
+    if (score >= 5) scored.push({ text: line.replace(/^betreff\s*[:\-]?\s*/i, '').trim(), score });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  if (!scored.length) return '';
+
+  // Take best 1–2 items, joined with " und "
+  const top = scored.slice(0, 2).map(c => c.text);
+  const raw = top.length === 2 && top[0].length + top[1].length <= 70
+    ? top.join(' und ')
+    : top[0];
+
+  return raw.length > 72 ? raw.slice(0, 69).trim() + '…' : raw;
+}
+
+function _composeSentence({ typeLabel, sender, date, amountStr, serviceHint, fallbackTitle }) {
+  let sentence = typeLabel;
+
+  if (sender) sentence += ` von ${sender}`;
+  if (date)   sentence += ` vom ${date}`;
+  if (amountStr) sentence += ` über ${amountStr}`;
+  if (serviceHint) sentence += ` für ${_lcFirst(serviceHint)}`;
+
+  if (!sentence.endsWith('.')) sentence += '.';
+
+  // If nothing meaningful was added, fall back to file name
+  if (sentence === `${typeLabel}.`) {
+    const fb = String(fallbackTitle || '').replace(/\.pdf$/i, '').trim();
+    return fb || sentence;
+  }
+
+  return sentence;
+}
+
+function _buildSummaryFromAiFields(ai, lines, fallbackTitle) {
   if (!ai) return String(fallbackTitle || '').replace(/\.pdf$/i, '').trim();
 
-  const sender = String(ai.fields?.sender?.value   || '').trim();
-  const ref    = String(ai.fields?.reference?.value || '').trim();
-  const amount = ai.fields?.amount?.value;
-  const date   = String(ai.fields?.date?.value     || '').trim();
-  const type   = String(ai.type || '').toLowerCase();
+  const sender    = String(ai.fields?.sender?.value    || '').trim();
+  const ref       = String(ai.fields?.reference?.value || '').trim();
+  const amount    = ai.fields?.amount?.value;
+  const date      = String(ai.fields?.date?.value      || '').trim();
+  const type      = String(ai.type || '').toLowerCase();
 
-  const parts = [];
-  if (sender) parts.push(sender);
+  const typeLabel  = _naturalDocTypeLabel(type);
+  const amountStr  = (Number.isFinite(amount) && amount > 0)
+    ? amount.toFixed(2).replace('.', ',') + '\u00A0\u20AC'
+    : '';
 
-  if      (type === 'rechnung')   parts.push('Rechnung');
-  else if (type === 'gutschrift') parts.push('Gutschrift');
-  else if (type === 'mahnung')    parts.push('Mahnung');
-  else if (type === 'angebot')    parts.push('Angebot');
+  const serviceHint = _extractServiceHint(lines || [], { sender, ref, amountStr, date });
 
-  if (ref) parts.push('Nr.\u00A0' + ref);
-
-  if (Number.isFinite(amount) && amount > 0) {
-    parts.push(amount.toFixed(2).replace('.', ',') + '\u00A0\u20AC');
-  }
-
-  if (date) parts.push('vom\u00A0' + date);
-
-  if (!parts.length) {
-    return String(fallbackTitle || '').replace(/\.pdf$/i, '').trim() || '';
-  }
-  return parts.join(' \u00B7 ');
+  return _composeSentence({ typeLabel, sender, date, amountStr, serviceHint, fallbackTitle });
 }
 
 function buildSummaryFromPdfText(text, lines, fallbackTitle) {
   const t = String(text || '');
   const cleanLines = (lines || []).map(x => String(x || '').trim()).filter(Boolean);
 
-  // ── 1. Run candidate engines ──
+  // ── 1. Resolve fields from candidate engines ──
   const invoiceCands = extractInvoiceNoCandidates(t, cleanLines);
   const amountCands  = extractAmountCandidates(t);
   const companyCands = extractCompanyCandidates(t, cleanLines);
   const dateCands    = extractDateCandidates(t, cleanLines);
 
-  // ── 2. Resolve fields ──
   const invoice = resolveField(invoiceCands);
   const amount  = resolveField(amountCands);
   const company = resolveField(companyCands);
   const date    = resolveField(dateCands);
 
-  // ── 3. Document kind ──
-  const docKind = detectDocumentKindFromText(t);
+  // ── 2. Document kind ──
+  const docKind   = detectDocumentKindFromText(t);
+  const typeLabel = _naturalDocTypeLabel(docKind.toLowerCase());
 
-  // ── 4. Build structured prefix ──
-  const parts = [];
+  // ── 3. Format amount display string ──
+  const amountStr = (() => {
+    const v = amount.value;
+    if (!v) return '';
+    // already formatted as "1.234,56 €" — pass through
+    if (typeof v === 'string' && /,\d{2}/.test(v)) return v;
+    // numeric
+    const n = parseFloat(String(v).replace(/\./g, '').replace(',', '.'));
+    if (Number.isFinite(n) && n > 0) return n.toFixed(2).replace('.', ',') + '\u00A0\u20AC';
+    return '';
+  })();
 
-  if (company.value) parts.push(company.value);
-
-  if (docKind && docKind !== 'Dokument') parts.push(docKind);
-
-  if (invoice.value && invoice.confidence === 'high') {
-    parts.push(`Nr.\u00A0${invoice.value}`);   // non-breaking space
-  }
-
-  if (amount.value) parts.push(amount.value);
-
-  if (date.value) parts.push(`vom\u00A0${date.value}`);
-
-  const structuredPrefix = parts.join(' \u00B7 ');  // interpunct
-
-  // ── 5. Find a descriptive service/content line ──
-  const SERVICE_RX = /\b(?:wartung|reparatur|miet(?:rechnung)?|leistung(?:en)?|lieferung|installation|sanierung|montage|inspektion|betrieb|service|reinigung|beratung|prüfung|kontrolle|überwachung|abrechnung|betriebskosten|nebenkosten|heizkosten|heizkostenabrechnung|strom|gas|wasser|telefon|internet|software|lizenz|pflege|entsorgung|hausverwaltung|objektverwaltung|instandhaltung)\b/i;
-  const SUBJECT_RX = /^(?:betreff|betr\.|re:|subject)\s*[:\-]?\s*/i;
-
-  const skipSet = new Set(
-    [company.value, invoice.value, amount.value, date.value]
-      .filter(Boolean)
-      .map(v => v.toLowerCase().trim())
-  );
-
-  let descLine = '';
-  let bestDescScore = -1;
-
-  for (const line of cleanLines) {
-    if (isBadSummaryLine(line)) continue;
-    if (line.length < 8 || line.length > 200) continue;
-
-    // Skip lines that merely repeat already-extracted structured data
-    if (skipSet.size && [...skipSet].some(sv => line.toLowerCase().includes(sv.slice(0, 12)))) continue;
-
-    // Skip clearly non-descriptive lines
-    if (/\b(?:bank|iban|bic|konto|überweisung|ueberweisung|zahlbar|fällig|faellig|tel\.?|fax|www\.|steuer-?nr|steuernummer)\b/i.test(line)) continue;
-
-    // Skip address lines
-    if (/\b\d{5}\s+[A-ZÄÖÜa-zäöüß]|straße|strasse|postfach\b/i.test(line)) continue;
-
-    let lscore = 0;
-    if (SERVICE_RX.test(line)) lscore += 4;
-    if (SUBJECT_RX.test(line)) lscore += 5;
-    if (/[a-zäöüß]{4,}/.test(line)) lscore += 1;
-    if (line.split(/\s+/).length >= 3) lscore += 1;
-    if (line.length >= 20 && line.length <= 140) lscore += 1;
-
-    if (lscore >= 3 && lscore > bestDescScore) {
-      bestDescScore = lscore;
-      descLine = line.replace(SUBJECT_RX, '').trim();
-    }
-  }
-
-  // ── 6. Compose final summary ──
-  const finalParts = [];
-  if (structuredPrefix) finalParts.push(structuredPrefix);
-
-  if (descLine) {
-    // Avoid duplicating what's already in the structured prefix
-    const descLower = descLine.toLowerCase();
-    const prefixLower = structuredPrefix.toLowerCase();
-    if (!prefixLower.includes(descLower.slice(0, 18))) {
-      finalParts.push(descLine);
-    }
-  }
-
-  let summary = finalParts.join(' \u00B7 ').replace(/\s{2,}/g, ' ').trim();
-
-  if (summary.length > 240) {
-    summary = summary.slice(0, 237).trim() + '…';
-  }
-
-  if (!summary) {
-    const fb = String(fallbackTitle || '').replace(/\.pdf$/i, '').trim();
-    summary = fb || 'Keine inhaltliche Zusammenfassung verfügbar.';
-  }
-
-  // Debug
-  console.log('[FDL SUMMARY ENGINE v2]', {
-    invoice, amount, company, date, docKind,
-    structuredPrefix, descLine, summary
+  // ── 4. Extract service hint from document lines ──
+  const serviceHint = _extractServiceHint(cleanLines, {
+    sender: company.value,
+    ref:    invoice.value,
+    amountStr,
+    date:   date.value
   });
+
+  // ── 5. Compose natural sentence ──
+  const summary = _composeSentence({
+    typeLabel,
+    sender:       company.value,
+    date:         date.value,
+    amountStr,
+    serviceHint,
+    fallbackTitle
+  });
+
+  console.log('[FDL SUMMARY ENGINE v3]', { company, invoice, amount, date, docKind, serviceHint, summary });
 
   return summary;
 }
@@ -2651,7 +2693,7 @@ const out = {
 
   // FIX: build summary from validated AI fields, not from raw-text re-extraction
   summary: ai
-    ? _buildSummaryFromAiFields(ai, file?.name || '')
+    ? _buildSummaryFromAiFields(ai, lines, file?.name || '')
     : buildSummaryFromPdfText(text, lines, file?.name || '')
 };
     __av3PdfInsightCache.set(cacheKey, out);
@@ -2972,16 +3014,31 @@ function buildArchivSummary(ctx) {
     docType, sender, amount, docDate, objectCode, objectName, file
   } = ctx || {};
 
-  const bits = [];
+  const typeLabel = _naturalDocTypeLabel(String(docType || '').toLowerCase());
 
-  if (docType) bits.push(docType);
-  if (sender) bits.push(`Absender ${sender}`);
-  if (objectCode) bits.push(`Objekt ${objectCode}${objectName ? ` (${objectName})` : ''}`);
-  if (amount) bits.push(`Betrag ${amount}`);
-  if (docDate) bits.push(`vom ${docDate}`);
-  if (!bits.length && file?.name) bits.push(file.name.replace(/\.pdf$/i, ''));
+  // Format amount string if it's a raw number or German format
+  const amountStr = (() => {
+    if (!amount) return '';
+    const s = String(amount).trim();
+    if (/,\d{2}/.test(s) || /€/.test(s)) return s;
+    const n = parseFloat(s.replace(/\./g, '').replace(',', '.'));
+    if (Number.isFinite(n) && n > 0) return n.toFixed(2).replace('.', ',') + '\u00A0\u20AC';
+    return s || '';
+  })();
 
-  return bits.join(' · ');
+  let sentence = typeLabel;
+  if (sender) sentence += ` von ${sender}`;
+  if (docDate) sentence += ` vom ${docDate}`;
+  if (amountStr) sentence += ` über ${amountStr}`;
+  if (!sentence.endsWith('.')) sentence += '.';
+
+  // If nothing meaningful was added beyond the type, fall back to file name
+  if (sentence === `${typeLabel}.`) {
+    const fb = file?.name ? file.name.replace(/\.pdf$/i, '').trim() : '';
+    return fb || sentence;
+  }
+
+  return sentence;
 }
 function railButtons(taskCount) {
   return `
