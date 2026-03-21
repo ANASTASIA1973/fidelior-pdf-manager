@@ -56,11 +56,16 @@
    * Betrifft kurze, rein-kleingeschriebene Fragmente wie "iy", "1y", "dy".
    * Lässt legitime Präfixe wie "e.K.", "AG" oder "Dr." unangetastet.
    */
-  function stripOcrJunk(value) {
-    // Führende 1-3-Zeichen Kleinbuchstaben/Ziffern-Kombinationen (OCR-Müll)
-    let v = value.replace(/^([a-z]{1,3}|\d[a-z]{1,2}|[a-z]{1,2}\d)\s+/, "").trim();
-    // Führende einzelne Sonderzeichen oder Pipes
+ function stripOcrJunk(value) {
+    let v = String(value || "");
+    // Führende 1-3-Zeichen Kleinbuchstaben/Ziffern-Kombinationen (z. B. "iy", "1y", "ab2")
+    v = v.replace(/^([a-z]{1,3}|\d[a-z]{1,2}|[a-z]{1,2}\d)\s+/, "").trim();
+    // Führende einzelne Ziffer vor Großbuchstaben (OCR-Fragment wie "1 Stadtwerke")
+    v = v.replace(/^\d\s+(?=[A-ZÄÖÜ])/, "").trim();
+    // Führende Sonderzeichen oder Pipes
     v = v.replace(/^[|\\\/~`'"^*_=+<>]+\s*/, "").trim();
+    // Führender Punkt oder Bindestrich vor Großbuchstaben (OCR-Artefakt ". ABC GmbH")
+    v = v.replace(/^[.\-]\s+(?=[A-ZÄÖÜ])/, "").trim();
     return v;
   }
 
@@ -297,26 +302,46 @@
      Erkennt Empfänger-Sequenzen: Name → Straße → PLZ/Ort
      Gibt Set der absoluten Zeilenindizes zurück.
   ========================================================= */
-
   function buildRecipientLikeIndices(allLines) {
-    const streetRx  = /\b(straße|strasse|str\.)\s*\d|\b(weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive|boulevard|court)\b/i;
-    const zipCityRx = /\b\d{4,5}\s+[A-Za-zÄÖÜäöüß]{2}/;
-    const set       = new Set();
+    const streetRx        = /\b(straße|strasse|str\.)\s*\d|\b(weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive|boulevard|court)\b/i;
+    const zipCityRx       = /\b\d{4,5}\s+[A-Za-zÄÖÜäöüß]{2}/;
+    // Explizite Empfänger-Präfixe sind eigenständige Anker für den Adressblock
+    const recipientPfxRx  = /^(Herr|Frau|Familie|Dr\.?|Prof\.?|z\.?\s*Hd\.?|c\/o)\b/i;
+    const set             = new Set();
 
     for (let i = 0; i < allLines.length; i++) {
       const l0 = normalizeWs(allLines[i]);
       const l1 = normalizeWs(allLines[i + 1] || "");
       const l2 = normalizeWs(allLines[i + 2] || "");
+      const l3 = normalizeWs(allLines[i + 3] || "");
 
+      // 3-Zeiler: i=Name, i+1=Straße, i+2=PLZ
       if (streetRx.test(l1) && zipCityRx.test(l2)) {
         set.add(i); set.add(i + 1); set.add(i + 2);
         continue;
       }
+      // 3-Zeiler ab Straße: i=Straße, i+1=PLZ
       if (streetRx.test(l0) && zipCityRx.test(l1)) {
         if (i > 0) set.add(i - 1);
         set.add(i); set.add(i + 1);
         continue;
       }
+      // 4-Zeiler: i=Name1, i+1=Name2, i+2=Straße, i+3=PLZ
+      if (streetRx.test(l2) && zipCityRx.test(l3) && !streetRx.test(l0)) {
+        set.add(i); set.add(i + 1); set.add(i + 2); set.add(i + 3);
+        continue;
+      }
+      // Expliziter Empfänger-Präfix (Herr/Frau/Familie/c.o) als Anker
+      if (recipientPfxRx.test(l0)) {
+        set.add(i);
+        if (streetRx.test(l2) && zipCityRx.test(l3)) {
+          set.add(i + 1); set.add(i + 2); set.add(i + 3);
+        } else if (streetRx.test(l1) && zipCityRx.test(l2)) {
+          set.add(i + 1); set.add(i + 2);
+        }
+        continue;
+      }
+      // PLZ-first: ZIP an i, Straße an i-1
       if (zipCityRx.test(l0) && i >= 1 && streetRx.test(normalizeWs(allLines[i - 1] || ""))) {
         if (i >= 2) set.add(i - 2);
         set.add(i - 1);
@@ -339,11 +364,20 @@
 
     const recipientLike = buildRecipientLikeIndices(allLines);
 
+    // Inhaltsbasierter Empfänger-Check: Fängt Fälle ab, in denen recipientLike
+    // wegen lokalem vs. absolutem Zeilenindex nicht greift (senderZone-Scan
+    // übergibt localIdx, recipientLike enthält aber absolute Indizes).
+    const recipientContentSet = new Set(
+      (zones.recipientZone || zones.recipientBlock || [])
+        .map(l => normalizeCompare(normalizeWs(l)))
+        .filter(Boolean)
+    );
+
     const companyFormRx = /\b(gmbh|ag|kg|ug|ohg|kgaa|mbh|ltd\.?|inc\.?|corp\.?|llc|s\.?a\.?r?\.?l\.?|b\.?v\.?|n\.?v\.?|plc|s\.?p\.?a\.?|s\.?r\.?l\.?|e\.?\s*k\.?|e\.?\s*v\.?|gbr|partg|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke|wasser|praxis|apotheke|steuerberatung|steuerberater|notar|rechtsanwalt|online|telecom|telekom|digital|media|group|verlag|vertrieb|handel|technik|systems|system|consulting|consult|partner|netz|netze|netzwerk|infrastruktur|dienstleistung|dienstleistungen|bau|baubetrieb|elektro|sanitär|heizung|dach|maler|versand|logistik|transport|spedition|software|hardware|capital|invest|strom|gas|wärme|mobilfunk|internet|kommunikation)\b/i;
 
     const negativeLineRx = /\b(rechnung|invoice|kundennummer|kunden\-?nr|vertragsnummer|vertrag\s*nr|iban|bic|swift|telefon\s*nr|fax|e-?mail|www\.|ust\-?id|mwst|steuer\s*nr|datum|seite|page|tarif|lieferadresse|rechnungsadresse|leistungsempfänger|kontonummer|konto\s*nr)\b/i;
     const greetingRx    = /^(sehr geehrte|guten tag|hallo|dear|liebe[rs]?|hi\b)\b/i;
-    const streetRx      = /\b(straße|strasse|str\.)\s*\d|\b(weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive|boulevard|court)\b/i;
+    const streetRx      = /\b(postfach|straße|strasse|str\.)\s*\d|\b(weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive|boulevard|court)\b/i;
     const zipCityRx     = /\b\d{4,5}\s+[A-Za-zÄÖÜäöüß]/;
     const sentenceRx    = /\b(wir|sie|bitte|danke|hiermit|prüfung|zahlung|überweisen|kontaktieren|informieren|bitten|teilen|stellen|wurden|haben|sind|werden)\b/i;
     const labelPrefixRx = /^(name|firma|absender|rechnungssteller|vendor|lieferant|auftragnehmer)\s*:\s*/i;
@@ -358,17 +392,25 @@
       if (zipCityRx.test(raw))  return;
       if (streetRx.test(raw))   return;
 
-      const hasLabel      = labelPrefixRx.test(raw);
+        const hasLabel      = labelPrefixRx.test(raw);
       const hasCompany    = companyFormRx.test(raw);
       const hasNegative   = negativeLineRx.test(raw);
       const isInAddrBlock = Number.isInteger(absIdx) && recipientLike.has(absIdx);
+      // Inhaltsbasierter Empfänger-Check (zonenunabhängig, kein Index-Problem)
+      const isInRecipientContent = recipientContentSet.has(normalizeCompare(raw));
+      // Rein zweiteiliger Personenname ohne Firmensignal: "Max Mustermann"
+      // Zwei Wörter, beide groß, keine Ziffer, kein companyFormRx-Treffer
+      const isPersonNameOnly = !hasCompany && !/\d/.test(raw) &&
+        /^[A-ZÄÖÜ][a-zäöüß]{1,25}\s+[A-ZÄÖÜ][a-zäöüß]{2,30}$/.test(raw);
 
       let score = baseScore;
-      if (hasLabel)     score += 8;
-      if (hasCompany)   score += 14;
-      if (!hasNegative) score += 2;
-      if (!/\d/.test(raw)) score += 1;
-      if (isInAddrBlock)   score -= 30;
+      if (hasLabel)              score += 8;
+      if (hasCompany)            score += 14;
+      if (!hasNegative)          score += 2;
+      if (!/\d/.test(raw))       score += 1;
+      if (isInAddrBlock)         score -= 30;
+      if (isInRecipientContent)  score -= 30;
+      if (isPersonNameOnly)      score -= 8;
 
       switch (zoneTag) {
         case "senderZone":

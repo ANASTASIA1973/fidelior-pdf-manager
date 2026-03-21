@@ -37,27 +37,53 @@
     let start = -1;
     let end = -1;
 
-    for (let i = 0; i < head.length - 2; i++) {
-      const l1 = normalizeWs(head[i] || "");
+    const zipCityRx      = /\b\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]{2,}/;
+    const streetRx       = /\b(straße|str\.|weg|allee|platz|ring|gasse|ufer|chaussee|pfad|steig|road|street|avenue|lane|drive)\b/i;
+    const badNameRx      = /\b(rechnung|invoice|kundennummer|vertragsnummer|datum|tarif|seite)\b/i;
+    const nameLikeRx     = /^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.,\(\)\- ]{1,}$/;
+    const recipientPfxRx = /^(Herr|Frau|Familie|Dr\.?|Prof\.?|z\.?\s*Hd\.?|c\/o)\b/i;
+
+    // Schleife beginnt bei i=2: die ersten beiden Zeilen gehören typischerweise
+    // zum Absender-Briefkopf und dürfen nicht als Empfängerblock erkannt werden.
+    for (let i = 2; i < head.length - 2; i++) {
+      const l1 = normalizeWs(head[i]     || "");
       const l2 = normalizeWs(head[i + 1] || "");
       const l3 = normalizeWs(head[i + 2] || "");
+      const l4 = normalizeWs(head[i + 3] || "");
 
-      const hasZipCity = /\b\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-]{2,}/.test(l3);
-      const hasStreet = /\b(straße|str\.|weg|allee|platz|ring|gasse|ufer|chaussee|pfad|steig|road|street|avenue|lane|drive)\b/i.test(l2);
-      const looksLikeName =
-        /^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,}$/.test(l1) &&
-        !/\b(rechnung|invoice|kundennummer|vertragsnummer|datum|tarif|seite)\b/i.test(l1);
-
-      if (hasZipCity && hasStreet && looksLikeName) {
+      // Expliziter Empfänger-Präfix als starker Anker
+      if (recipientPfxRx.test(l1)) {
         start = i;
-        end = i + 2;
+        if (streetRx.test(l3) && zipCityRx.test(l4)) {
+          end = i + 3; // 4-Zeiler: Präfix → Name → Straße → PLZ
+        } else if (streetRx.test(l2) && zipCityRx.test(l3)) {
+          end = i + 2; // 3-Zeiler: Präfix → Straße → PLZ
+        } else {
+          end = i + 1;
+        }
+        break;
+      }
+
+      // 3-Zeiler: l1=Name, l2=Straße, l3=PLZ
+      if (zipCityRx.test(l3) && streetRx.test(l2) && nameLikeRx.test(l1) && !badNameRx.test(l1)) {
+        start = i;
+        end   = i + 2;
+        break;
+      }
+
+      // 4-Zeiler: l1=Name1, l2=Name2, l3=Straße, l4=PLZ
+      if (zipCityRx.test(l4) && streetRx.test(l3) &&
+          nameLikeRx.test(l1) && !badNameRx.test(l1) &&
+          nameLikeRx.test(l2) && !badNameRx.test(l2) &&
+          !streetRx.test(l1)) {
+        start = i;
+        end   = i + 3;
         break;
       }
     }
 
     return { start, end };
   }
-
   function detectMetaIndices(head) {
     const out = [];
 

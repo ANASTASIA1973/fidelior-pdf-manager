@@ -286,8 +286,13 @@ function isClearlyBadSenderLine(line) {
   if (BANK_RX.test(s)) return true;
   if (VAT_RX.test(s)) return true;
 
-  if (/hauptverwaltung/i.test(s)) return true;
+ if (/hauptverwaltung/i.test(s)) return true;
   if (/kundenservice/i.test(s)) return true;
+  // Typische Empfänger-Einleitungszeilen
+  if (/^(c\/o|z\.?\s*Hd\.?)\b/i.test(s)) return true;
+  if (/^An\s+(Herrn?|Frau|die\s+Firma)\b/i.test(s)) return true;
+  // Postfach ohne Firmensignal
+  if (/^Postfach\s+\d/i.test(s) && !strongCompany) return true;
 
   if (/^\d[\d\s.,/-]*$/.test(s)) return true;
   if (s.length < 3 || s.length > 90) return true;
