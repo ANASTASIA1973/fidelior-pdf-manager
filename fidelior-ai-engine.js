@@ -511,16 +511,29 @@
       const isInBlockRecipient = partyBlocks.recipientLineKeys.has(normalizeCompare(raw));
       const isInBlockContact   = partyBlocks.contactLineKeys.has(normalizeCompare(raw));
 
+      // Zusätzliche harte Negativsignale
+      const isContactLine =
+        /(service|kundenservice|fragen|kontakt|hotline|support|erreichen|mail|telefon|fax)/i.test(raw);
+
+      const isAddressLikeName =
+        !hasCompany &&
+        /^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß&.\- ]{2,}$/.test(raw) &&
+        (isInRecipientContent || isInBlockRecipient);
+
       let score = baseScore;
       if (hasLabel)              score += 8;
       if (hasCompany)            score += 14;
       if (!hasNegative)          score += 2;
       if (!/\d/.test(raw))       score += 1;
-      if (isInAddrBlock)         score -= 30;
-      if (isInRecipientContent)  score -= 30;
-      if (isInBlockRecipient)    score -= 30;
-      if (isInBlockContact)      score -= 20;
-      if (isPersonNameOnly)      score -= 8;
+
+      // Härtere Strafen, damit Empfänger/Kontakt wirklich rausfallen
+      if (isInAddrBlock)         score -= 40;
+      if (isInRecipientContent)  score -= 40;
+      if (isInBlockRecipient)    score -= 40;
+      if (isInBlockContact)      score -= 25;
+      if (isContactLine)         score -= 20;
+      if (isPersonNameOnly)      score -= 12;
+      if (isAddressLikeName)     score -= 12;
 
       switch (zoneTag) {
         case "senderZone":
