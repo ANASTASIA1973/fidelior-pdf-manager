@@ -353,6 +353,108 @@
   }
 
   /* =========================================================
+     PARTEIEN-BLÖCKE
+     Erkennt zusammenhängende Zeilen als Blöcke (Absender /
+     Empfänger / Kontakt) – inhaltsbasiert, ohne Index-Abhängigkeit.
+     Gibt zurück:
+       bestSenderBlock   – { value, score } oder null
+       recipientLineKeys – Set normalisierter Zeileninhalt
+       contactLineKeys   – Set normalisierter Zeileninhalt
+  ========================================================= */
+
+  function detectPartyBlocks(lines) {
+    const N = Math.min(lines.length, 40);
+
+    const streetRx2       = /\b(straße|strasse|str\.)\s*\d|\b(weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive)\b/i;
+    const zipCityRx2      = /\b\d{4,5}\s+[A-Za-zÄÖÜäöüß]{2}/;
+    const recipientPfxRx2 = /^(Herr|Frau|Familie|z\.?\s*Hd\.?|c\/o)\b/i;
+    const contactRx2      = /\b(tel\.?(?:efon)?|fax|mobil|e-?mail|www\.|http|ihre\s+fragen|hotline|kundenservice|service-?center)\b/i;
+    const companyRx2      = /\b(gmbh|ag|kg|ug|ohg|kgaa|se|mbh|ltd\.?|inc\.?|corp\.?|llc|gbr|partg|holding|immobilien|hausverwaltung|verwaltung|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke|wasser|telecom|telekom|digital|media|group|verlag|vertrieb)\b/i;
+
+    const recipientLineKeys = new Set();
+    const contactLineKeys   = new Set();
+
+    // --- Schritt 1: Empfänger-Adressblock finden ---
+    // Gleiche Logik wie detectRecipientRange, aber auf allLines statt head.
+    // Schleife startet bei i=2: erste zwei Zeilen gehören zum Absender-Briefkopf.
+    let recipientStart = -1;
+    let recipientEnd   = -1;
+
+    for (let i = 2; i < N - 1; i++) {
+      const l0 = normalizeWs(lines[i]     || "");
+      const l1 = normalizeWs(lines[i + 1] || "");
+      const l2 = normalizeWs(lines[i + 2] || "");
+      const l3 = normalizeWs(lines[i + 3] || "");
+
+      // Starker Anker: expliziter Empfänger-Präfix
+      if (recipientPfxRx2.test(l0)) {
+        recipientStart = i;
+        if (streetRx2.test(l2) && zipCityRx2.test(l3)) recipientEnd = i + 3;
+        else if (streetRx2.test(l1) && zipCityRx2.test(l2)) recipientEnd = i + 2;
+        else recipientEnd = i + 1;
+        break;
+      }
+
+      // 3-Zeiler: l0=Name, l1=Straße, l2=PLZ
+      if (streetRx2.test(l1) && zipCityRx2.test(l2)) {
+        recipientStart = i;
+        recipientEnd   = i + 2;
+        break;
+      }
+
+      // 4-Zeiler: l0=Name1, l1=Name2, l2=Straße, l3=PLZ
+      if (streetRx2.test(l2) && zipCityRx2.test(l3) && !streetRx2.test(l0)) {
+        recipientStart = i;
+        recipientEnd   = i + 3;
+        break;
+      }
+    }
+
+    // Empfänger-Zeilen in Set aufnehmen
+    if (recipientStart >= 0) {
+      for (let i = recipientStart; i <= Math.min(recipientEnd, N - 1); i++) {
+        const l = normalizeWs(lines[i] || "");
+        if (l) recipientLineKeys.add(normalizeCompare(l));
+      }
+    }
+
+    // --- Schritt 2: Kontaktzeilen markieren (gesamtes Header-Fenster) ---
+    for (let i = 0; i < N; i++) {
+      const l = normalizeWs(lines[i] || "");
+      if (contactRx2.test(l) && !companyRx2.test(l)) {
+        contactLineKeys.add(normalizeCompare(l));
+      }
+    }
+
+    // --- Schritt 3: Besten Absender-Kandidaten vor dem Empfängerblock finden ---
+    const senderSearchEnd = recipientStart > 0 ? recipientStart : Math.min(10, N);
+    let bestSenderBlock = null;
+    let bestScore       = -Infinity;
+
+    for (let i = 0; i < senderSearchEnd; i++) {
+      const l = normalizeWs(lines[i] || "");
+      if (!l || l.length < 3) continue;
+      if (streetRx2.test(l) || zipCityRx2.test(l) || contactRx2.test(l)) continue;
+      if (recipientPfxRx2.test(l)) continue;
+
+      const hasCompany = companyRx2.test(l);
+
+      let s = 0;
+      if (i <= 1)      s += 12;
+      else if (i <= 3) s += 7;
+      else             s += 3;
+      if (hasCompany)  s += 14;
+
+      if (s > bestScore) {
+        bestScore       = s;
+        bestSenderBlock = { value: stripOcrJunk(l), score: s };
+      }
+    }
+
+    return { bestSenderBlock, recipientLineKeys, contactLineKeys };
+  }
+
+  /* =========================================================
      ABSENDER
   ========================================================= */
 
@@ -367,11 +469,14 @@
     // Inhaltsbasierter Empfänger-Check: Fängt Fälle ab, in denen recipientLike
     // wegen lokalem vs. absolutem Zeilenindex nicht greift (senderZone-Scan
     // übergibt localIdx, recipientLike enthält aber absolute Indizes).
-    const recipientContentSet = new Set(
+   const recipientContentSet = new Set(
       (zones.recipientZone || zones.recipientBlock || [])
         .map(l => normalizeCompare(normalizeWs(l)))
         .filter(Boolean)
     );
+
+    // Block-basierte Parteien-Erkennung: arbeitet auf allLines, kein Index-Problem.
+    const partyBlocks = detectPartyBlocks(allLines);
 
     const companyFormRx = /\b(gmbh|ag|kg|ug|ohg|kgaa|mbh|ltd\.?|inc\.?|corp\.?|llc|s\.?a\.?r?\.?l\.?|b\.?v\.?|n\.?v\.?|plc|s\.?p\.?a\.?|s\.?r\.?l\.?|e\.?\s*k\.?|e\.?\s*v\.?|gbr|partg|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke|wasser|praxis|apotheke|steuerberatung|steuerberater|notar|rechtsanwalt|online|telecom|telekom|digital|media|group|verlag|vertrieb|handel|technik|systems|system|consulting|consult|partner|netz|netze|netzwerk|infrastruktur|dienstleistung|dienstleistungen|bau|baubetrieb|elektro|sanitär|heizung|dach|maler|versand|logistik|transport|spedition|software|hardware|capital|invest|strom|gas|wärme|mobilfunk|internet|kommunikation)\b/i;
 
@@ -400,8 +505,11 @@
       const isInRecipientContent = recipientContentSet.has(normalizeCompare(raw));
       // Rein zweiteiliger Personenname ohne Firmensignal: "Max Mustermann"
       // Zwei Wörter, beide groß, keine Ziffer, kein companyFormRx-Treffer
-      const isPersonNameOnly = !hasCompany && !/\d/.test(raw) &&
+        const isPersonNameOnly = !hasCompany && !/\d/.test(raw) &&
         /^[A-ZÄÖÜ][a-zäöüß]{1,25}\s+[A-ZÄÖÜ][a-zäöüß]{2,30}$/.test(raw);
+      // Block-basierte Checks: inhaltsbasiert, kein Index-Problem
+      const isInBlockRecipient = partyBlocks.recipientLineKeys.has(normalizeCompare(raw));
+      const isInBlockContact   = partyBlocks.contactLineKeys.has(normalizeCompare(raw));
 
       let score = baseScore;
       if (hasLabel)              score += 8;
@@ -410,6 +518,8 @@
       if (!/\d/.test(raw))       score += 1;
       if (isInAddrBlock)         score -= 30;
       if (isInRecipientContent)  score -= 30;
+      if (isInBlockRecipient)    score -= 30;
+      if (isInBlockContact)      score -= 20;
       if (isPersonNameOnly)      score -= 8;
 
       switch (zoneTag) {
@@ -473,6 +583,22 @@
       /\b(?:rechnungssteller|lieferant|anbieter|auftragnehmer|vendor|supplier)\b[:\s]+([^\n]{3,80})/i
     );
     if (labelMatch?.[1]) push(cleanToken(labelMatch[1]), 22, "Label im Dokument", -1, "metaZone");
+
+    // Parteienblock: bester Absender-Kandidat aus block-basierter Erkennung.
+    // Wird direkt als Kandidat eingefügt (analog zu Lieferantenprofil).
+    // score = sScore (Position + Firmensignal) + 10 Pauschalbonus für Blockbefund.
+    if (partyBlocks.bestSenderBlock?.value) {
+      const bv = partyBlocks.bestSenderBlock.value;
+      if (bv && bv.length >= 3) {
+        candidates.push({
+          value:  bv,
+          score:  partyBlocks.bestSenderBlock.score + 10,
+          line:   bv,
+          index:  -1,
+          source: "Parteienblock"
+        });
+      }
+    }
 
     if (profile?.name) {
       candidates.push({
