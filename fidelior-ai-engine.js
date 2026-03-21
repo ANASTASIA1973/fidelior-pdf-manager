@@ -489,6 +489,12 @@
 
     function push(line, baseScore, source, absIdx, zoneTag) {
       const raw = normalizeWs(line);
+            // Harte Ausschlüsse: diese Zeilen dürfen nie Absender-Kandidaten werden
+      if (/^(herr|frau|familie)\b/i.test(raw)) return;
+      if (/^(an\s+(herrn?|frau|die\s+firma))\b/i.test(raw)) return;
+      if (/^(c\/o|z\.?\s*hd\.?)\b/i.test(raw)) return;
+      if (/^(ihre fragen|bei fragen|für fragen|kontakt|kundenservice)\b/i.test(raw)) return;
+      if (/^(sehr geehrte|guten tag|liebe|hallo)\b/i.test(raw)) return;
       if (!raw || raw.length < 3 || raw.length > 90) return;
       if (raw.split(/\s+/).length > 9) return;
       if (/[!?]/.test(raw)) return;
@@ -532,7 +538,7 @@
       if (isInBlockRecipient)    score -= 40;
       if (isInBlockContact)      score -= 25;
       if (isContactLine)         score -= 20;
-      if (isPersonNameOnly)      score -= 12;
+     if (isPersonNameOnly)      score -= 18;
       if (isAddressLikeName)     score -= 12;
 
       switch (zoneTag) {
@@ -600,6 +606,7 @@
     // Parteienblock: bester Absender-Kandidat aus block-basierter Erkennung.
     // Wird direkt als Kandidat eingefügt (analog zu Lieferantenprofil).
     // score = sScore (Position + Firmensignal) + 10 Pauschalbonus für Blockbefund.
+     /*
     if (partyBlocks.bestSenderBlock?.value) {
       const bv = partyBlocks.bestSenderBlock.value;
       if (bv && bv.length >= 3) {
@@ -612,7 +619,7 @@
         });
       }
     }
-
+    */
     if (profile?.name) {
       candidates.push({
         value:  stripOcrJunk(normalizeWs(profile.name)),
