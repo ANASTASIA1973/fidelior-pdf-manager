@@ -1473,10 +1473,17 @@ function findInvoiceNumberStrict(rawText){
 }
 // — Text + Zeilen (mit x/y) extrahieren —
 async function extractTextAndLinesFirstPages(pdf, maxPages = 3){
-  const N = Math.min(maxPages, pdf.numPages);
+  const totalPages = pdf.numPages;
+  const N = Math.min(maxPages, totalPages);
+
+  // Seiten-Indizes: erste N Seiten + letzte Seite (falls sie nicht schon enthalten ist)
+  const pageNums = [];
+  for (let i = 1; i <= N; i++) pageNums.push(i);
+  if (totalPages > N) pageNums.push(totalPages); // letzte Seite immer einschließen
+
   let allItems = [];
-  for (let i = 1; i <= N; i++){
-    const p = await pdf.getPage(i);
+  for (const pageNum of pageNums){
+    const p = await pdf.getPage(pageNum);
     const c = await p.getTextContent({ normalizeWhitespace:true, disableCombineTextItems:false });
     allItems = allItems.concat(c.items || []);
   }
@@ -1876,7 +1883,12 @@ function analyzeDocument(txt, lines){
   return window.FideliorAI.analyzeDocument(txt, lines);
 }
 function applyAnalysisFieldToUi(fieldId, field, analysis){
-  if (!field || field.confidence !== "high") return false;
+  // Datum und Betrag erlauben medium-Confidence; alle anderen nur high.
+  const minConf = (fieldId === "invoiceDate" || fieldId === "amountInput")
+    ? ["high", "medium"]
+    : ["high"];
+
+  if (!field || !minConf.includes(field.confidence)) return false;
 
   if (fieldId === "invoiceNo") {
     const detectedType = String(

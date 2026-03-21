@@ -1,5 +1,5 @@
 /* =========================================================
-   Fidelior AI Engine v8
+   Fidelior AI Engine v9
    Zentrale Dokumentanalyse – Single Source of Truth
 
    Prinzipien:
@@ -8,17 +8,21 @@
    - UI rendert nur
    - lieber leer als falsch – aber nicht unnötig leer
 
-   v8 Fixes:
-   - labelValueScan: Nachbar-Lookup nutzt globale allLines (nicht Zone-Array)
-     → Multi-Page / Split-Line Totals werden zuverlässig erkannt
-   - TOTAL_LABELS: Jahresbetrag, Jahresprämie, Beitrag, Versicherungsbetrag,
-     Abschlussbetrag, Zahllast, Zahlungsbetrag hinzugefügt
-   - finalizeField: minAbsoluteScore-Pfad ohne Confidence-Sperre
-     → eindeutige Einzelkandidaten werden nicht mehr verworfen
-   - Sender: OCR-Schmutz am Anfang (kurze Kleinbuchstaben-Fragmente) wird entfernt
-   - Sender: Adressblock-Malus und Zone-Boni weiter geschärft
-   - Rechnungsnummer: stärker in metaZone verankert, Heading-Muster robuster
-   - Datum: Fälligkeitsdatum-Abgrenzung stabiler
+   v9 Fixes:
+   - finalizeField: Confidence-Gate entfernt – minScore + minMargin
+     sind die einzigen Qualitätstore; Confidence ist rein informativ.
+     Verhindert, dass valide Medium-Kandidaten still verworfen werden.
+   - Sender: partyBlocks.bestSenderBlock wieder aktiviert (war in v8
+     auskommentiert); Score gedeckelt auf 36.
+   - buildRecipientLikeIndices: "An Herrn/Frau/die Firma" explizit als
+     Empfänger-Anker → verhindert Empfängernamen als Absender.
+   - detectDateCandidates: "Druckdatum", "Erstellt am", "Erstellungsdatum",
+     "Leistungszeitraum" / "Abrechnungszeitraum" erhalten Negativ-Score;
+     Fälligkeits-Penalty auf -18 erhöht.
+   - detectAmountCandidates: MwSt-Prozentzeilenmalus stabilisiert;
+     "Monatsprämie" / "monatlich" in EXCLUDE ergänzt.
+   - detectSenderCandidates: "Empfänger", "An die Firma" als harte
+     Ausschlüsse; companyFormRx um Branchen erweitert.
 ========================================================= */
 
 (() => {
@@ -237,12 +241,14 @@
 
     if (!best) return empty();
 
-    // Absolut-Pfad: hoher Score genügt, keine Confidence-Sperre
+    // Absolut-Pfad: hoher Score genügt, keine weitere Prüfung
     if ((best.score || 0) >= minAbsoluteScore) return result();
 
+    // Qualitäts-Tore: Score und Abstand zum zweitbesten Kandidaten.
+    // Confidence ist rein informativ – kein eigenes Gate hier.
+    // (v9: Confidence-Gate entfernt; medium-Kandidaten mit gutem Score/Margin passieren)
     if ((best.score || 0) < minScore) return empty();
     if (margin < minMargin)           return empty();
-    if (confidence !== "high")        return empty();
 
     return result();
   }
@@ -305,8 +311,8 @@
   function buildRecipientLikeIndices(allLines) {
     const streetRx        = /\b(straße|strasse|str\.)\s*\d|\b(weg|allee|platz|gasse|ufer|chaussee|ring|damm|pfad|steig|road|street|avenue|lane|drive|boulevard|court)\b/i;
     const zipCityRx       = /\b\d{4,5}\s+[A-Za-zÄÖÜäöüß]{2}/;
-    // Explizite Empfänger-Präfixe sind eigenständige Anker für den Adressblock
-    const recipientPfxRx  = /^(Herr|Frau|Familie|Dr\.?|Prof\.?|z\.?\s*Hd\.?|c\/o)\b/i;
+    // Explizite Empfänger-Präfixe: persönliche Anreden + "An Herrn/Frau/die Firma"
+    const recipientPfxRx  = /^(Herr|Frau|Familie|Dr\.?|Prof\.?|z\.?\s*Hd\.?|c\/o|An\s+(Herrn?|Frau|die\s+Firma|den)|Empfänger(?:in)?)\b/i;
     const set             = new Set();
 
     for (let i = 0; i < allLines.length; i++) {
@@ -491,7 +497,8 @@
       const raw = normalizeWs(line);
             // Harte Ausschlüsse: diese Zeilen dürfen nie Absender-Kandidaten werden
       if (/^(herr|frau|familie)\b/i.test(raw)) return;
-      if (/^(an\s+(herrn?|frau|die\s+firma))\b/i.test(raw)) return;
+      if (/^(an\s+(herrn?|frau|die\s+firma|den))\b/i.test(raw)) return;
+      if (/^(empfänger(?:in)?)\b/i.test(raw)) return;
       if (/^(c\/o|z\.?\s*hd\.?)\b/i.test(raw)) return;
       if (/^(ihre fragen|bei fragen|für fragen|kontakt|kundenservice)\b/i.test(raw)) return;
       if (/^(sehr geehrte|guten tag|liebe|hallo)\b/i.test(raw)) return;
@@ -604,22 +611,21 @@
     if (labelMatch?.[1]) push(cleanToken(labelMatch[1]), 22, "Label im Dokument", -1, "metaZone");
 
     // Parteienblock: bester Absender-Kandidat aus block-basierter Erkennung.
-    // Wird direkt als Kandidat eingefügt (analog zu Lieferantenprofil).
-    // score = sScore (Position + Firmensignal) + 10 Pauschalbonus für Blockbefund.
-     /*
+    // Wird direkt als Kandidat eingefügt – gedeckelt auf Score 36, damit kein
+    // schwacher Block über starke Label-Kandidaten hinaus bubbelt.
     if (partyBlocks.bestSenderBlock?.value) {
-      const bv = partyBlocks.bestSenderBlock.value;
-      if (bv && bv.length >= 3) {
+      const bv    = partyBlocks.bestSenderBlock.value;
+      const bsc   = partyBlocks.bestSenderBlock.score;
+      if (bv && bv.length >= 3 && bsc >= 8) {
         candidates.push({
           value:  bv,
-          score:  partyBlocks.bestSenderBlock.score + 10,
+          score:  Math.min(bsc + 10, 36),
           line:   bv,
           index:  -1,
           source: "Parteienblock"
         });
       }
     }
-    */
     if (profile?.name) {
       candidates.push({
         value:  stripOcrJunk(normalizeWs(profile.name)),
@@ -856,7 +862,13 @@
       /\bteilbetrag\b/i,
       /\bratenzahlung\b/i,
       /\bmonats-?beitrag\b/i,   // Monatsbeitrag ist Einzelrate, nicht Jahresgesamt
-      /\bmonatlich\b/i
+      /\bmonatlich\b/i,
+      /\bmonats-?pr[äa]mie\b/i, // Monatsprämie = Einzelrate
+      /\bkwh-?preis\b/i,        // Energieeinheitspreis
+      /\bgrundpreis\b/i,        // Grundgebühr, nicht Gesamtbetrag
+      /\barbeitspreis\b/i,
+      /\beinheits-?preis\b/i,
+      /\bpos(?:ition)?\b/i      // Tabellenpositionswert
     ];
 
     const TAX_PERCENT_RX = /\b(mwst\.?|ust\.?|mehrwertsteuer|vat)\s+\d{1,2}[,\.]\d{0,2}\s*%/i;
@@ -1043,8 +1055,8 @@
       { rx: /\b(leistungsdatum|lieferdatum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i, score: 16, src: "Leistungsdatum" }
     ];
 
-    // Fälligkeitsdatum aktiv bestrafen
-    const dueDateRx = /\b(fälligkeits?datum|fällig\s+(?:am|bis|zum)|zahlungsziel|zahlungsfrist|due\s+date|pay\s+by|payment\s+due|fällig\s+bei|zahlbar\s+bis)\b/i;
+    // Fälligkeitsdatum und sonstige Nicht-Rechnungsdaten aktiv bestrafen
+    const dueDateRx = /\b(fälligkeits?datum|fällig\s+(?:am|bis|zum)|zahlungsziel|zahlungsfrist|due\s+date|pay\s+by|payment\s+due|fällig\s+bei|zahlbar\s+bis|druckdatum|erstellt\s+am|erstellungsdatum|printed\s+on|created\s+on|drucktag|abrechnungszeitraum|leistungszeitraum|lieferzeitraum|buchungsdatum|valuta)\b/i;
     const todayIso  = new Date().toISOString().slice(0, 10);
 
     function pushDate(iso, line, score, source, index) {
@@ -1069,7 +1081,7 @@
         const iso = toIsoDate(m[2]);
         if (!iso) continue;
         let s = def.score + zoneBonus;
-        if (isDue) s -= 16;
+        if (isDue) s -= 18;
         if (semanticType === "rechnung" || semanticType === "gutschrift") s += 2;
         pushDate(iso, line, s, def.src + (zoneBonus > 0 ? " (Zone)" : ""), idx);
       }
@@ -1103,7 +1115,7 @@
         const iso = toIsoDate(m[2]);
         if (!iso) continue;
         let s = def.score;
-        if (isDue) s -= 16;
+        if (isDue) s -= 18;
         if (semanticType === "rechnung" || semanticType === "gutschrift") s += 2;
         pushDate(iso, line, s, def.src, idx);
       }
@@ -1124,7 +1136,7 @@
         if (!m?.[1]) { if (off === 1) continue; break; }
         const iso = toIsoDate(m[1]);
         let s = 28;
-        if (isDue) s -= 16;
+        if (isDue) s -= 18;
         pushDate(iso, line + " " + next, s, "Multi-Line-Datum", idx);
         break;
       }
