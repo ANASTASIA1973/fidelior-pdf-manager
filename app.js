@@ -1171,7 +1171,7 @@ async function renderAll(){
 }
 
 
-  /* ---------------------------- Upload & Zoom ------------------------------ */
+ /* ---------------------------- Upload & Zoom ------------------------------ */
 
 
 // ==================================================================
@@ -1194,7 +1194,6 @@ function attachUpload(){
     if (mb > 50){ setStatus(`Zu groß (${mb.toFixed(1)} MB)`); return; }
 
     if (!fromInbox){
-      // nur löschen, wenn nicht aus Inbox gekommen
       currentInboxFileHandle = null;
       currentInboxFileName   = "";
       currentInboxRelPath    = null;
@@ -1220,26 +1219,25 @@ function attachUpload(){
 
     await renderAll();
 
+    autoRecognize();
 
-autoRecognize();
+    // 👉 NEU: Document Record nach Analyse sofort erstellen
+    try {
+      updateCurrentDocumentRecord();
+    } catch (e) {
+      console.warn("updateCurrentDocumentRecord failed:", e);
+    }
 
-// 👉 NEU: Document Record nach Analyse sofort erstellen
-try {
-  updateCurrentDocumentRecord();
-} catch (e) {
-  console.warn("updateCurrentDocumentRecord failed:", e);
-}
-
-$("#saveBtn")?.removeAttribute("disabled");
-toast("<strong>Datei geladen</strong>", 1500);
-refreshPreview();
+    $("#saveBtn")?.removeAttribute("disabled");
+    toast("<strong>Datei geladen</strong>", 1500);
+    refreshPreview();
   }
 
   // für refreshInbox() erreichbar machen
   window.__fdl_takeFile = takeFile;
 
   // Neuer, minimaler Picker-Handler (nur Inbox-ROOT prüfen + Debug-Ausgaben)
-btnPick?.addEventListener("click", async () => {
+  btnPick?.addEventListener("click", async () => {
   try {
     if (!window.showOpenFilePicker) {
       // Fallback auf <input type="file">
