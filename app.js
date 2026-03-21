@@ -1378,6 +1378,8 @@ document.getElementById("downloadBtn")?.addEventListener("click", () => {
 });
 
 // === Helper: STRIKTE Rechnungsnummer-Erkennung (robust & konservativ) ===
+// DEPRECATED – wird im Hauptfluss nicht aufgerufen.
+// Ersetzt durch detectReferenceCandidates() in fidelior-ai-engine.js.
 function findInvoiceNumberStrict(rawText){
   if (!rawText) return "";
 
@@ -1525,7 +1527,10 @@ function storeDocumentFingerprint(fp){
 
 }
 // — Betrag erkennen (Fälliger Betrag > Gesamt brutto) —
+// DEPRECATED – wird im Hauptfluss nicht aufgerufen.
+// Ersetzt durch detectAmountCandidates() in fidelior-ai-engine.js.
 function detectTotalAmountFromLines(lines){
+
   if (!Array.isArray(lines) || !lines.length) return NaN;
 
   const PRI = [
@@ -1682,6 +1687,8 @@ function createDocumentSummary(meta){
 
   return parts.join(" ");
 }
+// DEPRECATED – Aufruf aus autoRecognize() entfernt (Patch 1).
+// Ergebnis wurde nie zur UI-Befüllung genutzt.
 function extractStructuredFacts(text){
   const t = String(text || "");
   const facts = {};
@@ -1747,6 +1754,8 @@ function isMaskedIbanLike(tok){
  *  – sucht nach 'Rechnungsnummer' / 'Invoice number'
  *  – nimmt die rechteste 6+stellige Zahl derselben oder nächsten Zeile
  *  – ignoriert Kundennummer/Vertragsnummer/Maske 'DE…'
+ *  DEPRECATED – wird im Hauptfluss nicht aufgerufen.
+ *  Ersetzt durch detectReferenceCandidates() in fidelior-ai-engine.js.
  */
 function findInvoiceNumberFromLines(lines){
   if (!Array.isArray(lines)) return "";
@@ -1899,6 +1908,8 @@ function applyAnalysisFieldToUi(fieldId, field, analysis){
    SMART DOCUMENT TYPE DETECTION
 ========================================================= */
 
+// DEPRECATED – wird im Hauptfluss nicht aufgerufen.
+// Ersetzt durch detectSemanticType() in fidelior-ai-engine.js.
 function detectDocTypeSmart(txt){
   const t = String(txt || "").toLowerCase();
 
@@ -1923,6 +1934,9 @@ function detectDocTypeSmart(txt){
   return "dokument";
 }
 
+// DEPRECATED – wird im Hauptfluss nur noch von extractStructuredFacts aufgerufen
+// (selbst deprecated, Aufruf entfernt). Ersetzt durch detectDateCandidates()
+// in fidelior-ai-engine.js.
 function detectInvoiceDateSmart(txt, lines){
   const labelPatterns = [
     /rechnungsdatum[:\s]+(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})/i,
@@ -1950,6 +1964,8 @@ function detectInvoiceDateSmart(txt, lines){
 
   return valid.length ? isoToDisp(valid[valid.length - 1]) : "";
 }
+// DEPRECATED – wird im Hauptfluss nicht aufgerufen.
+// Ersetzt durch detectSenderCandidates() in fidelior-ai-engine.js.
 function detectSenderSmart(txt, lines){
   const STRONG_COMPANY_RX = /\b(gmbh|ag|kg|ug|ohg|mbh|ltd|inc|company|corp|llc)\b/i;
 
@@ -2010,8 +2026,9 @@ async function autoRecognize() {
     const fp = createDocumentFingerprint(txt);
     storeDocumentFingerprint(fp);
 
-    const facts = extractStructuredFacts(txt);
-    console.log("Document facts:", facts);
+   // extractStructuredFacts-Aufruf entfernt: Ergebnis wurde ausschließlich
+    // in console.log genutzt und hat keine UI-Felder gesteuert.
+    // Funktion bleibt definiert (DEPRECATED-Markierung siehe weiter unten).
 
 const analysis = analyzeDocument(txt, lines);
 
@@ -2232,11 +2249,30 @@ if (senderEl && !senderEl.dataset.userTyped) {
   }
   ensureEditableFileName();
 
-function computeFileNameAuto() {
-  // Eingaben einsammeln
-  const betragRaw = (amountEl?.value || "").trim();           // z. B. "45,22"
-  const absender  = (senderEl?.value || "").trim();
-  const reNummer  = (invNoEl?.value || "").trim();            // RE-/Rechnungsnummer (roh)
+function computeFileNameAuto(analysis) {
+  // Eingaben einsammeln.
+  // DOM-Werte haben Vorrang. analysis ist optionaler Fallback für Felder,
+  // die die Engine erkannt hat, aber wegen confidence < "high" nicht ins DOM
+  // geschrieben wurden. analysis kommt aus window.__fdlLastAutoLearningContext?.analysis
+  // (wird von effectiveFileName übergeben).
+  const _af = analysis?.fields || {};
+
+  const betragRaw =
+    (amountEl?.value || "").trim() ||
+    // Fallback: Engine-Zahl → numToEuro → formatAmountDisplay
+    // ergibt dasselbe Format wie nach Blur im Betrag-Feld ("1.234,56").
+    (Number.isFinite(_af.amount?.value)
+      ? formatAmountDisplay(numToEuro(_af.amount.value))
+      : "");
+
+  const absender =
+    (senderEl?.value || "").trim() ||
+    (_af.sender?.value || "").trim();
+
+  const reNummer =
+    (invNoEl?.value || "").trim() ||
+    (_af.reference?.value || "").trim();
+
   const objCode   = (objSel?.value  || "").trim();            // z. B. "EGYO" / "B75" ...
   const sub       = (subSel?.value  || "").trim();            // Unterordner (für B75-Sonderfall)
 const egyoZusatz = (egyoSuffixEl?.value || "").trim();
@@ -2251,8 +2287,10 @@ const egyoZusatz = (egyoSuffixEl?.value || "").trim();
   }
 
   // Datum in "JJJJ.MM.TT"
+  // Fallback auf analysis.fields.date (ISO-Format, z.B. "2025-03-15") wenn beide
+  // DOM-Felder leer sind. dispToIso("") gibt "" zurück, daher kein Seiteneffekt.
   const datum =
-    (dispToIso(invDateEl?.value) || dispToIso(recvDateEl?.value) || "")
+    (dispToIso(invDateEl?.value) || dispToIso(recvDateEl?.value) || (_af.date?.value || ""))
       .replace(/-/g, ".") || today().split(".").reverse().join(".");
 
   // Betrag nur bei Rechnung verwenden und nur wenn sinnvoll
@@ -2315,11 +2353,14 @@ return base + ".pdf";
 
 
   function effectiveFileName(){
+    // analysis aus dem letzten autoRecognize-Lauf als Fallback für leere DOM-Felder.
+    const analysis = window.__fdlLastAutoLearningContext?.analysis || null;
     if (fileNameInput && fileNameInput.dataset.mode === "manual") {
       const v = fileNameInput.value.trim();
-      return v ? (/\.(pdf)$/i.test(v) ? v : (v + ".pdf")) : computeFileNameAuto();
+      return v ? (/\.(pdf)$/i.test(v) ? v : (v + ".pdf")) : computeFileNameAuto(analysis);
     }
-    return computeFileNameAuto();
+    return computeFileNameAuto(analysis);
+  
   }
 
   // Mapping helpers (use code→record; use scopevisioName/pcloudName, not displayName)

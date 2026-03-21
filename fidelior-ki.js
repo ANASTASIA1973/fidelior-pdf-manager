@@ -900,34 +900,32 @@ async function onOcr(txt, lines, assignmentsCfg) {
       result = extractSender(txt, lines, matchedRule);
     }
 
-    if (result?.value) {
+   if (result?.value) {
       const current = normalizeWs(senderEl.value || '');
       const incoming = normalizeWs(result.value);
 
       const sameSender =
         normalizeForCompare(current) === normalizeForCompare(incoming);
 
-      const mayWrite =
+      // mayUpdateUi: Badge, Status und Learn-Panel aktualisieren wenn sinnvoll.
+      // Kein DOM-Write mehr (senderEl.value / classList / kiDetected / delete userTyped):
+      // – senderEl.value wird ausschließlich durch app.js / applyAnalysisFieldToUi gesetzt.
+      // – kiDetected bedeutete "KI hat Wert ins Feld geschrieben" – ohne DOM-Write
+      //   wäre der Marker falsch und würde mayWrite beim nächsten Aufruf fälschlich
+      //   triggern.
+      // – delete userTyped darf nicht gesetzt werden wenn KI nichts geschrieben hat.
+      const mayUpdateUi =
         !current ||
-        senderEl.dataset.kiDetected === '1' ||
         sameSender;
 
-      if (mayWrite) {
-        if (!current) {
-          senderEl.value = incoming;
-          senderEl.classList.add('auto');
-        }
-
-        senderEl.dataset.kiDetected = '1';
+      if (mayUpdateUi) {
+        // kiSource setzen: neutraler Informationsträger für Learn-Panel und Badge.
         senderEl.dataset.kiSource = result.source;
-        delete senderEl.dataset.userTyped;
 
         showSenderBadge(result.confidence, result.source);
         setStatus(result.confidence, `Absender erkannt: ${incoming}`);
 
-        if (typeof refreshPreview === 'function') {
-          try { refreshPreview(); } catch {}
-        }
+        // Kein refreshPreview: autoRecognize() in app.js ruft es am Ende auf.
 
         if (result.confidence !== 'high') {
           setTimeout(() => {
@@ -939,7 +937,8 @@ async function onOcr(txt, lines, assignmentsCfg) {
         }
       }
 
-      return;
+      // Strukturierten Vorschlag zurückgeben – kann künftig von app.js ausgewertet werden.
+      return result;
     }
 
     removeSenderBadge();
