@@ -1,5 +1,5 @@
 /* =========================================================
-   Fidelior AI Engine v7
+   Fidelior AI Engine v8
    Zentrale Dokumentanalyse – Single Source of Truth
 
    Prinzipien:
@@ -8,11 +8,17 @@
    - UI rendert nur
    - lieber leer als falsch – aber nicht unnötig leer
 
-   v7 Korrekturen:
-   - Betrag: Label-Wörterbuch mit Bindestrichen ("Bruttorechnungs-Betrag"),
-             Label->Wert-Direktscan, adaptiver minAbsoluteScore in finalizeField
-   - Absender: Adressblock-Detektor (Name + Straße + PLZ/Ort) identifiziert
-               Empfänger-Blöcke und entwerted diese aktiv
+   v8 Fixes:
+   - labelValueScan: Nachbar-Lookup nutzt globale allLines (nicht Zone-Array)
+     → Multi-Page / Split-Line Totals werden zuverlässig erkannt
+   - TOTAL_LABELS: Jahresbetrag, Jahresprämie, Beitrag, Versicherungsbetrag,
+     Abschlussbetrag, Zahllast, Zahlungsbetrag hinzugefügt
+   - finalizeField: minAbsoluteScore-Pfad ohne Confidence-Sperre
+     → eindeutige Einzelkandidaten werden nicht mehr verworfen
+   - Sender: OCR-Schmutz am Anfang (kurze Kleinbuchstaben-Fragmente) wird entfernt
+   - Sender: Adressblock-Malus und Zone-Boni weiter geschärft
+   - Rechnungsnummer: stärker in metaZone verankert, Heading-Muster robuster
+   - Datum: Fälligkeitsdatum-Abgrenzung stabiler
 ========================================================= */
 
 (() => {
@@ -43,6 +49,19 @@
       .replace(/^[#:;.,\-\s]+/, "")
       .replace(/[,:;.]+$/, "")
       .trim();
+  }
+
+  /*
+   * Entfernt OCR-Artefakte am Anfang eines Strings.
+   * Betrifft kurze, rein-kleingeschriebene Fragmente wie "iy", "1y", "dy".
+   * Lässt legitime Präfixe wie "e.K.", "AG" oder "Dr." unangetastet.
+   */
+  function stripOcrJunk(value) {
+    // Führende 1-3-Zeichen Kleinbuchstaben/Ziffern-Kombinationen (OCR-Müll)
+    let v = value.replace(/^([a-z]{1,3}|\d[a-z]{1,2}|[a-z]{1,2}\d)\s+/, "").trim();
+    // Führende einzelne Sonderzeichen oder Pipes
+    v = v.replace(/^[|\\\/~`'"^*_=+<>]+\s*/, "").trim();
+    return v;
   }
 
   function linesFromInput(text, lines) {
@@ -166,9 +185,11 @@
   /*
    * finalizeField
    *
-   * opts.minAbsoluteScore: wenn der beste Kandidat diesen Score erreicht
-   * UND Confidence >= medium, wird er ohne Margin-Anforderung übernommen.
-   * Verhindert, dass eindeutige Einzelkandidaten verworfen werden.
+   * opts.minAbsoluteScore:
+   *   Wenn der beste Kandidat diesen Score erreicht, wird er ohne
+   *   Margin-Prüfung übernommen. Verhindert, dass eindeutige Kandidaten
+   *   (z. B. klarer Total-Label-Treffer) wegen niedriger Margin verworfen werden.
+   *   Kein Confidence-Check beim Absolut-Pfad (v8: Confidence-Sperre entfernt).
    */
   function finalizeField(candidates, opts = {}) {
     const list   = Array.isArray(candidates) ? candidates : [];
@@ -211,8 +232,8 @@
 
     if (!best) return empty();
 
-    // Absolut-Pfad: hoher Score, kein Margin nötig
-    if ((best.score || 0) >= minAbsoluteScore && confidence !== "low") return result();
+    // Absolut-Pfad: hoher Score genügt, keine Confidence-Sperre
+    if ((best.score || 0) >= minAbsoluteScore) return result();
 
     if ((best.score || 0) < minScore) return empty();
     if (margin < minMargin)           return empty();
@@ -258,10 +279,12 @@
     if (/\b(vertragsbestätigung|auftragsbestätigung|bestätigung)\b/i.test(t)) return "vertrag";
 
     const hasInvoice  = /\b(rechnung|invoice|bill|verbrauchsabrechnung|liquidation)\b/i.test(t);
-    const hasTotal    = /\b(gesamt|summe|total|zu zahlen|rechnungsbetrag|invoice total|amount due|zahlbetrag|endbetrag)\b/i.test(t);
+    const hasTotal    = /\b(gesamt|summe|total|zu zahlen|rechnungsbetrag|invoice total|amount due|zahlbetrag|endbetrag|jahresbetrag|jahresprämie|beitrag)\b/i.test(t);
     const hasCurrency = /€|\beur\b/i.test(t);
 
     if (hasInvoice && (hasTotal || hasCurrency)) return "rechnung";
+    // Dokument hat klaren Finanzbezug aber kein "Rechnung"-Label → trotzdem Rechnung
+    if (hasTotal && hasCurrency && /\b(versicherung|telekom|energie|wasser|gas|strom|internet|mobilfunk|handy|tarif)\b/i.test(t)) return "rechnung";
     return "dokument";
   }
 
@@ -271,9 +294,8 @@
 
   /* =========================================================
      ADRESSBLOCK-DETEKTOR
-     Erkennt Empfänger-Sequenzen: Name / Straße / PLZ Ort
-     Gibt Menge der absoluten Zeilenindizes zurück die zur
-     Empfänger-Adresse gehören.
+     Erkennt Empfänger-Sequenzen: Name → Straße → PLZ/Ort
+     Gibt Set der absoluten Zeilenindizes zurück.
   ========================================================= */
 
   function buildRecipientLikeIndices(allLines) {
@@ -286,23 +308,18 @@
       const l1 = normalizeWs(allLines[i + 1] || "");
       const l2 = normalizeWs(allLines[i + 2] || "");
 
-      // Name + Straße + PLZ/Ort (3-zeilig)
       if (streetRx.test(l1) && zipCityRx.test(l2)) {
         set.add(i); set.add(i + 1); set.add(i + 2);
         continue;
       }
-
-      // Straße + PLZ/Ort (2-zeilig), Zeile davor = Name
       if (streetRx.test(l0) && zipCityRx.test(l1)) {
         if (i > 0) set.add(i - 1);
         set.add(i); set.add(i + 1);
         continue;
       }
-
-      // PLZ/Ort direkt → Straße davor, Name davor
-      if (zipCityRx.test(l0) && streetRx.test(normalizeWs(allLines[i - 1] || ""))) {
+      if (zipCityRx.test(l0) && i >= 1 && streetRx.test(normalizeWs(allLines[i - 1] || ""))) {
         if (i >= 2) set.add(i - 2);
-        if (i >= 1) set.add(i - 1);
+        set.add(i - 1);
         set.add(i);
       }
     }
@@ -322,7 +339,7 @@
 
     const recipientLike = buildRecipientLikeIndices(allLines);
 
-    const companyFormRx = /\b(gmbh|ag|kg|ug|ohg|kgaa|mbh|ltd\.?|inc\.?|corp\.?|llc|s\.?a\.?r?\.?l\.?|b\.?v\.?|n\.?v\.?|plc|s\.?p\.?a\.?|s\.?r\.?l\.?|e\.?\s*k\.?|e\.?\s*v\.?|gbr|partg|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke|wasser|praxis|apotheke|steuerberatung|steuerberater|notar|rechtsanwalt|online|telecom|telekom|digital|media|group|verlag|vertrieb|handel|technik|systems|system|consulting|consult|partner|netz|netze|netzwerk|infrastruktur|dienstleistung|dienstleistungen|bau|baubetrieb|elektro|sanitär|heizung|dach|maler|versand|logistik|transport|spedition|software|hardware|capital|invest)\b/i;
+    const companyFormRx = /\b(gmbh|ag|kg|ug|ohg|kgaa|mbh|ltd\.?|inc\.?|corp\.?|llc|s\.?a\.?r?\.?l\.?|b\.?v\.?|n\.?v\.?|plc|s\.?p\.?a\.?|s\.?r\.?l\.?|e\.?\s*k\.?|e\.?\s*v\.?|gbr|partg|holding|immobilien|hausverwaltung|verwaltung|management|solutions|services|service|energie|versorgung|versicherung|kanzlei|bank|sparkasse|werke|wasser|praxis|apotheke|steuerberatung|steuerberater|notar|rechtsanwalt|online|telecom|telekom|digital|media|group|verlag|vertrieb|handel|technik|systems|system|consulting|consult|partner|netz|netze|netzwerk|infrastruktur|dienstleistung|dienstleistungen|bau|baubetrieb|elektro|sanitär|heizung|dach|maler|versand|logistik|transport|spedition|software|hardware|capital|invest|strom|gas|wärme|mobilfunk|internet|kommunikation)\b/i;
 
     const negativeLineRx = /\b(rechnung|invoice|kundennummer|kunden\-?nr|vertragsnummer|vertrag\s*nr|iban|bic|swift|telefon\s*nr|fax|e-?mail|www\.|ust\-?id|mwst|steuer\s*nr|datum|seite|page|tarif|lieferadresse|rechnungsadresse|leistungsempfänger|kontonummer|konto\s*nr)\b/i;
     const greetingRx    = /^(sehr geehrte|guten tag|hallo|dear|liebe[rs]?|hi\b)\b/i;
@@ -332,33 +349,31 @@
     const labelPrefixRx = /^(name|firma|absender|rechnungssteller|vendor|lieferant|auftragnehmer)\s*:\s*/i;
 
     function push(line, baseScore, source, absIdx, zoneTag) {
-      const s = normalizeWs(line);
-      if (!s || s.length < 3 || s.length > 90) return;
-      if (s.split(/\s+/).length > 9) return;
-      if (/[!?]/.test(s)) return;
-      if (greetingRx.test(s)) return;
-      if (sentenceRx.test(s)) return;
-      if (zipCityRx.test(s))  return;
-      if (streetRx.test(s))   return;
+      const raw = normalizeWs(line);
+      if (!raw || raw.length < 3 || raw.length > 90) return;
+      if (raw.split(/\s+/).length > 9) return;
+      if (/[!?]/.test(raw)) return;
+      if (greetingRx.test(raw)) return;
+      if (sentenceRx.test(raw)) return;
+      if (zipCityRx.test(raw))  return;
+      if (streetRx.test(raw))   return;
 
-      const hasLabel      = labelPrefixRx.test(s);
-      const hasCompany    = companyFormRx.test(s);
-      const hasNegative   = negativeLineRx.test(s);
+      const hasLabel      = labelPrefixRx.test(raw);
+      const hasCompany    = companyFormRx.test(raw);
+      const hasNegative   = negativeLineRx.test(raw);
       const isInAddrBlock = Number.isInteger(absIdx) && recipientLike.has(absIdx);
 
       let score = baseScore;
-      if (hasLabel)   score += 8;
-      if (hasCompany) score += 14;
+      if (hasLabel)     score += 8;
+      if (hasCompany)   score += 14;
       if (!hasNegative) score += 2;
-      if (!/\d/.test(s)) score += 1;
-
-      // Adressblock-Malus: sehr stark, damit echter Firmenkopf immer gewinnt
-      if (isInAddrBlock) score -= 30;
+      if (!/\d/.test(raw)) score += 1;
+      if (isInAddrBlock)   score -= 30;
 
       switch (zoneTag) {
         case "senderZone":
           score += 8;
-          if (Number.isInteger(absIdx) && absIdx <= 1) score += 6; // allererste Zeilen
+          if (Number.isInteger(absIdx) && absIdx <= 1) score += 6;
           else if (Number.isInteger(absIdx) && absIdx <= 3) score += 3;
           break;
         case "recipientZone":
@@ -376,21 +391,22 @@
 
       if (score <= 0) return;
 
-      const value = hasLabel ? s.replace(labelPrefixRx, "").trim() : s;
-      if (!value) return;
+      let value = hasLabel ? raw.replace(labelPrefixRx, "").trim() : raw;
+      value = stripOcrJunk(value); // OCR-Schmutz am Anfang entfernen
+      if (!value || value.length < 3) return;
 
       candidates.push({
         value,
         score,
-        line:  s,
+        line:  raw,
         index: Number.isInteger(absIdx) ? absIdx : -1,
         source
       });
     }
 
-    // senderZone: absolute Zeilenindizes
-    const senderZoneLines = zones.senderZone || zones.headerTop || [];
-    senderZoneLines.forEach((line, localIdx) => {
+    // senderZone (absoluter Zeilenindex = localIdx, Zone beginnt bei 0)
+    const senderLines = zones.senderZone || zones.headerTop || [];
+    senderLines.forEach((line, localIdx) => {
       push(line, localIdx <= 2 ? 16 : 11, "Absenderzone", localIdx, "senderZone");
     });
 
@@ -400,7 +416,7 @@
       push(line, 4, "Metazone", metaStart + localIdx, "metaZone");
     });
 
-    // recipientZone (explizit vom Extraktor)
+    // explizite recipientZone (vom Extraktor)
     (zones.recipientZone || zones.recipientBlock || []).forEach((line) => {
       push(line, 2, "Empfängerzone", -1, "recipientZone");
     });
@@ -418,7 +434,7 @@
 
     if (profile?.name) {
       candidates.push({
-        value:  normalizeWs(profile.name),
+        value:  stripOcrJunk(normalizeWs(profile.name)),
         score:  30,
         line:   profile.name,
         index:  -1,
@@ -445,20 +461,23 @@
     const dateLikeRx  = /^(\d{1,2}[.\-\/]){2}\d{2,4}$/;
     const phoneLikeRx = /^[\d\s\+\-\/\(\)]{8,}$/;
     const rufnummerRx = /^0\d{5,}$/;
+    // Mandats-/Gläubiger-Referenzen (30+ Zeichen alphanumerisch = kein Rechnungsnr.)
+    const creditorRx  = /^[A-Z]{2}\d{2}[A-Z]{3}\d{14,}$/i;
 
     function isValidToken(token) {
       if (!token || token.length < 3 || token.length > 32) return false;
       if (!/\d/.test(token)) return false;
-      if (badPrefixRx.test(token))  return false;
-      if (ibanRx.test(token))       return false;
-      if (dateLikeRx.test(token))   return false;
-      if (phoneLikeRx.test(token) && !/[A-Z]/i.test(token)) return false;
-      if (rufnummerRx.test(token))  return false;
+      if (badPrefixRx.test(token))                               return false;
+      if (ibanRx.test(token))                                    return false;
+      if (creditorRx.test(token))                                return false;
+      if (dateLikeRx.test(token))                                return false;
+      if (phoneLikeRx.test(token) && !/[A-Z]/i.test(token))     return false;
+      if (rufnummerRx.test(token))                               return false;
       return true;
     }
 
     const goodCtxRx = /\b(rechnung|invoice|rg-?nr\.?|rechnungs?-?(?:nummer|nr\.?|no\.?)|belegnummer|beleg-?nr\.?|referenz(?:nummer)?|ref\.?\s*(?:nr\.?|no\.?)?|dokumenten?(?:nummer|nr\.?)?|dok\.?\s*nr\.?)\b/i;
-    const badCtxRx  = /\b(kundennummer|kunden-?nr\.?|customer\s*(?:no|number)|iban|bic|swift|vertragskonto|mandatsreferenz|mandats-?ref|rufnummer|telefonnummer|bestellnummer|vertrags-?nr\.?|debitor|kreditinstitut|bankverbindung|kontonummer|konto-?nr\.?)\b/i;
+    const badCtxRx  = /\b(kundennummer|kunden-?nr\.?|customer\s*(?:no|number)|iban|bic|swift|vertragskonto|mandatsreferenz|mandats-?ref|rufnummer|telefonnummer|bestellnummer|vertrags-?nr\.?|debitor|kreditinstitut|bankverbindung|kontonummer|konto-?nr\.?|gläubiger-?id)\b/i;
 
     function push(value, line, baseScore, source, index) {
       const token = cleanToken(value).replace(/\s+/g, "");
@@ -470,26 +489,35 @@
       if (goodCtxRx.test(lineN))                                       s += 10;
       if (/\brechnung\s+[A-Z0-9]/i.test(lineN))                        s += 8;
       if (semanticType === "rechnung" || semanticType === "gutschrift")  s += 2;
-      if (/^[A-Z]{1,4}[-_\/]\d{4,}$/i.test(token))                     s += 8;
-      if (/^[A-Z]{1,4}[-_\/]\d{4}[-_\/]\d+$/i.test(token))             s += 8;
-      if (/^\d{2,4}\/\d{3,}$/.test(token))                              s += 6;
-      if (/^[A-Z]{1,3}\d{6,}$/i.test(token))                            s += 8;
-      if (/^\d{6,}$/.test(token))                                        s += 4;
+
+      // Format-Boni
+      if (/^[A-Z]{1,4}[-_\/]\d{4,}$/i.test(token))                     s += 8;  // RE-20240001
+      if (/^[A-Z]{1,4}[-_\/]\d{4}[-_\/]\d+$/i.test(token))             s += 8;  // RE-2024-1234
+      if (/^\d{2,4}\/\d{3,}$/.test(token))                              s += 6;  // 2024/12345
+      if (/^[A-Z]{1,3}\d{6,}$/i.test(token))                            s += 8;  // B898301796
+      if (/^\d{6,}$/.test(token))                                        s += 4;  // rein numerisch 6+
+
       if (badCtxRx.test(lineN) && !goodCtxRx.test(lineN))              s -= 16;
 
       if (s <= 0) return;
-      candidates.push({ value: token, score: s, line: lineN, index: Number.isInteger(index) ? index : -1, source });
+      candidates.push({
+        value:  token,
+        score:  s,
+        line:   lineN,
+        index:  Number.isInteger(index) ? index : -1,
+        source
+      });
     }
 
     const labelDefs = [
-      { rx: /\b(rechnungs?(?:nummer|nr\.?|no\.?|#))\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,          base: 28, src: "Rechnungsnummer-Label" },
-      { rx: /\b(rechnung)\s+([A-Z0-9][A-Z0-9.\-\/_]{2,})/gi,                                               base: 26, src: "Rechnung-Heading" },
-      { rx: /\b(invoice\s*(?:no\.?|nr\.?|number|#)?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,          base: 28, src: "Invoice-Label" },
-      { rx: /\b(belegnummer|beleg-?nr\.?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,                     base: 24, src: "Belegnummer" },
-      { rx: /\b(rg\.?\s*nr\.?|rn\.?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,                         base: 24, src: "RG-Nr-Label" },
+      { rx: /\b(rechnungs?(?:nummer|nr\.?|no\.?|#))\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,           base: 28, src: "Rechnungsnummer-Label" },
+      { rx: /\b(rechnung)\s+([A-Z0-9][A-Z0-9.\-\/_]{2,})/gi,                                                base: 26, src: "Rechnung-Heading" },
+      { rx: /\b(invoice\s*(?:no\.?|nr\.?|number|#)?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,           base: 28, src: "Invoice-Label" },
+      { rx: /\b(belegnummer|beleg-?nr\.?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,                      base: 24, src: "Belegnummer" },
+      { rx: /\b(rg\.?\s*nr\.?|rn\.?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,                          base: 24, src: "RG-Nr-Label" },
       { rx: /\b(referenz(?:nummer)?|ref\.?\s*(?:nr\.?|no\.?)?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi, base: 20, src: "Referenz-Label" },
-      { rx: /\b(dokumenten?(?:nummer|nr\.?)?|dok\.?\s*nr\.?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,  base: 20, src: "Dokument-Nr-Label" },
-      { rx: /\b(r-?nr\.?|doc\.?\s*(?:no|nr)\.?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,              base: 18, src: "Sonstige-Nr-Label" }
+      { rx: /\b(dokumenten?(?:nummer|nr\.?)?|dok\.?\s*nr\.?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,   base: 20, src: "Dokument-Nr-Label" },
+      { rx: /\b(r-?nr\.?|doc\.?\s*(?:no|nr)\.?)\s*[:#\s\-]*([A-Z0-9][A-Z0-9.\-\/_]{1,})/gi,               base: 18, src: "Sonstige-Nr-Label" }
     ];
 
     function scanZone(lines, zoneBonus) {
@@ -506,10 +534,12 @@
       });
     }
 
+    // Zonen-Scan
     scanZone(zones.metaZone || zones.metaBlock || [],                  6);
     scanZone((zones.senderZone || zones.headerTop || []).slice(0, 10), 4);
     scanZone((zones.bodyZone  || zones.body      || []).slice(0, 80),  0);
 
+    // Volltext-Scan (fängt Zeilenumbruch-Formate)
     for (const def of labelDefs) {
       const rx = new RegExp(def.rx.source, "gi");
       let m;
@@ -518,6 +548,7 @@
       }
     }
 
+    // Multi-Line: Label-Zeile ohne Wert → nächste Zeile(n)
     const labelOnlyRx  = /\b(rechnungs?(?:nummer|nr\.?|no\.?)|rechnung\s*nr\.?|invoice\s*(?:no\.?|nr\.?|number)?|belegnummer|beleg-?nr\.?|rg-?nr\.?|referenz(?:nr\.?)?|dokumenten?(?:nummer|nr\.?)?|r-?nr\.?)\s*[:#\s\-]*$/i;
     const singleTokRx  = /^([A-Z0-9][A-Z0-9.\-\/_]{2,29})\s*$/i;
 
@@ -535,6 +566,7 @@
       }
     });
 
+    // Lieferantenprofil
     if (Array.isArray(profile?.invoiceNumberPatterns)) {
       for (const rx of profile.invoiceNumberPatterns) {
         if (!(rx instanceof RegExp)) continue;
@@ -559,43 +591,62 @@
     const candidates = [];
 
     /*
-     * TOTAL_LABELS: Wörterbuch für alle bekannten Gesamtbetrags-Labels.
-     * Enthält explizit Bindestriche ("Bruttorechnungs-Betrag"),
-     * weil \bbruttorechnungsbetrag\b solche Formen nicht trifft.
+     * TOTAL_LABELS: vollständiges Wörterbuch aller Gesamtbetrags-Labels.
+     * Bindestriche explizit aufgenommen ("Bruttorechnungs-Betrag").
+     * v8: Jahresbetrag, Jahresprämie, Beitrag, Versicherungsbetrag,
+     *     Abschlussbetrag, Zahllast, Zahlungsbetrag ergänzt.
      */
     const TOTAL_LABELS = [
-      { rx: /\bzu\s+zahlen\b/i,                                    score: 30 },
-      { rx: /\bzu\s+überweisen\b/i,                                 score: 30 },
-      { rx: /\bzu\s+zahlender\s+betrag\b/i,                         score: 30 },
-      { rx: /\bzahlbetrag\b/i,                                      score: 28 },
-      { rx: /\bgesamtbetrag\b/i,                                    score: 28 },
-      { rx: /\brechnungsbetrag\b/i,                                  score: 28 },
-      { rx: /\brechnungsendbetrag\b/i,                               score: 30 },
-      { rx: /\bendbetrag\b/i,                                       score: 26 },
-      { rx: /\bbrutto-?rechnungs-?betrag\b/i,                       score: 28 }, // "Bruttorechnungs-Betrag", "Bruttorechnungsbetrag"
-      { rx: /\bbrutto-?betrag\b/i,                                  score: 26 },
-      { rx: /\bbrutto-?summe\b/i,                                   score: 26 },
-      { rx: /\bgesamt-?summe\b/i,                                   score: 26 },
-      { rx: /\bgesamt-?preis\b/i,                                   score: 24 },
-      { rx: /\brechnungs-?summe\b/i,                                score: 26 },
-      { rx: /\binvoice\s+total\b/i,                                 score: 28 },
-      { rx: /\btotal\s+amount\s+(due|payable)\b/i,                  score: 28 },
-      { rx: /\bamount\s+(due|payable)\b/i,                          score: 28 },
-      { rx: /\boffener?\s+betrag\b/i,                               score: 26 },
-      { rx: /\bnoch\s+offen\b/i,                                    score: 26 },
-      { rx: /\boffene\s+forderung\b/i,                              score: 26 },
-      { rx: /\brestbetrag\b/i,                                      score: 24 },
-      { rx: /\bgesamt-?forderung\b/i,                               score: 26 },
-      { rx: /\bforderungs-?betrag\b/i,                              score: 24 },
-      { rx: /\bbetrag\s+inkl\.?\s*(mwst|ust|mehrwertsteuer)\b/i,    score: 26 },
-      { rx: /\binkl\.?\s*(mwst|ust)\s+gesamt\b/i,                  score: 24 },
-      { rx: /\binkl\.?\s*(mwst|ust)\b/i,                           score: 18 },
-      { rx: /\bsumme\b/i,                                           score: 16 },
-      { rx: /\btotal\b/i,                                           score: 14 },
-      { rx: /\bgesamt\b/i,                                          score: 14 }
+      // Stärkste Zahlungs-Signale
+      { rx: /\bzu\s+zahlen\b/i,                                         score: 32 },
+      { rx: /\bzu\s+überweisen\b/i,                                      score: 32 },
+      { rx: /\bzu\s+zahlender\s+betrag\b/i,                              score: 32 },
+      { rx: /\bzahlbetrag\b/i,                                           score: 30 },
+      { rx: /\bzahlungs-?betrag\b/i,                                     score: 30 },
+      { rx: /\brechnungsendbetrag\b/i,                                   score: 32 },
+      { rx: /\brechnungsbetrag\b/i,                                      score: 30 },
+      { rx: /\bgesamtbetrag\b/i,                                         score: 30 },
+      // Jahres-/Versicherungsbeträge
+      { rx: /\bjahres-?betrag\b/i,                                       score: 28 },
+      { rx: /\bjahres-?pr[äa]mie\b/i,                                   score: 28 },
+      { rx: /\bjahresbeitrag\b/i,                                        score: 28 },
+      { rx: /\bversicherungs-?betrag\b/i,                                score: 28 },
+      { rx: /\bbeitrags-?betrag\b/i,                                     score: 26 },
+      { rx: /\babschluss-?betrag\b/i,                                    score: 26 },
+      { rx: /\bzahllast\b/i,                                             score: 28 },
+      // Endbeträge
+      { rx: /\bendbetrag\b/i,                                            score: 28 },
+      { rx: /\bbrutto-?rechnungs-?betrag\b/i,                            score: 30 },
+      { rx: /\bbrutto-?betrag\b/i,                                       score: 28 },
+      { rx: /\bbrutto-?summe\b/i,                                        score: 28 },
+      { rx: /\bgesamt-?summe\b/i,                                        score: 28 },
+      { rx: /\bgesamt-?preis\b/i,                                        score: 26 },
+      { rx: /\brechnungs-?summe\b/i,                                     score: 28 },
+      // International
+      { rx: /\binvoice\s+total\b/i,                                      score: 30 },
+      { rx: /\btotal\s+amount\s+(due|payable)\b/i,                       score: 30 },
+      { rx: /\bamount\s+(due|payable)\b/i,                               score: 30 },
+      // Offene Forderungen
+      { rx: /\boffener?\s+betrag\b/i,                                    score: 28 },
+      { rx: /\bnoch\s+offen\b/i,                                         score: 28 },
+      { rx: /\boffene\s+forderung\b/i,                                   score: 28 },
+      { rx: /\brestbetrag\b/i,                                           score: 26 },
+      { rx: /\bgesamt-?forderung\b/i,                                    score: 28 },
+      { rx: /\bforderungs-?betrag\b/i,                                   score: 26 },
+      // inkl. MwSt.-Varianten
+      { rx: /\bbetrag\s+inkl\.?\s*(mwst|ust|mehrwertsteuer)\b/i,         score: 28 },
+      { rx: /\binkl\.?\s*(mwst|ust)\s+gesamt\b/i,                       score: 26 },
+      { rx: /\binkl\.?\s*(mwst|ust)\b/i,                                score: 18 },
+      // Allgemeine Summen-Label (niedrigerer Score)
+      { rx: /\bsumme\b/i,                                                score: 16 },
+      { rx: /\btotal\b/i,                                                score: 14 },
+      { rx: /\bgesamt\b/i,                                               score: 14 },
+      // Beitrag allgemein (nur wenn kein stärkerer trifft)
+      { rx: /\bbeitrag\b/i,                                              score: 16 }
     ];
 
-    const STRONG_THRESHOLD = 18; // Labels ab diesem Score = klares Total-Signal
+    // Score-Schwelle für "klares Total-Label"
+    const STRONG_THRESHOLD = 18;
 
     const EXCLUDE = [
       /\bzwischensumme\b/i,
@@ -615,7 +666,9 @@
       /\banzahlung\b/i,
       /\bvorauszahlung\b/i,
       /\bteilbetrag\b/i,
-      /\bratenzahlung\b/i
+      /\bratenzahlung\b/i,
+      /\bmonats-?beitrag\b/i,   // Monatsbeitrag ist Einzelrate, nicht Jahresgesamt
+      /\bmonatlich\b/i
     ];
 
     const TAX_PERCENT_RX = /\b(mwst\.?|ust\.?|mehrwertsteuer|vat)\s+\d{1,2}[,\.]\d{0,2}\s*%/i;
@@ -629,22 +682,23 @@
     }
 
     function isExcluded(text) {
-      if (getLabelScore(text) >= STRONG_THRESHOLD) return false; // starkes Label hebt Ausschluss auf
+      // Starkes Total-Label hebt Ausschluss auf
+      if (getLabelScore(text) >= STRONG_THRESHOLD) return false;
       return EXCLUDE.some(rx => rx.test(text));
     }
 
     // Geldbetrags-Regex: exakt 2 Dezimalstellen
-    const MONEY = /-?\d{1,3}(?:[.\u00A0]\d{3})*[,]\d{2}(?!\d)|-?\d{1,3}(?:[,]\d{3})*[.]\d{2}(?!\d)|-?\d+[,]\d{2}(?!\d)|-?\d+[.]\d{2}(?!\d)/g;
+    const MONEY_SOURCE = "-?\\d{1,3}(?:[.\\u00A0]\\d{3})*[,]\\d{2}(?!\\d)|-?\\d{1,3}(?:[,]\\d{3})*[.]\\d{2}(?!\\d)|-?\\d+[,]\\d{2}(?!\\d)|-?\\d+[.]\\d{2}(?!\\d)";
 
     function extractAmounts(text) {
       const seen = new Set();
       const out  = [];
       let m;
 
-      // EUR/€ flankierte Werte zuerst (stärkste Evidenz)
+      // EUR/€ flankierte Werte (stärkste Evidenz)
       const currRx = /(?:EUR|€)\s*(-?\d[\d.,\u00A0]*\d|\d+[,\.]\d{2})|(-?\d[\d.,\u00A0]*\d|\d+[,\.]\d{2})\s*(?:EUR|€)/gi;
       while ((m = currRx.exec(text))) {
-        const raw = (m[1] || m[2]).replace(/\s/g, "");
+        const raw = (m[1] || m[2]).replace(/[\s\u00A0]/g, "");
         const v   = parseEuro(raw);
         if (!Number.isFinite(v) || v <= 0) continue;
         const key = v.toFixed(2);
@@ -652,7 +706,7 @@
       }
 
       // Geldbeträge ohne Währungszeichen
-      const rx2 = new RegExp(MONEY.source, "g");
+      const rx2 = new RegExp(MONEY_SOURCE, "g");
       while ((m = rx2.exec(text))) {
         const v = parseEuro(m[0]);
         if (!Number.isFinite(v) || v <= 0) continue;
@@ -663,22 +717,21 @@
       return out;
     }
 
-    function baseScore(text, value, zoneBonus, lineIdx, totalLines) {
-      const lsc      = getLabelScore(text);
-      const excl     = isExcluded(text);
-      const taxOnly  = TAX_PERCENT_RX.test(text) && lsc < STRONG_THRESHOLD;
-      const hasIban  = /\bDE\d{2}\b/i.test(text);
-
+    function computeScore(lsc, excl, taxOnly, hasIban, value, hasCurrency, zoneBonus, lineIdx) {
       let s = 2 + zoneBonus;
       if (!excl && lsc > 0)  s += lsc;
       if (excl)              s -= 14;
       if (taxOnly)           s -= 16;
-      if (hasIban)           s -= 20;
+      if (hasIban)           s -= 22;
+      if (hasCurrency)       s += 3;
       if (value < 1)         s -= 12;
       if (value < 0.5)       s -= 8;
 
-      if (lineIdx >= totalLines - 25) s += 4;
-      if (lineIdx >= totalLines - 12) s += 6;
+      // Positions-Bonus: Totalbeträge stehen oft am Dokumentende / auf letzter Seite
+      const n = allLines.length;
+      if (lineIdx >= n - 50) s += 2;
+      if (lineIdx >= n - 25) s += 4;
+      if (lineIdx >= n - 12) s += 6;
 
       if (semanticType === "rechnung" || semanticType === "gutschrift" || semanticType === "mahnung") s += 2;
 
@@ -686,12 +739,18 @@
     }
 
     /*
-     * Label→Wert-Direktscan
-     * Nur aktiviert wenn Label-Score >= STRONG_THRESHOLD.
-     * Sucht in derselben Zeile ODER in Nachbarzeilen.
+     * labelValueScan (v8-Fix):
+     * Nachbar-Lookup erfolgt immer über GLOBALE allLines (nicht Zone-Array).
+     * Dadurch werden Split-Line-Totals auch erkannt, wenn Label und Wert
+     * an Zonengrenzen liegen (z. B. letzte Zeile totalsZone / erste Zeile footer).
+     *
+     * Parameter:
+     *   zoneLines   – Array der Zone-Zeilen (oder allLines)
+     *   zoneBonus   – zusätzlicher Score-Bonus für diese Zone
+     *   lineOffset  – absoluter Index der ersten Zone-Zeile in allLines
      */
-    function labelValueScan(lines, zoneBonus, lineOffset) {
-      lines.forEach((rawLine, localIdx) => {
+    function labelValueScan(zoneLines, zoneBonus, lineOffset) {
+      zoneLines.forEach((rawLine, localIdx) => {
         const text = normalizeWs(rawLine);
         const lsc  = getLabelScore(text);
         if (lsc < STRONG_THRESHOLD) return;
@@ -701,62 +760,76 @@
 
         if (amounts.length) {
           amounts.forEach(amt => {
-            const s = 4 + zoneBonus + lsc + (amt.hasCurrency ? 4 : 0) + (semanticType === "rechnung" ? 2 : 0);
+            const excl    = isExcluded(text);
+            const taxOnly = TAX_PERCENT_RX.test(text) && lsc < STRONG_THRESHOLD;
+            const hasIban = /\bDE\d{2}\b/i.test(text);
+            const s = computeScore(lsc, excl, taxOnly, hasIban, amt.value, amt.hasCurrency, zoneBonus, absIdx);
             candidates.push({ value: amt.value, raw: amt.raw, score: s, line: text, index: absIdx, source: "Label-Direktscan" });
           });
           return;
         }
 
-        // Wert steht in Nachbarzeile
-        for (const offset of [1, -1, 2]) {
-          const nbRaw = normalizeWs(lines[localIdx + offset] || "");
-          if (!nbRaw) continue;
-          const nbAmts = extractAmounts(nbRaw);
+        // Kein Wert in derselben Zeile → globale Nachbarzeilen prüfen
+        for (const offset of [1, -1, 2, -2]) {
+          const nbIdx  = absIdx + offset;
+          if (nbIdx < 0 || nbIdx >= allLines.length) continue;
+          const nbLine = normalizeWs(allLines[nbIdx] || "");
+          if (!nbLine) continue;
+          const nbAmts = extractAmounts(nbLine);
           if (!nbAmts.length) continue;
+
           nbAmts.forEach(amt => {
-            const s = 4 + zoneBonus + lsc + 8 + (amt.hasCurrency ? 4 : 0) + (semanticType === "rechnung" ? 2 : 0);
-            candidates.push({ value: amt.value, raw: amt.raw, score: s, line: text + " | " + nbRaw, index: absIdx, source: "Multi-Line-Total" });
+            const excl    = isExcluded(nbLine);
+            const taxOnly = TAX_PERCENT_RX.test(nbLine) && lsc < STRONG_THRESHOLD;
+            const hasIban = /\bDE\d{2}\b/i.test(nbLine);
+            const s = computeScore(lsc, excl, taxOnly, hasIban, amt.value, amt.hasCurrency, zoneBonus + 6, nbIdx) + 4;
+            candidates.push({ value: amt.value, raw: amt.raw, score: s, line: text + " | " + nbLine, index: absIdx, source: "Multi-Line-Total" });
           });
           break;
         }
       });
     }
 
-    // Label-Direktscan auf Zonen (höchste Zone-Boni)
-    const totLen = zones.totalsZone?.length || 0;
-    const fotLen = zones.footerZone?.length || 0;
-    labelValueScan(zones.totalsZone || [], 14, allLines.length - totLen);
-    labelValueScan(zones.footerZone || [], 10, allLines.length - fotLen);
-    labelValueScan(zones.tableZone  || [],  4, 0);
-    labelValueScan(allLines,                0, 0);
+    // Zonen-Offsets berechnen
+    const totLen    = zones.totalsZone?.length || 0;
+    const fotLen    = zones.footerZone?.length || 0;
+    const tableLen  = zones.tableZone?.length  || 0;
 
-    // Generischer Zeilen-Scan für alle Zeilen
+    labelValueScan(zones.totalsZone || [], 14, Math.max(0, allLines.length - totLen));
+    labelValueScan(zones.footerZone || [], 10, Math.max(0, allLines.length - fotLen));
+    labelValueScan(zones.tableZone  || [],  4, 0);
+    labelValueScan(allLines,               0, 0);
+
+    // Generischer Zeilen-Scan (fängt alle Beträge ohne starke Labels mit)
     allLines.forEach((rawLine, idx) => {
       const text    = normalizeWs(rawLine);
       if (!text) return;
-      const amounts = extractAmounts(text);
-      amounts.forEach((amt, pos) => {
-        const s = baseScore(text, amt.value, 0, idx, allLines.length)
-          + (amt.hasCurrency ? 3 : 0)
-          + (pos === amounts.length - 1 && amounts.length > 1 ? 2 : 0);
+      const lsc     = getLabelScore(text);
+      const excl    = isExcluded(text);
+      const taxOnly = TAX_PERCENT_RX.test(text) && lsc < STRONG_THRESHOLD;
+      const hasIban = /\bDE\d{2}\b/i.test(text);
+
+      extractAmounts(text).forEach((amt, pos) => {
+        const s = computeScore(lsc, excl, taxOnly, hasIban, amt.value, amt.hasCurrency, 0, idx)
+          + (pos === 0 && lsc >= STRONG_THRESHOLD ? 2 : 0); // Erster Wert auf Label-Zeile leicht bevorzugen
         candidates.push({
           value:  amt.value,
           raw:    amt.raw,
           score:  s,
           line:   text,
           index:  idx,
-          source: getLabelScore(text) >= STRONG_THRESHOLD ? "Totalzeile" : "Betrag aus Dokument"
+          source: lsc >= STRONG_THRESHOLD ? "Totalzeile" : "Betrag aus Dokument"
         });
       });
     });
 
-    // Zahlungssatz: "Rechnungsbetrag in Höhe von X,XX EUR"
-    const payRx = /(?:rechnungsbetrag|gesamtbetrag|betrag|zahlung|zahlungsbetrag|zahlen\s+sie)\s+(?:in\s+h[öo]he\s+von\s+|von\s+|[üu]ber\s+|i\.?h\.?v\.?\s*)?(-?\d+[,\.]\d{2})\s*(?:EUR|€)/gi;
+    // Zahlungssatz-Pattern: "... in Höhe von X,XX EUR" / "buchen ... X,XX EUR"
+    const payRx = /(?:rechnungsbetrag|gesamtbetrag|jahresbetrag|jahresprämie|beitrag|betrag|zahlung|zahlungsbetrag|zahlen\s+sie)\s+(?:in\s+h[öo]he\s+von\s+|von\s+|[üu]ber\s+|i\.?h\.?v\.?\s*)?(-?\d[\d.,]*\d|\d+[,\.]\d{2})\s*(?:EUR|€)/gi;
     let pm;
     while ((pm = payRx.exec(joined))) {
       const v = parseEuro(pm[1]);
       if (Number.isFinite(v) && v > 0) {
-        candidates.push({ value: v, raw: pm[1], score: 32, line: normalizeWs(pm[0]), index: -1, source: "Zahlungssatz" });
+        candidates.push({ value: v, raw: pm[1], score: 34, line: normalizeWs(pm[0]), index: -1, source: "Zahlungssatz" });
       }
     }
 
@@ -774,35 +847,46 @@
     const candidates = [];
 
     const labelDefs = [
-      { rx: /\b(rechnungsdatum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,         score: 28, src: "Rechnungsdatum" },
-      { rx: /\b(ausstellungsdatum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,       score: 26, src: "Ausstellungsdatum" },
-      { rx: /\b(invoice\s*date)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,          score: 26, src: "Invoice-Date" },
-      { rx: /\b(belegdatum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,              score: 24, src: "Belegdatum" },
-      { rx: /\b(datum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,                   score: 18, src: "Datum-Label" },
+      { rx: /\b(rechnungsdatum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,          score: 30, src: "Rechnungsdatum" },
+      { rx: /\b(ausstellungsdatum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,        score: 28, src: "Ausstellungsdatum" },
+      { rx: /\b(invoice\s*date)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,           score: 28, src: "Invoice-Date" },
+      { rx: /\b(belegdatum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,               score: 26, src: "Belegdatum" },
+      { rx: /\b(datum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i,                    score: 20, src: "Datum-Label" },
       { rx: /\b(leistungsdatum|lieferdatum)\s*[:#\s\-]*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\b/i, score: 16, src: "Leistungsdatum" }
     ];
 
-    const dueDateRx = /\b(fälligkeits?datum|fällig\s+(?:am|bis|zum)|zahlungsziel|zahlungsfrist|due\s+date|pay\s+by|payment\s+due)\b/i;
+    // Fälligkeitsdatum aktiv bestrafen
+    const dueDateRx = /\b(fälligkeits?datum|fällig\s+(?:am|bis|zum)|zahlungsziel|zahlungsfrist|due\s+date|pay\s+by|payment\s+due|fällig\s+bei|zahlbar\s+bis)\b/i;
     const todayIso  = new Date().toISOString().slice(0, 10);
 
     function pushDate(iso, line, score, source, index) {
       if (!iso || iso > todayIso) return;
-      candidates.push({ value: formatDisplayDate(iso), iso, score, line: normalizeWs(line), index: Number.isInteger(index) ? index : -1, source });
+      candidates.push({
+        value:  formatDisplayDate(iso),
+        iso,
+        score,
+        line:   normalizeWs(line),
+        index:  Number.isInteger(index) ? index : -1,
+        source
+      });
     }
 
     function scanLine(line, idx, zoneBonus) {
       if (!line) return;
       const isDue = dueDateRx.test(line);
+
       for (const def of labelDefs) {
         const m = line.match(def.rx);
         if (!m?.[2]) continue;
         const iso = toIsoDate(m[2]);
         if (!iso) continue;
         let s = def.score + zoneBonus;
-        if (isDue) s -= 14;
+        if (isDue) s -= 16;
         if (semanticType === "rechnung" || semanticType === "gutschrift") s += 2;
         pushDate(iso, line, s, def.src + (zoneBonus > 0 ? " (Zone)" : ""), idx);
       }
+
+      // Lose Datumserkennung nur in Zonen (nicht global)
       if (zoneBonus > 0) {
         [...line.matchAll(/\b(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4})\b/g)].forEach(m => {
           const iso = toIsoDate(m[1]);
@@ -810,15 +894,17 @@
           let s = 6;
           if (/\b(rechnungsdatum|invoice\s*date|belegdatum|ausstellungsdatum)\b/i.test(line)) s = 22;
           else if (/\bdatum\b/i.test(line)) s = 14;
-          if (isDue) s -= 10;
+          if (isDue) s -= 12;
           pushDate(iso, line, s + zoneBonus, "Datum in Zone", idx);
         });
       }
     }
 
-    (zones.metaZone || zones.metaBlock || []).forEach((l, i) => scanLine(normalizeWs(l), i, 6));
+    // Zonen-Scan
+    (zones.metaZone || zones.metaBlock || []).forEach((l, i)   => scanLine(normalizeWs(l), i, 6));
     (zones.senderZone || zones.headerTop || []).forEach((l, i) => scanLine(normalizeWs(l), i, 4));
 
+    // Volltext-Scan für alle Label-Muster
     allLines.forEach((rawLine, idx) => {
       const line  = normalizeWs(rawLine);
       if (!line) return;
@@ -829,13 +915,13 @@
         const iso = toIsoDate(m[2]);
         if (!iso) continue;
         let s = def.score;
-        if (isDue) s -= 14;
+        if (isDue) s -= 16;
         if (semanticType === "rechnung" || semanticType === "gutschrift") s += 2;
         pushDate(iso, line, s, def.src, idx);
       }
     });
 
-    // Multi-Line-Datum
+    // Multi-Line-Datum: "Rechnungsdatum:" auf Zeile N, Datum auf N+1
     const labelOnlyDateRx = /\b(rechnungsdatum|invoice\s*date|belegdatum|ausstellungsdatum|datum)\s*[:#\s\-]*$/i;
     const dateValueOnlyRx = /^\s*(\d{1,2}[.\-\/]\d{1,2}[.\-\/]\d{2,4}|\d{4}-\d{2}-\d{2})\s*$/;
 
@@ -849,17 +935,18 @@
         const m = next.match(dateValueOnlyRx);
         if (!m?.[1]) { if (off === 1) continue; break; }
         const iso = toIsoDate(m[1]);
-        let s = 26;
-        if (isDue) s -= 14;
+        let s = 28;
+        if (isDue) s -= 16;
         pushDate(iso, line + " " + next, s, "Multi-Line-Datum", idx);
         break;
       }
     });
 
+    // Lieferantenprofil
     const supplierApi = window.FideliorSupplierProfiles || null;
     if (supplierApi?.detectDateByProfile) {
       try {
-        const pd  = supplierApi.detectDateByProfile(payload, profile);
+        const pd = supplierApi.detectDateByProfile(payload, profile);
         if (pd) { const iso = toIsoDate(pd); if (iso) pushDate(iso, pd, 22, "Lieferantenprofil Datum", -1); }
       } catch (_) {}
     }
@@ -929,21 +1016,22 @@
         };
 
     /*
-     * Betrag: minAbsoluteScore 28
-     * Eindeutiger Totalwert ("Bruttorechnungs-Betrag 7,99 EUR") erreicht
-     * Label-Direktscan-Score >> 28 → wird ohne Margin-Prüfung übernommen.
+     * Betrag: minAbsoluteScore = 24
+     * Ein klarer Total-Label-Treffer (z. B. "Rechnungsbetrag 39,00 €" Score ~36)
+     * gewinnt ohne Margin-Prüfung.
+     * minScore = 14 (statt 16) für robustere Erkennung bei schwachen Labels.
      */
     const amountField = finalizeField(amountCandidates, {
-      minScore:         16,
+      minScore:         14,
       minMargin:        4,
-      minAbsoluteScore: 28,
+      minAbsoluteScore: 24,
       emptyValue:       NaN
     });
 
     const dateField = finalizeField(dateCandidates, {
       minScore:         14,
       minMargin:        3,
-      minAbsoluteScore: 30,
+      minAbsoluteScore: 28,
       emptyValue:       ""
     });
 
@@ -1038,5 +1126,5 @@
     analyzeDocument
   };
 
-  console.info("[FideliorAI] zentrale Analyse-Engine v7 aktiv");
+  console.info("[FideliorAI] zentrale Analyse-Engine v8 aktiv");
 })();
